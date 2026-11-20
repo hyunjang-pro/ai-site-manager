@@ -438,13 +438,10 @@ export function hasScope(c, id) {
   const trade = c?.trade;
   if (trade === id) return true;
   if (trade === 'combined') {
-    if (id === 'bathroom' || id === 'kitchen' || id === 'wallpaper') {
-      const scopes = scopeList(c);
-      if (scopes.length) return scopes.includes(id);
-      // 세부 공종을 안 골랐을 때만 기존처럼 넓게 본다(복합 = 집 전체)
-      return true;
-    }
-    return scopeList(c).includes(id);
+    const scopes = scopeList(c);
+    // 세부 공종을 안 골랐으면 '집 전체 복합'으로 본다 (철거·도배·욕실·주방·현관·미장 포함)
+    if (!scopes.length) return ['wallpaper', 'bathroom', 'kitchen', 'demolition', 'entrance', 'plaster'].includes(id);
+    return scopes.includes(id);
   }
   if (id === 'bathroom' && trade === 'tilewaterproof') return (c?.tileWork?.mode || 'both') !== 'waterproof';
   if (id === 'bathroom' && trade === 'plaster') return !!c?.plaster?.tile;
