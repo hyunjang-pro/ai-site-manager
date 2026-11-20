@@ -250,7 +250,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           </div>
 
           <AlertCard tone="info" title="사진은 이렇게 읽습니다">
-            숨고 요청서·카톡 캡처의 글자를 기기 안에서 읽습니다(무료 OCR). 사진은 외부로 저장되지 않고, 현장 사진첩에만 남습니다.
+            숨고 요청서·카톡 캡처의 글자를 기기 안에서 읽습니다(무료 OCR). 첫 1회는 인식 데이터를 받느라 20~40초 걸릴 수 있습니다. 사진은 외부로 저장되지 않고 현장 사진첩에만 남습니다.
           </AlertCard>
         </div>
       ) : (

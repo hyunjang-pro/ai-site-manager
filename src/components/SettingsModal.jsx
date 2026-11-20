@@ -64,7 +64,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
       <div className="rounded-2xl border-2 border-blue-900/10 bg-white p-3.5">
         <p className="flex items-center gap-1.5 text-base font-extrabold text-ink">🛡️ 보수적 견적 보호</p>
         <p className="mt-1 text-xs leading-5 text-ink-3">
-          원가에 예비비를 더해 <b className="text-ink-2">싸게 써서 손해 보는 일</b>을 막습니다. 6%면 300만원 현장에 18만원을 미리 얹는 셈입니다.
+          원가에 예비비를 더해 <b className="text-ink-2">싸게 써서 손해 보는 일</b>을 막습니다. 6%면 300만원 현장에 18만원을 미리 얹는 셈입니다. 바꾸면 <b className="text-ink-2">앞으로 만드는 현장</b>부터 적용됩니다.
         </p>
         <div className="mt-2">
           <Segmented
