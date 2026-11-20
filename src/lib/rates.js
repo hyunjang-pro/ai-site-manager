@@ -2,15 +2,35 @@
 // 설정에서 바꾸면 "앞으로 만드는 현장"에만 적용된다. 이미 만든 현장은 unitPriceSnapshot 을 그대로 쓴다.
 export const DEFAULT_RATES = {
   labor: {
+    // ── 철거·기본 인부 ──
     demolition: 27, // 철거공 공표 26.1만(2026.9.1) + 지역 인력수급 여유
     helper: 19, // 보통인부 공표 17.3만 + 사무소 수수료 여유
+    // ── 도배·타일·주방 ──
     wallpaper: 30, // 도배 기공 일당 (2026 하반기 시세)
     bathroom: 37, // 타일공 공표 29.4만 + 기능공 프리미엄
-    kitchen: 32, // 목수·설비
+    kitchen: 32, // 주방 철거·설치 기공
+    // ── 직종별 기능공 (2026 실견적 DB 14직종 + 장판·코킹·창호·청소) ──
+    carpenter: 30, // 목수(목공) — 문·문틀·몰딩·가구·데크
+    electrician: 28, // 전기·조명공 — 콘센트·스위치·매입등
+    plumber: 28, // 설비·배관공 — 수전·배관·보일러
+    plasterer: 27, // 미장·방수공 — 바닥 몰탈·방수
+    film: 28, // 인테리어 필름공 — 필름·시트지
+    floor: 28, // 장판·마루공
+    window: 32, // 창호·샷시공
+    painter: 26, // 페인트·탄성공 (도장)
+    caulking: 25, // 코킹·실리콘공
+    cleaner: 19, // 준공 청소 인원
+    repair: 28, // 부분 수선 기공 (도장·코킹이 아닌 보수)
     tilewaterproof: 37,
-    window: 32,
-    repair: 28,
     daylabor: 19, // 인력 지원 원가(일당)
+  },
+  // 원거리 교통비 — 기준 거리 이상이면 (거리 ÷ 기준거리, 내림) × 연인원 × 1인당 추가금
+  travel: {
+    baseKm: 15, // 이 거리까지는 교통비 없음
+    perWorker: 1, // 기준 거리 1구간마다 인부 1명·1일당 만원
+  },
+  meal: {
+    perWorker: 1, // 인부 1명 하루 식비 (만원)
   },
   waste: {
     truckMixed: 35, // 2.5톤 혼합 폐기물 (2026 수도권 70~80만, 지방 반영)
@@ -71,14 +91,49 @@ export const DEFAULT_RATES = {
 
 export const RATE_FIELDS = [
   {
-    group: '인건비 (하루 일당)',
+    group: '인건비 — 철거·기본 인부',
     icon: '👷',
+    hint: '하루 일당입니다. 이 값으로 노무비를 계산합니다.',
     fields: [
       { path: ['labor', 'demolition'], label: '철거 기공', unit: '만원/일' },
       { path: ['labor', 'helper'], label: '보조·잡부', unit: '만원/일' },
+    ],
+  },
+  {
+    group: '인건비 — 도배·타일·주방',
+    icon: '🏠',
+    fields: [
       { path: ['labor', 'wallpaper'], label: '도배 기공', unit: '만원/일' },
       { path: ['labor', 'bathroom'], label: '타일·욕실 기공', unit: '만원/일' },
       { path: ['labor', 'kitchen'], label: '주방 설치 기공', unit: '만원/일' },
+    ],
+  },
+  {
+    group: '인건비 — 직종별 기능공',
+    icon: '🔧',
+    hint: '철거·폐기물·인테리어에 부르는 인부 종류입니다. 그 직종 노무비가 이 일당으로 계산됩니다.',
+    fields: [
+      { path: ['labor', 'carpenter'], label: '목수 (목공)', unit: '만원/일' },
+      { path: ['labor', 'electrician'], label: '전기·조명공', unit: '만원/일' },
+      { path: ['labor', 'plumber'], label: '설비·배관공', unit: '만원/일' },
+      { path: ['labor', 'plasterer'], label: '미장·방수공', unit: '만원/일' },
+      { path: ['labor', 'film'], label: '인테리어 필름공', unit: '만원/일' },
+      { path: ['labor', 'floor'], label: '장판·마루공', unit: '만원/일' },
+      { path: ['labor', 'window'], label: '창호·샷시공', unit: '만원/일' },
+      { path: ['labor', 'painter'], label: '페인트·탄성공', unit: '만원/일' },
+      { path: ['labor', 'caulking'], label: '코킹·실리콘공', unit: '만원/일' },
+      { path: ['labor', 'repair'], label: '수선·보수 기공', unit: '만원/일' },
+      { path: ['labor', 'cleaner'], label: '준공 청소 인원', unit: '만원/일' },
+    ],
+  },
+  {
+    group: '교통비·식비',
+    icon: '🚚',
+    hint: '현장 거리(km)가 기준을 넘으면 교통비가, 모든 현장에 식비가 연인원(명·일)만큼 자동으로 붙습니다.',
+    fields: [
+      { path: ['travel', 'baseKm'], label: '기준 거리 (이내는 무료)', unit: 'km' },
+      { path: ['travel', 'perWorker'], label: '기준 거리 넘을 때 1인당', unit: '만원/일' },
+      { path: ['meal', 'perWorker'], label: '인부 1인당 하루 식비', unit: '만원/일' },
     ],
   },
   {
@@ -140,6 +195,26 @@ export const RATE_FIELDS = [
     icon: '🛡️',
     fields: [{ path: ['buffer'], label: '예비비(안전 버퍼)', unit: '%' }],
   },
+];
+
+// 직종 목록 — 설정 일당과 '인부 종류' 고르기에 같이 쓴다.
+export const LABOR_ROLES = [
+  { key: 'demolition', label: '철거 기공' },
+  { key: 'helper', label: '보조·잡부' },
+  { key: 'wallpaper', label: '도배 기공' },
+  { key: 'bathroom', label: '타일·욕실 기공' },
+  { key: 'kitchen', label: '주방 설치 기공' },
+  { key: 'carpenter', label: '목수 (목공)' },
+  { key: 'electrician', label: '전기·조명공' },
+  { key: 'plumber', label: '설비·배관공' },
+  { key: 'plasterer', label: '미장·방수공' },
+  { key: 'film', label: '인테리어 필름공' },
+  { key: 'floor', label: '장판·마루공' },
+  { key: 'window', label: '창호·샷시공' },
+  { key: 'painter', label: '페인트·탄성공' },
+  { key: 'caulking', label: '코킹·실리콘공' },
+  { key: 'repair', label: '수선·보수 기공' },
+  { key: 'cleaner', label: '준공 청소 인원' },
 ];
 
 // 1평 = 3.305785㎡ — ㎡ 단가를 평당으로 바꿔 암산 없이 보여준다.

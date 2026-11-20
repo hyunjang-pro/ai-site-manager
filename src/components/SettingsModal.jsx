@@ -8,7 +8,10 @@ import { getSupplier, saveSupplier } from '../lib/supplier.js';
 import { BigButton, Details, Field, IconTile, Modal, Segmented, Select, SmallButton, TextInput, cx } from './ui.jsx';
 
 const GROUP_ICON = {
-  '인건비 (하루 일당)': HardHat,
+  '인건비 — 철거·기본 인부': HardHat,
+  '인건비 — 도배·타일·주방': HardHat,
+  '인건비 — 직종별 기능공': HardHat,
+  '교통비·식비': Truck,
   '폐기물 차량·장비': Truck,
   '사다리차·부대비용': ArrowUpFromLine,
   '최소 공사비': MapPin,
@@ -178,6 +181,9 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
                   <Icon className="h-4 w-4 text-brand" strokeWidth={2.2} />
                   {group.group}
                 </p>
+                {group.hint ? (
+                  <p className="-mt-1 mb-2 text-2xs font-semibold leading-4 text-ink-3">{group.hint}</p>
+                ) : null}
                 <div className="grid grid-cols-2 gap-1.5">
                   {group.fields.map((f) => (
                     <label key={f.path.join('.')} className="block rounded-xl bg-white px-2.5 py-2 ring-1 ring-slate-200/70">

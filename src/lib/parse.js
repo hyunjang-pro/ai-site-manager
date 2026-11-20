@@ -67,14 +67,96 @@ export function parseInput(text = '') {
   return { trade, sizeValue, sizeUnit, floor, hints, keywords, detected: kinds.length > 0 };
 }
 
+// 첫 통화에 물어볼 3가지 — 공종·관공서 여부에 따라 다르다. AI가 뽑은 질문이 있으면 그것을 쓴다.
+const TRADE_QUESTIONS = {
+  demolition: [
+    '철거 범위가 전체인가요, 마감만인가요? (원상복구 포함 여부)',
+    '석면·텍스·유리처럼 따로 처리해야 하는 자재가 있나요?',
+  ],
+  groundwork: [
+    '정지(터파기) 범위가 몇 평·몇 ㎡인가요? (부지 전체인지 일부인지)',
+    '성토·절토가 필요한가요? 흙은 어디로 내보내나요?',
+    '굴삭기가 들어갈 길폭과 수도·전기 매설 위치는 확인하셨나요?',
+  ],
+  waste: [
+    '폐기물이 몇 톤·몇 차 나올까요? 성상은 섞여 있나요?',
+    '1톤차·2.5톤차 중 어떤 차가 들어갈 수 있나요? (진입로·주차)',
+  ],
+  bathroom: [
+    '욕실 몇 칸인가요? 전체 철거인가요, 덧방인가요?',
+    '아래층 누수 이력이 있나요? (방수·담수 범위가 달라집니다)',
+  ],
+  kitchen: [
+    '싱크대 길이(m)와 배치를 바꾸시나요?',
+    '상판 재질(인조대리석·엔지니어드)과 후드·수전 재사용 여부는요?',
+  ],
+  wallpaper: [
+    '도배만인가요, 장판·마루까지인가요?',
+    '벽지는 합지·실크 중 어느 쪽인가요?',
+  ],
+  plaster: [
+    '바닥 면적이 몇 ㎡인가요? (도배·타일과 겁치는 부분)',
+    '난방배관·단열 보강도 넣나요? 양생 3일은 괜찮으신가요?',
+  ],
+  window: [
+    '몇 ㎡·몇 짝인가요? 어떤 사양(이중창·시스템창)인가요?',
+    '기존 창호 철거·폐기물까지 포함인가요?',
+  ],
+  carpentry: [
+    '문·몰딩 길이(m)나 개수를 알려주실 수 있나요?',
+    '기성품·맞춤 중 어느 쪽이고, 도장까지 포함인가요?',
+  ],
+  electric: [
+    '몇 개소인가요? (콘센트·스위치·조명)',
+    '노출·매립 중 어느 쪽이며 분전반 증설이 필요한가요?',
+  ],
+  plumbing: [
+    '몇 개소인가요? (수전·배관·보일러)',
+    '누수 위치와 기존 배관 재질을 아시나요?',
+  ],
+  film: [
+    '필름 시공 면적과 대상(유리·문·가구)은요?',
+    '난방필름·단열필름·인테리어필름 중 어떤 건가요?',
+  ],
+  repair: [
+    '수선할 곳이 몇 군데인가요? (사진으로 보내주시면 정확합니다)',
+    '페인트·실리콘 중 어떤 마감이며, 같은 곳이 다시 생긴 적 있나요?',
+  ],
+  labor: [
+    '며칠·몇 명이 필요한가요?',
+    '작업 종류(철거·운반·잡일)와 장비 포함 여부는요?',
+  ],
+  combined: [
+    '어디까지 하시나요? (철거·도배·욕실·주방·현관·미장·정지)',
+    '문·몰딩·창호·전기는 빼는 게 맞나요?',
+  ],
+};
+
+const BID_QUESTIONS = [
+  '설계내역서·과업지시서를 받을 수 있나요? (물량·범위 확인)',
+  '현장설명회나 입찰 참가 자격 조건이 있나요?',
+];
+
 export function firstCallQuestions(c, parsed = {}) {
-  const qs = [];
+  // AI가 현장·공고를 읽고 만든 질문이 있으면 그것을 그대로 쓴다.
+  const ai = Array.isArray(c?.aiAnalysis?.firstCallQuestions) ? c.aiAnalysis.firstCallQuestions.filter(Boolean) : [];
+  if (ai.length) return ai.slice(0, 3);
+
+  const trade = c?.bid ? 'bid' : String(c?.trade || '');
+  const qs = [...(trade === 'bid' ? BID_QUESTIONS : TRADE_QUESTIONS[trade] || [])];
+  if (c?.subScopes?.length > 1 && trade === 'combined' && c.subScopes.includes('groundwork')) {
+    qs.push('정지(터파기)와 철거 중 어느 쪽을 먼저 하나요? (순서·장비 대기)');
+  }
+  if (!qs.length) {
+    qs.push('어떤 공사를 어디까지 하시나요? (범위를 사진으로 보내주시면 정확합니다)');
+  }
+  // 현장에서 반드시 확인해야 하는 것(층·엘리베이터, 사진, 규모)을 뒤에 채워 3개를 맞춘다.
   if (!parsed.floor && !c?.lifting?.floor) qs.push('엘리베이터가 있나요? 몇 층인가요?');
   else if (c?.lifting?.ladderAllowed === 'unknown') qs.push('건물 앞에 사다리차를 세울 수 있나요? (주차·소방통로)');
-  if (!c?.photos?.length) qs.push('철거·시공 범위 사진 3장(바닥·욕실·주방)을 보내주세요.');
-  if (!c?.sizeValue || c?.sizeUnit === '모름') qs.push('평수나 시공 길이를 아시나요? (모르시면 실측 때 재겠습니다)');
-  if (!qs.length) qs.push('희망 착공일과 거주 중 여부를 알려주세요. (일정과 보양비가 달라집니다)');
-  while (qs.length < 3) qs.push('현장에서 특별히 걱정되는 부분(누수·균열·소음)이 있나요?');
+  if (qs.length < 3 && !c?.photos?.length) qs.push('현장 사진 3장(전체·문제 부위·진입로)을 보내주세요.');
+  if (qs.length < 3 && (!c?.sizeValue || c?.sizeUnit === '모름')) qs.push('평수나 시공 길이를 아시나요? (모르시면 실측 때 재겠습니다)');
+  if (qs.length < 3) qs.push('희망 착공일과 거주 중 여부를 알려주세요. (일정과 보양비가 달라집니다)');
+  if (qs.length < 3) qs.push('현장에서 특별히 걱정되는 부분(누수·균열·소음)이 있나요?');
   return qs.slice(0, 3);
 }
 

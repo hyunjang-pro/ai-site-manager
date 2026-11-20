@@ -5,7 +5,10 @@
 // 모델 이름은 구글이 자주 바꾼다. 이름 하나만 치면 gemini_http_404가 나므로
 //  1) 알려진 이름을 앞에서부터 시도하고
 //  2) 404가 나면 GET /v1beta/models 로 '지금 이 키로 실제 쓸 수 있는 모델'을 찾아 자동 전환한다.
+//  3) 503(모델 과부하)·502·429(무료 한도)가 나도 그 모델만 잠깐 막힌 것이라, 포기하지 않고
+//     후보 목록의 다음 모델로 넘어가 재시도한다(IMG_1548).
 // 성공한 모델 이름은 이 탭(sessionStorage)과 메모리에 기억해 다음부터 바로 쓴다.
+// 잠깐 막힌 모델은 10분 동안 후보 뒤로 미뤄, 다시 눌렀을 때 같은 503 모델에서 또 멈추지 않게 한다.
 const API_ROOT = 'https://generativelanguage.googleapis.com';
 const API_VERSION = 'v1beta';
 const API_VERSIONS = ['v1beta', 'v1'];
@@ -29,6 +32,7 @@ export const IMAGE_MODEL_CANDIDATES = [
 ];
 
 export const GEMINI_MODEL_STORAGE = 'aiSiteManager.geminiModel.v1';
+export const GEMINI_COOLDOWN_STORAGE = 'aiSiteManager.geminiCooldown.v1';
 export const GEMINI_KEY_STORAGE = 'aiSiteManager.geminiKey';
 export const GEMINI_KEY_URL = 'https://aistudio.google.com/apikey';
 
@@ -123,6 +127,79 @@ export function clearModelCache(apiKey) {
   modelMemo = { fp: key ? keyFingerprint(key) : '', text: '', image: '', version: '' };
   try {
     sessionStorage.removeItem(GEMINI_MODEL_STORAGE);
+    sessionStorage.removeItem(GEMINI_COOLDOWN_STORAGE);
+  } catch (e) {
+    // ignore
+  }
+  cooldownMemo = { fp: key ? keyFingerprint(key) : '', until: {} };
+}
+
+// ---- 잠깐 막힌 모델(쿨다운) ----
+// 503·502·429는 키가 아니라 '그 모델'이 잠깐 막힌 것이라 다음 모델로 바꾸면 대개 바로 된다.
+// 막힌 모델은 10분 동안 후보 뒤로 미룬다(빼지는 않는다 — 전부 막히면 결국 다시 시도한다).
+const TRANSIENT_COOLDOWN_MS = 10 * 60 * 1000;
+const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
+let cooldownMemo = { fp: '', until: {} };
+
+export function isRetryableStatus(status) {
+  return RETRYABLE_STATUSES.includes(Number(status) || 0);
+}
+
+function readCooldowns(key) {
+  const fp = keyFingerprint(key);
+  if (cooldownMemo.fp === fp) return cooldownMemo;
+  let found = { fp, until: {} };
+  try {
+    const raw = sessionStorage.getItem(GEMINI_COOLDOWN_STORAGE);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && parsed.fp === fp && parsed.until && typeof parsed.until === 'object') {
+      const now = Date.now();
+      const until = {};
+      for (const [name, t] of Object.entries(parsed.until)) {
+        if (Number(t) > now) until[name] = Number(t);
+      }
+      found = { fp, until };
+    }
+  } catch (e) {
+    // sessionStorage를 못 쓰면 메모리만 쓴다.
+  }
+  cooldownMemo = found;
+  return found;
+}
+
+// 남은 쿨다운(ms). 0이면 지금 바로 써도 된다.
+function coolingLeft(key, model) {
+  const until = Number(readCooldowns(key).until[String(model || '')] || 0);
+  const left = until - Date.now();
+  return left > 0 ? left : 0;
+}
+
+function markCooling(apiKey, model) {
+  const key = String(apiKey || '').trim();
+  const name = String(model || '').trim();
+  if (!key || !name) return;
+  const cur = readCooldowns(key);
+  const next = { fp: cur.fp, until: { ...cur.until, [name]: Date.now() + TRANSIENT_COOLDOWN_MS } };
+  cooldownMemo = next;
+  try {
+    sessionStorage.setItem(GEMINI_COOLDOWN_STORAGE, JSON.stringify(next));
+  } catch (e) {
+    // ignore
+  }
+}
+
+function clearCooling(apiKey, model) {
+  const key = String(apiKey || '').trim();
+  const name = String(model || '').trim();
+  if (!key || !name) return;
+  const cur = readCooldowns(key);
+  if (!cur.until[name]) return;
+  const until = { ...cur.until };
+  delete until[name];
+  const next = { fp: cur.fp, until };
+  cooldownMemo = next;
+  try {
+    sessionStorage.setItem(GEMINI_COOLDOWN_STORAGE, JSON.stringify(next));
   } catch (e) {
     // ignore
   }
@@ -316,7 +393,10 @@ function photoParts(photos = []) {
 }
 
 // 텍스트 호출 — 기억한 모델 → 알려진 이름 → (404면) 실제 모델 목록 순서.
-// 429·500처럼 모델을 바꿔도 같은 오류는 다른 모델을 시도하지 않고 바로 알린다.
+// 404(이름 바뀜)·503·502·429(잠깐 막힘)면 다음 모델로 자동 재시도하고,
+// 400·403·시간초과처럼 모델을 바꿔도 같은 오류만 바로 알린다.
+const MAX_TEXT_ATTEMPTS = 5;
+
 export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature = 0.2 }) {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('no_key');
@@ -326,37 +406,73 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
   };
 
   const cache = readModelCache(key);
-  const firstModel = cache.text || TEXT_MODEL_CANDIDATES[0];
   let usedVersion = cache.version;
-  let attempt = await postGenerate(key, firstModel, body, timeoutMs, usedVersion);
-  const tried = [firstModel];
+  const pending = [];
+  for (const m of [cache.text, ...TEXT_MODEL_CANDIDATES]) {
+    const name = String(m || '').trim();
+    if (name && !pending.includes(name)) pending.push(name);
+  }
+  const tried = [];
+  let discovered = false;
+  let attempt = null;
 
-  if (!attempt.ok && attempt.notFound) {
-    const found = await discoverModels(key, 'text', timeoutMs);
-    if (found.ok) usedVersion = found.version;
-    const queue = [];
-    if (found.ok) {
-      if (found.preferred) queue.push(found.preferred);
-      // 목록에서 flash 계열을 최신순으로, 그다음 알려진 이름
-      const ranked = found.ids
-        .map((id) => ({ id, score: textModelScore(id) }))
-        .filter((x) => x.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .map((x) => x.id);
-      queue.push(...ranked);
+  // 후보 중 '지금 쿨다운이 풀린' 모델을 먼저 고른다(같으면 원래 순서).
+  const takeNext = () => {
+    let bestIdx = -1;
+    let bestLeft = Infinity;
+    pending.forEach((m, i) => {
+      if (tried.includes(m)) return;
+      const left = coolingLeft(key, m);
+      if (left < bestLeft) {
+        bestLeft = left;
+        bestIdx = i;
+      }
+    });
+    if (bestIdx < 0) return '';
+    return pending.splice(bestIdx, 1)[0];
+  };
+
+  while (tried.length < MAX_TEXT_ATTEMPTS) {
+    const model = takeNext();
+    if (!model) break;
+    tried.push(model);
+    attempt = await postGenerate(key, model, body, timeoutMs, usedVersion);
+    if (attempt.ok) {
+      clearCooling(key, model);
+      break;
     }
-    queue.push(...TEXT_MODEL_CANDIDATES);
-    for (const model of queue) {
-      if (!model || tried.includes(model)) continue;
-      if (tried.length >= 4) break;
-      tried.push(model);
-      attempt = await postGenerate(key, model, body, timeoutMs, usedVersion);
-      if (attempt.ok) break;
-      if (!attempt.notFound) break;
+
+    if (attempt.notFound) {
+      // 이름이 바뀐 경우 — 이 키로 실제 쓸 수 있는 모델을 찾아 후보 맨 앞에 넣는다.
+      if (!discovered) {
+        discovered = true;
+        const found = await discoverModels(key, 'text', timeoutMs);
+        if (found.ok) {
+          usedVersion = found.version;
+          const ranked = found.ids
+            .map((id) => ({ id, score: textModelScore(id) }))
+            .filter((x) => x.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map((x) => x.id);
+          const fresh = [...new Set([found.preferred, ...ranked].filter(Boolean))].filter(
+            (id) => !tried.includes(id) && !pending.includes(id)
+          );
+          pending.unshift(...fresh);
+        }
+      }
+      continue;
     }
+
+    if (isRetryableStatus(attempt.status)) {
+      // 503·502·429 — 그 모델만 잠깐 막힌 것. 다음 모델로 넘어가고, 이 모델은 잠시 뒤로 미룬다.
+      markCooling(key, model);
+      continue;
+    }
+
+    break; // 400·403·키 오류·시간초과는 모델을 바꿔도 같다
   }
 
-  if (!attempt.ok) throw geminiError(attempt);
+  if (!attempt || !attempt.ok) throw geminiError(attempt || { reason: 'failed' });
   rememberModel(key, 'text', attempt.model, usedVersion);
   const raw = (attempt.data?.candidates?.[0]?.content?.parts || [])
     .map((p) => p?.text || '')
@@ -400,7 +516,7 @@ export const GEMINI_KNOWLEDGE = `
 const CASE_PROMPT = `너는 경북 안동의 철거·인테리어 현장 매니저를 돕는 분석가다.
 고객 문의 글과 현장 사진을 보고, 아래 JSON만 답한다. 설명 문장은 넣지 않는다.
 
-{"trade":"공종ID","tradeName":"공종이 목록에 없을 때만 한글 이름","title":"현장 제목(지역+규모+공종)","sizeValue":"숫자 문자열 또는 빈 문자열","sizeUnit":"평|㎡|m|칸|개|개소|톤|명|모름","floor":"숫자 문자열 또는 빈 문자열","elevator":"yes|no|unknown","siteCondition":"사진·글로 본 현장 상태(노후 싱크대, 누수 흔적 등)","materials":["필요 자재 3~6개, 규격 포함"],"crew":[{"role":"역할","count":숫자}],"priceRange":{"min":숫자,"max":숫자},"surveyChecks":[{"label":"답사에서 확인할 것","why":"놓치면 생기는 일","amount":예상 추가비 만원 숫자}],"wishText":"문의/희망사항 전문 그대로","missingCosts":[{"label":"빠뜨리기 쉬운 비용","range":"참고 5~12만","amount":8,"why":"왜 필요한지"}],"costBreakdown":[{"label":"인건비","detail":"기공 2명 × 27만 × 2일 + 보조 1명 × 19만 × 2일","amount":108}],"signal":{"level":"green|yellow|red","title":"판정 한 줄","reason":"근거 한 줄"},"buildPlan":{"phases":[{"label":"전날 · 준비","items":["할 일","할 일"]},{"label":"당일 · 시공","items":[]},{"label":"완료 · 정산","items":[]}],"checks":[{"label":"현장에서 확인할 것","why":"왜"}],"tell":"인부에게 이렇게 말하세요","notes":["이 현장 특이사항"]}},"includedScopes":["bathroom|kitchen|wallpaper|entrance|demolition|plaster|carpentry|electric|plumbing|film|window"],"excludedScopes":["window 등 고객이 빼라고 한 공종"],"summary":"한 문장 요약","warnings":["놓치면 손해 보는 점 0~3개"]}
+{"trade":"공종ID","tradeName":"공종이 목록에 없을 때만 한글 이름","title":"현장 제목(지역+규모+공종)","sizeValue":"숫자 문자열 또는 빈 문자열","sizeUnit":"평|㎡|m|칸|개|개소|톤|명|모름","floor":"숫자 문자열 또는 빈 문자열","elevator":"yes|no|unknown","siteCondition":"사진·글로 본 현장 상태(노후 싱크대, 누수 흔적 등)","materials":["필요 자재 3~6개, 규격 포함"],"crew":[{"role":"역할","count":숫자}],"priceRange":{"min":숫자,"max":숫자},"surveyChecks":[{"label":"답사에서 확인할 것","why":"놓치면 생기는 일","amount":예상 추가비 만원 숫자}],"wishText":"문의/희망사항 전문 그대로","firstCallQuestions":["이 현장을 위해 첫 통화에 고객에게 물어볼 것 3개 — 사장님이 그대로 읽을 수 있는 말투, 현장·공종에 맞춤"],"missingCosts":[{"label":"빠뜨리기 쉬운 비용","range":"참고 5~12만","amount":8,"why":"왜 필요한지"}],"costBreakdown":[{"label":"인건비","detail":"기공 2명 × 27만 × 2일 + 보조 1명 × 19만 × 2일","amount":108}],"signal":{"level":"green|yellow|red","title":"판정 한 줄","reason":"근거 한 줄"},"buildPlan":{"phases":[{"label":"전날 · 준비","items":["할 일","할 일"]},{"label":"당일 · 시공","items":[]},{"label":"완료 · 정산","items":[]}],"checks":[{"label":"현장에서 확인할 것","why":"왜"}],"tell":"인부에게 이렇게 말하세요","notes":["이 현장 특이사항"]}},"includedScopes":["bathroom|kitchen|wallpaper|entrance|demolition|plaster|carpentry|electric|plumbing|film|window"],"excludedScopes":["window 등 고객이 빼라고 한 공종"],"summary":"한 문장 요약","warnings":["놓치면 손해 보는 점 0~3개"]}
 
 공종ID 목록(반드시 이 중 하나): ${GEMINI_TRADES.join(', ')}
 - 목공/문·몰딩·가구·데크=carpentry, 전기·조명·콘센트=electric, 배관·수도·보일러=plumbing, 필름·시트지=film, 맨땅·터파기·기초·토목=groundwork
@@ -450,6 +566,9 @@ export function normalizeCaseAnalysis(data = {}) {
       max: Math.max(0, Math.round(parseFloat(data?.priceRange?.max) || 0)),
     },
     wishText: String(data.wishText || '').slice(0, 1200),
+    firstCallQuestions: Array.isArray(data.firstCallQuestions)
+      ? data.firstCallQuestions.map((q) => String(q || '').slice(0, 90)).filter(Boolean).slice(0, 3)
+      : [],
     missingCosts: Array.isArray(data.missingCosts)
       ? data.missingCosts
           .map((x) => ({ label: String(x?.label || '').slice(0, 40), range: String(x?.range || ''), amount: Math.max(0, Math.round(parseFloat(x?.amount) || 0)), why: String(x?.why || '') }))
@@ -554,7 +673,8 @@ function geminiHint(e) {
   if (status === 404) return '이 키로 쓸 수 있는 모델을 찾지 못했습니다. 잠시 뒤 다시 누르거나 키 발급 페이지에서 새 키를 만들어 보세요.';
   if (status === 400) return '키가 올바르지 않거나 Gemini API에서 쓸 수 없는 키입니다. 키를 다시 확인하세요.';
   if (status === 403) return '이 키에 Gemini API 사용 권한이 없습니다. Google AI Studio에서 API 사용 설정을 확인하세요.';
-  if (status === 429) return '무료 사용량 한도를 넘었습니다. 잠시 후 다시 시도하세요.';
+  if (status === 429) return '무료 사용량 한도를 넘었습니다. 다른 모델로 자동 전환해 봤지만 모두 한도였습니다. 잠시 후 다시 시도하세요.';
+  if (status === 503 || status === 502 || status === 504) return '구글이 잠깐 과부하 상태입니다. 다른 모델로 자동 전환해 봤지만 모두 막혔습니다. 1~2분 뒤 다시 눌러 주세요.';
   if (reason === 'timeout') return '응답이 없습니다. 인터넷 연결을 확인하고 다시 눌러 주세요.';
   return '';
 }
@@ -646,19 +766,35 @@ export async function generateAfterPreview({ apiKey, beforeImage, caseInfo = {},
     if (!r || !r.ok) return null;
     const dataUrl = extractInlineImage(r.data);
     if (!dataUrl) return null;
+    clearCooling(key, r.model);
     rememberModel(key, 'image', r.model, version);
     return { ok: true, dataUrl, model: r.model };
   };
 
-  // 1) 기억한 이미지 모델 → 알려진 이미지 모델
-  const firstModels = [...new Set([cache.image, ...IMAGE_MODEL_CANDIDATES].filter(Boolean))];
+  // 이미지 모델도 텍스트와 같다 — 503·502·429면 다음 이미지 모델로 넘어간다.
+  const handleFailure = (r, model) => {
+    if (!r) return 'next';
+    if (r.ok) return 'stop'; // 응답은 왔는데 이미지가 없다 → 모델을 바꿔도 같다
+    if (isRetryableStatus(r.status)) {
+      markCooling(key, model);
+      return 'next';
+    }
+    if (r.notFound || r.status === 400) {
+      worthDiscovering = true;
+      return 'next';
+    }
+    return 'stop'; // 403·시간초과 등
+  };
+
+  // 1) 기억한 이미지 모델 → 알려진 이미지 모델 (쿨다운 중인 모델은 뒤로)
+  const firstModels = [...new Set([cache.image, ...IMAGE_MODEL_CANDIDATES].filter(Boolean))].sort(
+    (a, b) => coolingLeft(key, a) - coolingLeft(key, b)
+  );
   for (const model of firstModels) {
     const r = await tryModel(model);
     const good = accept(r);
     if (good) return good;
-    if (!r) continue;
-    if (r.ok || (!r.notFound && r.status !== 400)) break; // 응답은 왔는데 이미지가 없거나 429·500이면 모델을 바꿔도 같다
-    if (r.notFound || r.status === 400) worthDiscovering = true;
+    if (handleFailure(r, model) === 'stop') break;
   }
 
   // 2) 404·400이면 실제 목록에서 이미지 모델 자동 탐색
@@ -666,12 +802,12 @@ export async function generateAfterPreview({ apiKey, beforeImage, caseInfo = {},
     const found = await discoverModels(key, 'image', timeoutMs);
     if (found.ok) {
       version = found.version;
-      const queue = [found.preferred, ...found.ids.filter((id) => imageModelScore(id) > 0)];
+      const queue = [found.preferred, ...found.ids.filter((id) => imageModelScore(id) > 0)].filter(Boolean);
       for (const model of queue) {
         const r = await tryModel(model);
         const good = accept(r);
         if (good) return good;
-        if (r && !r.ok && !r.notFound && r.status !== 400) break;
+        if (handleFailure(r, model) === 'stop') break;
       }
     }
   }

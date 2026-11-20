@@ -63,7 +63,7 @@ export function classifyRequest(rawText = '') {
   push('electric', /전기\s*(공사|배선|증설)|콘센트|조명|스위치|분전반|누전|형광등|LED|배선/);
   push('plumbing', /배관|급수|배수|수도|보일러|하수구|막힘|수전\s*(교체|수리)/);
   push('film', /필름|시트지|래핑|유리\s*필름/);
-  push('groundwork', /토목|터파기|기초\s*(공사|타설|콘크리트)|맨땅|콘크리트\s*타설|배수로|정원\s*공사|포장\s*공사/);
+  push('groundwork', /토목|터파기|기초\s*(공사|타설|콘크리트)|맨땅|콘크리트\s*타설|배수로|정원\s*공사|포장\s*공사|성토|절토|굴삭기|포크레인|아스콘|옹벽|부지\s*정지|정지\s*(작업|공사)|땅\s*고르|지반\s*(공사|복구)|노면\s*복구|부지\s*(정리|고르|공사)/);
 
   const ids = hits.map((h) => h.id);
   const fullInterior = /아파트\s*인테리어|집\s*전체\s*인테리어|전체\s*인테리어|풀\s*인테리어|올수리|집\s*전체/.test(t);
@@ -72,9 +72,13 @@ export function classifyRequest(rawText = '') {
     subScopes.push('demolition', 'wallpaper');
   }
   const core = ids.filter((id) => ['demolition', 'wallpaper', 'bathroom', 'kitchen'].includes(id));
+  // '철거 + 정지'처럼 두 가지 일이 한 현장에 같이 오면 한 공종만 고르면 나머지가 견적에서 빠진다.
+  const withGroundwork =
+    ids.includes('groundwork') && ids.some((id) => ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster'].includes(id));
 
   let trade = 'unclassified';
   if (fullInterior) trade = 'combined';
+  else if (withGroundwork) trade = 'combined';
   else if (core.length >= 2) trade = 'combined';
   else if (ids.includes('demolition')) trade = 'demolition';
   else if (ids.includes('labor')) trade = 'labor';
@@ -226,6 +230,7 @@ export function classifyRequest(rawText = '') {
   if (/현관|중문|신발장|현관\s*타일/.test(t)) subScopes.push('entrance');
   if (/철거|해체|원상복구/.test(t)) subScopes.push('demolition');
   if (/미장|몰탈|바닥\s*평탄/.test(t)) subScopes.push('plaster');
+  if (/토목|터파기|정지|성토|절토|굴삭기|포크레인|기초|배수로|옹벽|아스콘|맨땅/.test(t)) subScopes.push('groundwork');
   if (/창호|샤시|샷시|유리|중문/.test(t) && /(안\s*해|안해|안\s*하|제외|불필요|빼|기존\s*유지|그대로)/.test(t)) excludedScopes.push('window');
   if (excludedScopes.length) hints.push(`${excludedScopes.join(', ')} 제외 — 견적에서 빼고 손님에게 확인하세요.`);
   if (excludedWorks.length) hints.push(`${excludedWorks.join(', ')} 제외 — 견적에서 빼고 손님에게 확인하세요.`);
@@ -342,8 +347,8 @@ export function summarizeRequest(text, res) {
   else if (/거주|살고|사람이\s*삼/.test(t)) push('현장 상태', '거주 중');
   if (row('층 / 엘베')) push('층·엘베', row('층 / 엘베'));
   if (r.patch?.subScopes?.length) {
-    const label = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배·장판', entrance: '현관', demolition: '철거', plaster: '바닥 미장' };
-    push('포함', r.patch.subScopes.map((x) => label[x] || x).join('·'));
+    const label = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배·장판', entrance: '현관', demolition: '철거', plaster: '바닥 미장', groundwork: '기초·정지', window: '창호', carpentry: '문·몰딩', electric: '전기·조명' };
+    push('포함', r.patch.subScopes.map((x) => label[x] || String(x).replace(/^x:/, '')).join('·'));
   }
   if (r.patch?.excludedWorks?.length) push('제외', r.patch.excludedWorks.join('·'));
   if (r.patch?.extraWorks?.length) push('추가', r.patch.extraWorks.join('·'));

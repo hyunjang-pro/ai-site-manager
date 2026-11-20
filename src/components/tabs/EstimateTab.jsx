@@ -281,9 +281,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
                   </p>
                 </div>
                 <p className="text-xs text-ink-3">{r.note}</p>
-                <p className="text-2xs text-ink-4">
-                  {r.source} · 신뢰도 {r.grade}
-                </p>
+                <p className="text-2xs text-ink-4">{r.source}</p>
               </div>
             ))}
             {ref.items.length ? (
@@ -637,9 +635,6 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
         <p className="mt-1 text-[13px] font-semibold leading-5 text-ink-2">
           답사에서 달라진 점을 적으면 3단계에서 최종 견적이 다시 계산되고, 4단계에서 가견적과 비교해 보여드립니다.
         </p>
-        <BigButton className="mt-2.5 w-full" onClick={() => onGoSurvey && onGoSurvey()}>
-          다음: 3단계 답사
-        </BigButton>
       </Card>
     </div>
   );

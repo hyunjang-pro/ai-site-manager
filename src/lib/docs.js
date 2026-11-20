@@ -170,6 +170,7 @@ function combinedScopeGroups(scopes = []) {
   if (scopes.includes('kitchen')) out.push({ key: 'kitchen', name: '주방 (싱크대·상판)', desc: '기본형 싱크대·인조대리석 상판·철거', ids: ['sink', 'top', 'kitchen_labor', 'kitchen_waste'] });
   if (scopes.includes('entrance')) out.push({ key: 'ent', name: '현관 (중문·신발장·타일)', desc: '중문·신발장·현관 타일', ids: ['entrance'] });
   if (scopes.includes('plaster')) out.push({ key: 'plaster', name: '바닥 미장', desc: '몰탈 미장·양생', ids: ['plaster', 'plaster_mat'] });
+  if (scopes.includes('groundwork')) out.push({ key: 'ground', name: '기초·정지 (터파기·다짐)', desc: '터파기·정지·골재·장비', ids: ['groundwork', 'groundwork_mat', 'groundwork_equip'] });
   if (scopes.includes('carpentry')) out.push({ key: 'carp', name: '문·몰딩', desc: '문틀·몰딩', ids: ['carpentry'] });
   if (scopes.includes('electric')) out.push({ key: 'elec', name: '전기·조명', desc: '스위치·콘센트·조명', ids: ['electric'] });
   return out;

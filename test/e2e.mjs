@@ -7,11 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { cleanOcrText, evaluateOcr, scenePhotoNote } from '../src/lib/ocr.js';
 import { classifyRequest, summarizeRequest } from '../src/lib/classify.js';
-import { surveyWasteDrafts } from '../src/lib/parse.js';
+import { surveyWasteDrafts, firstCallQuestions } from '../src/lib/parse.js';
 import { wasteVehicle } from '../src/lib/waste.js';
 import { kstToday, addDaysISO, korDateLabel, korMonthDay } from '../src/lib/date.js';
-import { pickTextModel, pickImageModel, GEMINI_MODEL_STORAGE } from '../src/lib/gemini.js';
-import { perPyeong } from '../src/lib/rates.js';
+import { pickTextModel, pickImageModel, GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE } from '../src/lib/gemini.js';
+import { perPyeong, DEFAULT_RATES, RATE_FIELDS } from '../src/lib/rates.js';
+import { computeEstimate } from '../src/lib/pricing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '..', 'dist');
@@ -140,8 +141,109 @@ async function main() {
     record('설비: 보일러 배관', classifyRequest('보일러 배관 누수 수리').trade === 'plumbing');
     record('필름: 유리 필름', classifyRequest('유리 필름 시공 10㎡').trade === 'film');
     record('토목: 맨땅 데크', classifyRequest('맨땅에 데크 기초').trade === 'groundwork');
+    // '정지'는 '작업 정지'와 헷갈리지 않게 부지 맥락만
+    record('정지: 부지 정지', classifyRequest('부지 정지 작업 200평').trade === 'groundwork');
+    record('정지: 성토·절토', classifyRequest('성토하고 절토까지 맨땅 정리').trade === 'groundwork');
+    record('정지: 굴삭기', classifyRequest('굴삭기로 터파기 해야 함').trade === 'groundwork');
+    record('정지: 작업 정지는 토목 아님', classifyRequest('일이 있어서 작업 정지').trade !== 'groundwork');
+    const mixed = classifyRequest('상가 철거랑 부지 정지 작업 같이 해야 함');
+    record('철거+정지: 복합으로 묶음', mixed.trade === 'combined', mixed.trade);
+    record('철거+정지: 두 공종 모두 포함', (mixed.patch.subScopes || []).includes('demolition') && (mixed.patch.subScopes || []).includes('groundwork'), JSON.stringify(mixed.patch.subScopes));
     record('주방 동의어: 부엌', classifyRequest('부엌을 전면 인테리어. 최신식으로').trade === 'kitchen');
     record('주방 동의어: 상부장', classifyRequest('상부장·하부장 교체').trade === 'kitchen');
+  });
+
+  await step('단위: 직종별 일당 14+ → 계산 연결', async () => {
+    const roles = ['carpenter', 'electrician', 'plumber', 'plasterer', 'film', 'floor', 'window', 'painter', 'caulking', 'cleaner'];
+    record('일당: 직종 10종 기본값 있음', roles.every((k) => Number(DEFAULT_RATES.labor[k]) > 0), roles.map((k) => `${k}=${DEFAULT_RATES.labor[k]}`).join(' '));
+    record('일당: 설정 필드에 전부 있음', roles.every((k) => RATE_FIELDS.some((g) => g.fields.some((f) => f.path.join('.') === `labor.${k}`))));
+    record('일당: 2열 그리드(그룹당 필드 여러 개)', RATE_FIELDS.filter((g) => g.fields.some((f) => f.path[0] === 'labor')).length >= 2);
+
+    const laborOf = (trade, sizeValue, sizeUnit, patch, itemId = 'labor') => {
+      const est = computeEstimate({ trade, sizeValue, sizeUnit, unitPriceSnapshot: patch || {} });
+      return (est.items.find((i) => i.id === itemId) || {}).amount || 0;
+    };
+    const cases = [
+      ['목수', 'carpentry', '10', 'm', 'carpenter', 'labor'],
+      ['전기', 'electric', '6', '개소', 'electrician', 'labor'],
+      ['설비', 'plumbing', '5', '개소', 'plumber', 'labor'],
+      ['미장', 'plaster', '30', '㎡', 'plasterer', 'plaster'],
+      ['필름', 'film', '20', '㎡', 'film', 'labor'],
+    ];
+    cases.forEach(([label, trade, sizeValue, sizeUnit, key, itemId]) => {
+      const before = laborOf(trade, sizeValue, sizeUnit, null, itemId);
+      const after = laborOf(trade, sizeValue, sizeUnit, { labor: { [key]: 40 } }, itemId);
+      record(`일당: ${label} 40만으로 올리면 노무비 증가`, after > before && before > 0, `${before} → ${after}`);
+    });
+    record('일당: 목수 기본 30만 × 1.7일 = 51만', laborOf('carpentry', '10', 'm') === 51, String(laborOf('carpentry', '10', 'm')));
+
+    // 장판·마루공 — 도배 30평: 도배 2일 + 장판 1일
+    const wall = laborOf('wallpaper', '30', '평');
+    const wallUp = laborOf('wallpaper', '30', '평', { labor: { floor: 40 } });
+    record('일당: 장판공을 올리면 도배·장판 노무비 증가', wallUp > wall && wall > 0, `${wall} → ${wallUp}`);
+    // 코킹·페인트 — 수선 현장
+    const repairLabor = (patch, notes) => {
+      const est = computeEstimate({ trade: 'repair', sizeValue: '1', sizeUnit: '개소', notes, unitPriceSnapshot: patch || {} });
+      return (est.items.find((i) => i.id === 'labor') || {}).amount || 0;
+    };
+    const caulk = repairLabor(null, '욕실 바닥 실리콘 보수');
+    const caulkUp = repairLabor({ labor: { caulking: 40 } }, '욕실 바닥 실리콘 보수');
+    record('일당: 코킹공을 올리면 수선 노무비 증가', caulkUp > caulk, `${caulk} → ${caulkUp}`);
+    const paint = repairLabor(null, '문짝 페인트');
+    const paintUp = repairLabor({ labor: { painter: 40 } }, '문짝 페인트');
+    record('일당: 페인트공을 올리면 수선 노무비 증가', paintUp > paint, `${paint} → ${paintUp}`);
+    const painted = computeEstimate({ trade: 'repair', sizeValue: '1', sizeUnit: '개소', notes: '문짝 페인트' });
+    record('일당: 페인트 수선은 페인트공 단가', (painted.items.find((i) => i.id === 'labor')?.detail || '').includes('페인트'), painted.items.find((i) => i.id === 'labor')?.detail || '');
+  });
+
+  await step('단위: 교통비·식비 (거리·연인원)', async () => {
+    record('식비: 기본 1만/인·일', Number(DEFAULT_RATES.meal.perWorker) === 1);
+    record('교통: 기준 15km·1인당 1만', Number(DEFAULT_RATES.travel.baseKm) === 15 && Number(DEFAULT_RATES.travel.perWorker) === 1);
+    const near = computeEstimate({ trade: 'demolition', sizeValue: '10', sizeUnit: '평', distanceKm: 10 });
+    const far = computeEstimate({ trade: 'demolition', sizeValue: '10', sizeUnit: '평', distanceKm: 40 });
+    const crewItem = (est) => est.items.find((i) => i.id === 'crew_cost');
+    record('교통: 가까운 현장엔 원거리비 없음', crewItem(near).detail.includes('원거리') === false, crewItem(near).detail);
+    record('교통: 40km는 15km 기준 2회', far.crew.travelUnits === 2, String(far.crew.travelUnits));
+    record('교통비 = 2회 × 연인원 × 1만', far.crew.travelCost === Math.round(2 * far.crew.days * 1), `days=${far.crew.days} travel=${far.crew.travelCost}`);
+    record('식비 = 연인원 × 1만', far.crew.mealCost === Math.round(far.crew.days * 1), `days=${far.crew.days} meal=${far.crew.mealCost}`);
+    record('원가 한 줄: 교통비 · 식비', crewItem(far).name === '교통비 · 식비' && crewItem(far).amount === far.crew.travelCost + far.crew.mealCost, `${crewItem(far).amount}만`);
+    record('교통: 멀면 원가가 더 큼', far.totalDirectCost > near.totalDirectCost, `${near.totalDirectCost} → ${far.totalDirectCost}`);
+    const noMeal = computeEstimate({ trade: 'demolition', sizeValue: '10', sizeUnit: '평', unitPriceSnapshot: { meal: { perWorker: 0 }, travel: { perWorker: 0 } } });
+    record('식비 0원이면 교통비 줄 없음', !noMeal.items.find((i) => i.id === 'crew_cost'), String(noMeal.crew.total));
+  });
+
+  await step('단위: 복합 공종 계산 (철거+정지)', async () => {
+    const est = computeEstimate({
+      trade: 'combined',
+      sizeValue: '20',
+      sizeUnit: '평',
+      subScopes: ['demolition', 'groundwork'],
+    });
+    record('복합: 정지(토목) 원가 포함', est.items.some((i) => i.id === 'groundwork') && est.items.some((i) => i.id === 'groundwork_equip'), est.items.map((i) => i.id).join(','));
+    record('복합: 철거도 함께 계산', est.items.some((i) => i.id === 'labor') && est.items.some((i) => i.id === 'waste'));
+    record('복합: 요약에 철거·기초·정지', est.targetSummary.includes('철거') && est.targetSummary.includes('기초·정지'), est.targetSummary);
+    const noGround = computeEstimate({ trade: 'combined', sizeValue: '20', sizeUnit: '평', subScopes: ['demolition'] });
+    record('복합: 정지 없으면 원가 더 작음', est.totalDirectCost > noGround.totalDirectCost, `${noGround.totalDirectCost} → ${est.totalDirectCost}`);
+  });
+
+  await step('단위: 첫 통화 질문이 케이스마다 다름', async () => {
+    const grounds = firstCallQuestions({ trade: 'groundwork', rawInput: '부지 정지 200㎡', sizeValue: '200', sizeUnit: '㎡' });
+    const bath = firstCallQuestions({ trade: 'bathroom', rawInput: '욕실 1칸', sizeValue: '1', sizeUnit: '칸' });
+    const demo = firstCallQuestions({ trade: 'demolition', rawInput: '상가 철거 15평', sizeValue: '15', sizeUnit: '평' });
+    record('첫통화: 토목은 정지·성토 질문', grounds.some((q) => /정지|성토|터파기/.test(q)), grounds.join(' / '));
+    record('첫통화: 욕실은 욕실 질문', bath.some((q) => q.includes('욕실')), bath.join(' / '));
+    record('첫통화: 철거는 범위·석면 질문', demo.some((q) => /범위|석면/.test(q)), demo.join(' / '));
+    record('첫통화: 공종끼리 질문이 다름', grounds[0] !== bath[0] && bath[0] !== demo[0]);
+    record('첫통화: 항상 3개', grounds.length === 3 && bath.length === 3 && demo.length === 3);
+    const bid = firstCallQuestions({ trade: 'custom', bid: { noticeNo: 'R25BK0080' } });
+    record('첫통화: 관공서는 설계내역서·설명회 질문', bid.some((q) => /설계내역서|설명회/.test(q)), bid.join(' / '));
+    const ai = firstCallQuestions({ trade: 'bathroom', aiAnalysis: { firstCallQuestions: ['AI질문 하나', 'AI질문 둘', 'AI질문 셋'] } });
+    record('첫통화: AI 질문이 있으면 그것 먼저', ai[0] === 'AI질문 하나', ai.join(' / '));
+  });
+
+  await step('단위: 가견적 화면 내부 등급 숨김', async () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'src/components/tabs/EstimateTab.jsx'), 'utf8');
+    record('사례: 신뢰도 등급 문구 제거', !src.includes('신뢰도 {'), 'EstimateTab.jsx');
   });
 
   await step('단위: 복합 세부 공종·희망사항', async () => {
@@ -630,6 +732,11 @@ async function main() {
     await page.getByText('투찰가·남는 돈 미리보기').waitFor();
     await page.getByRole('button', { name: /내 장부로 가져오기/ }).click();
     await page.getByLabel('받은 내용').waitFor();
+    const received = await page.getByLabel('받은 내용').inputValue();
+    record('공고: 받은 내용에 발주처·공고번호', /발주처:/.test(received) && /공고번호:/.test(received), received.split('\n').slice(0, 3).join(' | '));
+    record('공고: 추정가격·추천 투찰가 포함', /추정가격: [\d,]+만원/.test(received) && /추천 투찰가: [\d,]+만원/.test(received));
+    record('공고: 마감일·지역·링크 포함', /마감일:/.test(received) && /지역:/.test(received) && /공고 링크:/.test(received));
+    record('공고: 1.정보에 공고 카드', (await mainText()).includes('🏛️ 관공서 공고') && (await mainText()).includes('추천 투찰가 (88%)'));
     await goTab(2);
     const t = await mainText();
     record('공고: 실행원가 80% 안내', t.includes('실행원가 하한') && t.includes('~80%'));
@@ -730,6 +837,80 @@ async function main() {
     await page.getByText('연결됨', { exact: false }).waitFor({ timeout: 20000 });
     const said2 = await page.locator('[role=dialog]').innerText();
     record('탐색: 목록에서 새 flash 모델 선택', said2.includes('연결됨 · gemini-3.0-flash'), said2.match(/연결됨[^\n]*/)?.[0] || '');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  // IMG_1548: gemini-2.5-flash 가 503(모델 과부하)을 돌려주는 키 — 다음 모델로 자동 넘어가는지.
+  const gemini503Mock = ({ busy, open }) => {
+    const hits = [];
+    const handler = async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (req.method() === 'GET' && /\/models(\?|$)/.test(url)) {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ models: [] }) });
+      }
+      const name = decodeURIComponent((url.match(/\/models\/([^:]+):generateContent/) || [])[1] || '');
+      hits.push(name);
+      if (busy.includes(name)) {
+        return route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 503, message: 'The model is currently overloaded. Please try again later.', status: 'UNAVAILABLE' } }),
+        });
+      }
+      if (open.includes(name)) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+        });
+      }
+      return route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 404, message: `models/${name} is not found for API version v1beta.`, status: 'NOT_FOUND' } }),
+      });
+    };
+    return { handler, hits };
+  };
+
+  await step('Gemini — 503(과부하)이면 다음 모델로 자동 재시도', async () => {
+    const mock503 = gemini503Mock({ busy: ['gemini-2.5-flash', 'gemini-2.5-flash-latest'], open: ['gemini-2.0-flash'] });
+    await context.route('https://generativelanguage.googleapis.com/**', mock503.handler);
+    await page.evaluate(
+      ([a, b]) => {
+        sessionStorage.removeItem(a);
+        sessionStorage.removeItem(b);
+      },
+      [GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE]
+    );
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    await openSettings();
+    await page.getByLabel('Gemini API 키').fill('AIzaTESTKEY123');
+    await page.getByRole('button', { name: '연결 테스트' }).click();
+    await page.getByText('연결됨', { exact: false }).waitFor({ timeout: 20000 });
+    const said503 = await page.locator('[role=dialog]').innerText();
+    record('503: 다음 모델로 자동 전환', said503.includes('연결됨 · gemini-2.0-flash'), said503.match(/연결됨[^\n]*/)?.[0] || '');
+    record('503: 과부하 모델부터 시도함', mock503.hits.includes('gemini-2.5-flash'), mock503.hits.join(' → '));
+    record('503: 실패로 끝나지 않음', !said503.includes('실패 ('), said503.match(/실패[^\n]*/)?.[0] || '없음');
+    const cool = await page.evaluate((k) => sessionStorage.getItem(k), GEMINI_COOLDOWN_STORAGE);
+    record('503: 막힌 모델을 쿨다운에 기록', String(cool || '').includes('gemini-2.5-flash'), String(cool || '').slice(0, 90));
+    // 모델 캐시만 지우고 다시 눌러도 503 모델은 건너뛰고 바로 붙는지
+    await page.evaluate((k) => sessionStorage.removeItem(k), GEMINI_MODEL_STORAGE);
+    mock503.hits.length = 0;
+    await page.getByRole('button', { name: '연결 테스트' }).click();
+    await page.waitForFunction((k) => !!sessionStorage.getItem(k), GEMINI_MODEL_STORAGE, { timeout: 20000 });
+    await page.waitForTimeout(300);
+    record(
+      '503: 재시도 때 503 모델은 건너뜀',
+      !mock503.hits.includes('gemini-2.5-flash') && !mock503.hits.includes('gemini-2.5-flash-latest'),
+      mock503.hits.join(' → ') || '호출 없음'
+    );
+    const saidAgain = await page.locator('[role=dialog]').innerText();
+    record('503: 재시도도 연결됨', saidAgain.includes('연결됨'), saidAgain.match(/연결됨[^\n]*/)?.[0] || '');
+    await shot('49b-gemini-503-fallback.png');
     await page.getByLabel('닫기').first().click();
     await page.waitForTimeout(300);
   });

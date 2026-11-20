@@ -15,17 +15,24 @@ export const MATERIAL_RATES = {
   bathroom: { tilePer: 120, fixturePer: 50, waterproofPer: 20, demolition: 80, ubrExtra: 90, laborDays: 3, wastePer: 20, overlayWaste: 5 },
   kitchen: { sinkPerM: 60, topPerM: 16, waste: 45, laborDays: 3 },
   tile: { materialPer: 3.2, installPer: 4.5, waterproofPer: 3.4, demolitionPer: 2.2, minimum: 45 },
-  window: { perSqm: 28, removal: 8, waste: 15, minimum: 35 },
+  window: { perSqm: 28, matPerSqm: 24, perDay: 8, removal: 8, waste: 15, minimum: 35 },
   repair: { perSpot: 12, materialPer: 5, minimum: 15 },
-  plaster: { mortarPer: 2.8, materialPer: 1.2, heatingPer: 2.5, minimum: 30 },
+  plaster: { mortarPer: 2.8, materialPer: 1.2, heatingPer: 2.5, minimum: 30, perDay: 9.6 },
   waste: { defaultTons: 1.5 },
-  // 2026 실무 단가 (자재+시공 합산, 만원)
-  carpentry: { perM: 9, minimum: 25 },
-  electric: { trip: 15, perPoint: 8, minimum: 25 },
-  plumbing: { trip: 15, perPoint: 12, minimum: 30 },
-  film: { perSqm: 2.2, minimum: 25 },
+  // 2026 실무 단가 — 노무는 '직종 일당 × 작업일수(하루 처리량 기준)'로 계산한다
+  carpentry: { perM: 9, matPer: 4, perDay: 6, minimum: 25 },
+  electric: { trip: 15, perPoint: 8, matPer: 3.2, perDay: 6, minimum: 25 },
+  plumbing: { trip: 15, perPoint: 12, matPer: 4.2, perDay: 3.5, minimum: 30 },
+  film: { perSqm: 2.2, matPer: 1.2, perDay: 28, minimum: 25 },
   groundwork: { perSqm: 4.5, equipRate: 0.25, minimum: 50 },
 };
+
+// 직종 일당 × 작업일수. '하루 처리량(perDay)'은 지금 단가 수준이 그대로 유지되게 잡은 값이다.
+function crewLabor(rates, role, fallbackRate, quantity, perDay, minDays = 0.5) {
+  const rate = getRate(rates, ['labor', role], fallbackRate);
+  const days = Math.max(minDays, Math.min(30, Math.round((quantity / Math.max(0.1, perDay)) * 10) / 10));
+  return { rate, days, cost: Math.round(days * rate) };
+}
 
 const TILE_ADD = { material: MATERIAL_RATES.tile.materialPer, install: MATERIAL_RATES.tile.installPer };
 
@@ -242,6 +249,7 @@ export function computeEstimate(c) {
   let materialTotal = 0;
   let wasteTotal = 0;
   let equipTotal = 0;
+  let crewDays = 0; // 총 연인원(명·일) — 교통비·식비를 여기에 곱한다
   let targetSummary = '';
 
   if (trade === 'demolition') {
@@ -254,6 +262,7 @@ export function computeEstimate(c) {
     const helperCount = pyung >= 12 ? 2 : 1;
     const perDay = skilled + helper * helperCount;
     const laborCost = days * perDay;
+    crewDays += days * (1 + helperCount);
     const defaultTrucks = Math.max(1, Math.round(pyung / 5));
     const truckCount = Math.max(1, parseInt(c?.waste?.trucks, 10) || defaultTrucks);
     const heavy = c?.waste?.heavy === true;
@@ -298,8 +307,14 @@ export function computeEstimate(c) {
     const floorUnit = is22 ? MATERIAL_RATES.wallpaper.floor22 : MATERIAL_RATES.wallpaper.floor18;
     const floorCost = Math.round(floorSqm * floorUnit);
     const subMat = Math.min(14, Math.max(8, Math.round(pyung * 0.42)));
-    const laborDays = pyung >= 30 ? 3 : 2;
-    const laborCost = laborDays * getRate(rates, ['labor', 'wallpaper'], 28);
+    // 도배공 하루 30평 안팎 · 장판공 반나절~하루 — 둘을 나눠 각 직종 일당으로 계산한다
+    const wallDays = pyung >= 30 ? 2 : 1.5;
+    const floorDays = pyung >= 30 ? 1 : 0.5;
+    const wallRate = getRate(rates, ['labor', 'wallpaper'], 30);
+    const floorRate = getRate(rates, ['labor', 'floor'], 28);
+    const laborDays = +(wallDays + floorDays).toFixed(1);
+    const laborCost = Math.round(wallDays * wallRate + floorDays * floorRate);
+    crewDays += laborDays;
 
     materialTotal += wallCost + floorCost + subMat;
     laborTotal += laborCost;
@@ -309,7 +324,7 @@ export function computeEstimate(c) {
       { id: 'wallpaper', category: '자재', name: `${silk ? '실크' : '합지'} 벽지 (${rolls}롤)`, detail: `벽 ${wallPyung}평 ÷ 5평/롤 × 1.15(손실) × ${rollUnit}만`, amount: wallCost },
       { id: 'floor', category: '자재', name: `${is22 ? '2.2T' : '1.8T'} 장판 (${floorSqm}㎡)`, detail: `${pyung}평 × 2.3 = ${floorSqm}㎡ × ${floorUnit}만`, amount: floorCost },
       { id: 'submat', category: '자재', name: '도배·장판 부자재', detail: '친환경 풀·초배지·장판본드·실리콘', amount: subMat },
-      { id: 'labor', category: '노무', name: `도배·장판 노무 (${laborDays}일)`, detail: `기공 1명 + 보조 1명 (${laborDays}일)`, amount: laborCost }
+      { id: 'labor', category: '노무', name: `도배·장판 노무 (${laborDays}일)`, detail: `도배 ${wallDays}일 × ${wallRate}만 + 장판·마루 ${floorDays}일 × ${floorRate}만`, amount: laborCost }
     );
   } else if (trade === 'bathroom') {
     const kans = sizeUnit === '칸' && sizeVal > 0 ? sizeVal : 1;
@@ -322,6 +337,7 @@ export function computeEstimate(c) {
     const wastePer = method === 'overlay' ? B.overlayWaste : method === 'ubr' ? 25 : B.wastePer;
     const laborDays = B.laborDays;
     const laborCost = Math.round(laborDays * getRate(rates, ['labor', 'bathroom'], 35) * kans);
+    crewDays += laborDays * kans;
 
     materialTotal += Math.round((B.tilePer + B.fixturePer + waterproofPer + demolitionPer) * kans);
     laborTotal += laborCost;
@@ -343,6 +359,7 @@ export function computeEstimate(c) {
     const sink = Math.round(meters * K.sinkPerM);
     const top = Math.round(meters * K.topPerM);
     const laborCost = K.laborDays * getRate(rates, ['labor', 'kitchen'], 30);
+    crewDays += K.laborDays;
     materialTotal += sink + top;
     wasteTotal += K.waste;
     laborTotal += laborCost;
@@ -362,6 +379,7 @@ export function computeEstimate(c) {
     const loadDays = tons >= 5 ? 2 : 1;
     const loadingRate = getRate(rates, ['waste', 'loading'], 19);
     const loading = Math.round(loadingRate * loadDays);
+    crewDays += loadDays;
     const truck = getRate(rates, ['waste', vehicle.rateKey], vehicle.rate);
     const ticket = getRate(rates, ['waste', 'ticket'], 3);
     const disposal = Math.round(tons * perTon);
@@ -383,6 +401,7 @@ export function computeEstimate(c) {
     const cost = getRate(rates, ['laborSupply', 'cost'], 19);
     const insurance = Math.round(getRate(rates, ['laborSupply', 'insurance'], 2) * people * days);
     const wageCost = Math.round(people * days * cost);
+    crewDays += people * days;
 
     laborTotal += wageCost + insurance;
     targetSummary = `일용 인력 ${people}명 × ${days}일 지원 (청구 ${charge}만/일 · 원가 ${cost}만/일 + 보험 ${insurance}만)`;
@@ -402,6 +421,9 @@ export function computeEstimate(c) {
     const tileLabor = Math.round(tileArea * T.installPer);
     const waterproof = Math.round(wpArea * T.waterproofPer);
     const wasteCost = remainTile ? 8 : Math.max(15, Math.round(area * 1.4));
+    crewDays +=
+      (tileArea ? Math.max(0.5, Math.round((tileArea / 7) * 10) / 10) : 0) +
+      (wpArea ? Math.max(0.2, Math.round((wpArea / 35) * 10) / 10) : 0);
 
     materialTotal += tileMaterial + waterproof;
     laborTotal += tileLabor + demo;
@@ -424,7 +446,9 @@ export function computeEstimate(c) {
     const area = sizeUnit === '㎡' ? Math.max(1, sizeVal) : Math.max(1, +(toPyung(sizeVal, sizeUnit, 10) * 3.3).toFixed(1));
     const withTile = /타일/.test(notes) || c?.plaster?.tile;
     const withHeating = /난방/.test(notes) || c?.plaster?.heating;
-    const mortar = Math.round(area * P.mortarPer);
+    const plasterCrew = crewLabor(rates, 'plasterer', 27, area, P.perDay);
+    const mortar = plasterCrew.cost;
+    crewDays += plasterCrew.days + (withTile ? Math.max(0.5, Math.round((area / 7) * 10) / 10) : 0);
     const material = Math.round(area * P.materialPer);
     const heating = withHeating ? Math.round(area * P.heatingPer) : 0;
     const tileAdd = withTile ? Math.round(area * (TILE_ADD.material + TILE_ADD.install)) : 0;
@@ -432,9 +456,9 @@ export function computeEstimate(c) {
     laborTotal += mortar + heating + (withTile ? Math.round(area * TILE_ADD.install) : 0);
     materialTotal += material + (withTile ? Math.round(area * TILE_ADD.material) : 0);
     wasteTotal += Math.max(12, Math.round(area * 0.9));
-    targetSummary = `바닥 미장 ${area}㎡${withHeating ? ' + 난방 보강' : ''}${withTile ? ' + 타일' : ''} (미장 ${P.mortarPer}만/㎡)`;
+    targetSummary = `바닥 미장 ${area}㎡${withHeating ? ' + 난방 보강' : ''}${withTile ? ' + 타일' : ''} (미장공 ${plasterCrew.days}일 × ${plasterCrew.rate}만)`;
     items.push(
-      { id: 'plaster', category: '노무', name: `바닥 미장 (${area}㎡)`, detail: `${area}㎡ × ${P.mortarPer}만 (몰탈·미장공)`, amount: mortar },
+      { id: 'plaster', category: '노무', name: `바닥 미장 (${area}㎡)`, detail: `미장공 ${plasterCrew.days}일 × ${plasterCrew.rate}만 (하루 ${P.perDay}㎡)`, amount: mortar },
       { id: 'mat', category: '자재', name: '몰탈·메쉬·양생 자재', detail: `${area}㎡ × ${P.materialPer}만`, amount: material }
     );
     if (withHeating) items.push({ id: 'heating', category: '추가(구조)', name: '난방배관·단열 보강', detail: `${area}㎡ × ${P.heatingPer}만`, amount: heating });
@@ -452,33 +476,45 @@ export function computeEstimate(c) {
   } else if (trade === 'window') {
     const W = MATERIAL_RATES.window;
     const area = sizeUnit === '㎡' ? Math.max(1, sizeVal) : Math.max(1, +(toPyung(sizeVal, sizeUnit, 4) * 3.3).toFixed(1));
-    const product = Math.round(area * W.perSqm);
+    const product = Math.round(area * W.matPerSqm);
     const removal = W.removal;
     const wasteCost = W.waste;
+    const windowCrew = crewLabor(rates, 'window', 32, area, W.perDay);
+    const install = windowCrew.cost;
+    crewDays += windowCrew.days + 0.5;
     materialTotal += product;
-    laborTotal += removal;
+    laborTotal += install + removal;
     wasteTotal += wasteCost;
-    targetSummary = `창호·발코니 ${area}㎡ 교체 (자재+시공 ${W.perSqm}만/㎡, 기존 철거 ${removal}만)`;
+    targetSummary = `창호·발코니 ${area}㎡ 교체 (자재 ${W.matPerSqm}만/㎡ + 샷시공 ${windowCrew.days}일 × ${windowCrew.rate}만, 기존 철거 ${removal}만)`;
     items.push(
-      { id: 'window', category: '자재', name: `창호·폴딩도어 (${area}㎡)`, detail: `${area}㎡ × ${W.perSqm}만 (자재+시공)`, amount: product },
+      { id: 'window', category: '자재', name: `창호·폴딩도어 (${area}㎡)`, detail: `${area}㎡ × ${W.matPerSqm}만 (샷시·유리·부자재)`, amount: product },
+      { id: 'window_labor', category: '노무', name: `샷시 시공 (${area}㎡)`, detail: `창호·샷시공 ${windowCrew.days}일 × ${windowCrew.rate}만 (하루 ${W.perDay}㎡)`, amount: install },
       { id: 'removal', category: '노무', name: '기존 창호 철거', detail: '유리·프레임 분리', amount: removal },
       { id: 'waste', category: '폐기물', name: '창호·유리 폐기물', detail: '분리 반출', amount: wasteCost }
     );
-    if (product + removal + wasteCost < W.minimum) {
-      const gap = Math.round(W.minimum - (product + removal + wasteCost));
+    if (product + install + removal + wasteCost < W.minimum) {
+      const gap = Math.round(W.minimum - (product + install + removal + wasteCost));
       items.push({ id: 'min_floor', category: '추가(현장)', name: '소규모 현장 최소 반영', detail: '출동·실측·마감 최소선', amount: gap });
       laborTotal += gap;
     }
   } else if (trade === 'repair') {
     const R = MATERIAL_RATES.repair;
     const spots = sizeUnit === '개소' || sizeUnit === '개' ? Math.max(1, sizeVal) : 1;
-    const laborCost = Math.round(spots * R.perSpot);
+    // 수선 내용에 따라 부르는 인부가 다르다 — 페인트·탄성 / 코킹·실리콘 / 일반 보수
+    const isPaint = /페인트|도장|탄성/.test(notes);
+    const isCaulk = /실리콘|코킹/.test(notes);
+    const repairRole = isPaint ? 'painter' : isCaulk ? 'caulking' : 'repair';
+    const repairLabel = isPaint ? '페인트·탄성공' : isCaulk ? '코킹·실리콘공' : '수선·보수 기공';
+    const repairRate = getRate(rates, ['labor', repairRole], isPaint ? 26 : isCaulk ? 25 : 28);
+    const repairDays = Math.max(0.5, Math.round(spots * 0.5 * 10) / 10);
+    const laborCost = Math.round(repairDays * repairRate);
     const matCost = Math.round(spots * R.materialPer);
+    crewDays += repairDays;
     laborTotal += laborCost;
     materialTotal += matCost;
-    targetSummary = `부분 수선 ${spots}개소 (1개소 ${R.perSpot}만 + 자재 ${R.materialPer}만)`;
+    targetSummary = `부분 수선 ${spots}개소 (${repairLabel} ${repairDays}일 × ${repairRate}만 + 자재 ${R.materialPer}만/개소)`;
     items.push(
-      { id: 'labor', category: '노무', name: `수선 인력 (${spots}개소)`, detail: `${spots}개소 × ${R.perSpot}만`, amount: laborCost },
+      { id: 'labor', category: '노무', name: `수선 인력 (${spots}개소)`, detail: `${repairLabel} ${repairDays}일 × ${repairRate}만`, amount: laborCost },
       { id: 'mat', category: '자재', name: '수선 자재·부자재', detail: `${spots}개소 × ${R.materialPer}만`, amount: matCost }
     );
     if (laborCost + matCost < R.minimum) {
@@ -492,26 +528,34 @@ export function computeEstimate(c) {
       sizeUnit === 'm' || sizeUnit === '개' || sizeUnit === '개소'
         ? Math.max(1, sizeVal)
         : Math.max(1, +(toPyung(sizeVal, sizeUnit, 3) * 1.5).toFixed(1));
-    const total = Math.max(C.minimum, Math.round(meters * C.perM));
-    const laborCost = Math.round(total * 0.55);
-    const matCost = total - laborCost;
+    const carpenterCrew = crewLabor(rates, 'carpenter', 30, meters, C.perDay);
+    const laborCost = carpenterCrew.cost;
+    const matCost = Math.round(meters * C.matPer);
+    crewDays += carpenterCrew.days;
     laborTotal += laborCost;
     materialTotal += matCost;
-    targetSummary = `목공 ${meters}m (문·문틀·몰딩·가구·데크) 자재+시공`;
+    targetSummary = `목공 ${meters}m (문·문틀·몰딩·가구·데크) · 목수 ${carpenterCrew.days}일`;
     items.push(
-      { id: 'labor', category: '노무', name: `목공 인건비 (${meters}m)`, detail: `m당 ${C.perM}만 중 노무 55%`, amount: laborCost },
-      { id: 'mat', category: '자재', name: `목재·부자재 (${meters}m)`, detail: 'MDF·각재·경첩·몰딩·도장', amount: matCost }
+      { id: 'labor', category: '노무', name: `목공 인건비 (${meters}m)`, detail: `목수 ${carpenterCrew.days}일 × ${carpenterCrew.rate}만 (하루 ${C.perDay}m)`, amount: laborCost },
+      { id: 'mat', category: '자재', name: `목재·부자재 (${meters}m)`, detail: `MDF·각재·경첩·몰딩·도장 (m당 ${C.matPer}만)`, amount: matCost }
     );
+    if (laborCost + matCost < C.minimum) {
+      const gap = Math.round(C.minimum - (laborCost + matCost));
+      items.push({ id: 'min_floor', category: '추가(현장)', name: '최소 출동비', detail: '이동·공구·마감', amount: gap });
+      laborTotal += gap;
+    }
   } else if (trade === 'electric') {
     const E = MATERIAL_RATES.electric;
     const points = Math.max(1, sizeVal || 1);
-    const laborCost = Math.round(points * E.perPoint * 0.6) + E.trip;
-    const matCost = Math.round(points * E.perPoint * 0.4);
+    const electricCrew = crewLabor(rates, 'electrician', 28, points, E.perDay);
+    const laborCost = electricCrew.cost + E.trip;
+    const matCost = Math.round(points * E.matPer);
+    crewDays += electricCrew.days;
     laborTotal += laborCost;
     materialTotal += matCost;
-    targetSummary = `전기·조명 ${points}개소 (출장 ${E.trip}만 + 개소당 ${E.perPoint}만)`;
+    targetSummary = `전기·조명 ${points}개소 (전기공 ${electricCrew.days}일 × ${electricCrew.rate}만 + 출장 ${E.trip}만)`;
     items.push(
-      { id: 'labor', category: '노무', name: `전기 공사 ${points}개소`, detail: `출장 ${E.trip}만 포함`, amount: laborCost },
+      { id: 'labor', category: '노무', name: `전기 공사 ${points}개소`, detail: `전기·조명공 ${electricCrew.days}일 × ${electricCrew.rate}만 (하루 ${E.perDay}개소) + 출장 ${E.trip}만`, amount: laborCost },
       { id: 'mat', category: '자재', name: '스위치·콘센트·전선·조명', detail: `${points}개소분`, amount: matCost }
     );
     if (laborCost + matCost < E.minimum) {
@@ -522,13 +566,15 @@ export function computeEstimate(c) {
   } else if (trade === 'plumbing') {
     const P = MATERIAL_RATES.plumbing;
     const points = Math.max(1, sizeVal || 1);
-    const laborCost = Math.round(points * P.perPoint * 0.65) + P.trip;
-    const matCost = Math.round(points * P.perPoint * 0.35);
+    const plumbingCrew = crewLabor(rates, 'plumber', 28, points, P.perDay);
+    const laborCost = plumbingCrew.cost + P.trip;
+    const matCost = Math.round(points * P.matPer);
+    crewDays += plumbingCrew.days;
     laborTotal += laborCost;
     materialTotal += matCost;
-    targetSummary = `설비·배관 ${points}개소 (출장 ${P.trip}만 + 개소당 ${P.perPoint}만)`;
+    targetSummary = `설비·배관 ${points}개소 (설비공 ${plumbingCrew.days}일 × ${plumbingCrew.rate}만 + 출장 ${P.trip}만)`;
     items.push(
-      { id: 'labor', category: '노무', name: `배관·설비 ${points}개소`, detail: `출장 ${P.trip}만 포함`, amount: laborCost },
+      { id: 'labor', category: '노무', name: `배관·설비 ${points}개소`, detail: `설비·배관공 ${plumbingCrew.days}일 × ${plumbingCrew.rate}만 (하루 ${P.perDay}개소) + 출장 ${P.trip}만`, amount: laborCost },
       { id: 'mat', category: '자재', name: '배관·밸브·수전·이음쇠', detail: `${points}개소분`, amount: matCost }
     );
     if (laborCost + matCost < P.minimum) {
@@ -539,20 +585,27 @@ export function computeEstimate(c) {
   } else if (trade === 'film') {
     const F = MATERIAL_RATES.film;
     const area = sizeUnit === '㎡' ? Math.max(1, sizeVal) : Math.max(1, +(toPyung(sizeVal, sizeUnit, 3) * 3.3).toFixed(1));
-    const total = Math.max(F.minimum, Math.round(area * F.perSqm));
-    const laborCost = Math.round(total * 0.45);
-    const matCost = total - laborCost;
+    const filmCrew = crewLabor(rates, 'film', 28, area, F.perDay);
+    const laborCost = filmCrew.cost;
+    const matCost = Math.round(area * F.matPer);
+    crewDays += filmCrew.days;
     laborTotal += laborCost;
     materialTotal += matCost;
-    targetSummary = `필름·시트지 ${area}㎡ (자재+시공 ${F.perSqm}만/㎡)`;
+    targetSummary = `필름·시트지 ${area}㎡ (필름공 ${filmCrew.days}일 × ${filmCrew.rate}만)`;
     items.push(
-      { id: 'labor', category: '노무', name: `필름 시공 (${area}㎡)`, detail: '기포·재단 포함', amount: laborCost },
-      { id: 'mat', category: '자재', name: `필름·시트지 자재 (${area}㎡)`, detail: '국산 인테리어 필름', amount: matCost }
+      { id: 'labor', category: '노무', name: `필름 시공 (${area}㎡)`, detail: `필름공 ${filmCrew.days}일 × ${filmCrew.rate}만 (하루 ${F.perDay}㎡) · 기포·재단 포함`, amount: laborCost },
+      { id: 'mat', category: '자재', name: `필름·시트지 자재 (${area}㎡)`, detail: `국산 인테리어 필름 (㎡당 ${F.matPer}만)`, amount: matCost }
     );
+    if (laborCost + matCost < F.minimum) {
+      const gap = Math.round(F.minimum - (laborCost + matCost));
+      items.push({ id: 'min_floor', category: '추가(현장)', name: '최소 출동비', detail: '자재 하차·마감 하한', amount: gap });
+      laborTotal += gap;
+    }
   } else if (trade === 'groundwork') {
     const G = MATERIAL_RATES.groundwork;
     const area = sizeUnit === '㎡' ? Math.max(1, sizeVal) : Math.max(1, +(toPyung(sizeVal, sizeUnit, 10) * 3.3).toFixed(1));
     const base = Math.max(G.minimum, Math.round(area * G.perSqm));
+    crewDays += Math.max(1, Math.round((area / 30) * 10) / 10);
     const equip = Math.round(base * G.equipRate);
     const laborCost = Math.round((base - equip) * 0.6);
     const matCost = base - equip - laborCost;
@@ -578,6 +631,7 @@ export function computeEstimate(c) {
       const skilled = getRate(rates, ['labor', 'demolition'], 27);
       const helperRate = getRate(rates, ['labor', 'helper'], 19);
       const cost = Math.round(demoDays * (skilled + helperRate));
+      crewDays += demoDays * 2;
       const wasteCost = Math.max(25, Math.round(pyung * 4));
       laborTotal += cost;
       wasteTotal += wasteCost;
@@ -595,6 +649,7 @@ export function computeEstimate(c) {
       const floorCost = Math.round(floorSqm * S.wallpaper.floor18);
       const subMat = Math.min(14, Math.max(8, Math.round(pyung * 0.42)));
       const laborCost = 2 * getRate(rates, ['labor', 'wallpaper'], 30);
+      crewDays += 2;
       materialTotal += wallCost + floorCost + subMat;
       laborTotal += laborCost;
       items.push(
@@ -608,6 +663,7 @@ export function computeEstimate(c) {
     if (scopes.includes('bathroom')) {
       const B = S.bathroom;
       const laborCost = Math.round(B.laborDays * getRate(rates, ['labor', 'bathroom'], 37));
+      crewDays += B.laborDays;
       const mat = B.demolition + B.waterproofPer + B.tilePer + B.fixturePer;
       materialTotal += mat;
       laborTotal += laborCost;
@@ -624,6 +680,7 @@ export function computeEstimate(c) {
       const sink = Math.round(3.2 * K.sinkPerM);
       const top = Math.round(3.2 * K.topPerM);
       const laborCost = K.laborDays * getRate(rates, ['labor', 'kitchen'], 32);
+      crewDays += K.laborDays;
       materialTotal += sink + top;
       laborTotal += laborCost;
       wasteTotal += K.waste;
@@ -638,6 +695,7 @@ export function computeEstimate(c) {
     if (scopes.includes('entrance')) {
       const cost = Math.round(pyung >= 20 ? 55 : 45);
       const laborPart = Math.round(cost * 0.6);
+      crewDays += 1;
       laborTotal += laborPart;
       materialTotal += cost - laborPart;
       items.push({ id: 'entrance', category: '자재', name: '현관 중문·신발장·현관 타일', detail: '중문 1 + 신발장 + 타일', amount: cost });
@@ -645,16 +703,38 @@ export function computeEstimate(c) {
     }
     if (scopes.includes('plaster')) {
       const area = Math.max(1, +(pyung * 3.3).toFixed(1));
-      const mortar = Math.round(area * S.plaster.mortarPer);
+      const combinedPlaster = crewLabor(rates, 'plasterer', 27, area, S.plaster.perDay);
+      const mortar = combinedPlaster.cost;
       const mat = Math.round(area * S.plaster.materialPer);
+      crewDays += combinedPlaster.days;
       laborTotal += mortar;
       materialTotal += mat;
       items.push(
-        { id: 'plaster', category: '노무', name: `바닥 미장 (${area}㎡)`, detail: `${area}㎡ × ${S.plaster.mortarPer}만`, amount: mortar },
+        { id: 'plaster', category: '노무', name: `바닥 미장 (${area}㎡)`, detail: `미장공 ${combinedPlaster.days}일 × ${combinedPlaster.rate}만`, amount: mortar },
         { id: 'plaster_mat', category: '자재', name: '몰탈·메쉬·양생', detail: `${area}㎡ × ${S.plaster.materialPer}만`, amount: mat }
       );
       scopeNames.push('바닥 미장');
     }
+    if (scopes.includes('groundwork')) {
+      const G = S.groundwork;
+      const area = Math.max(1, +(pyung * 3.3).toFixed(1));
+      const gBase = Math.max(G.minimum, Math.round(area * G.perSqm));
+      const gEquip = Math.round(gBase * G.equipRate);
+      const gLabor = Math.round((gBase - gEquip) * 0.6);
+      const gMat = gBase - gEquip - gLabor;
+      crewDays += Math.max(1, Math.round((area / 30) * 10) / 10);
+      laborTotal += gLabor;
+      materialTotal += gMat;
+      equipTotal += gEquip;
+      items.push(
+        { id: 'groundwork', category: '노무', name: `터파기·정지·다짐 (${area}㎡)`, detail: `기초·정지 ${G.perSqm}만/㎡ 기준`, amount: gLabor },
+        { id: 'groundwork_mat', category: '자재', name: `골재·시멘트·철근 (${area}㎡)`, detail: '기초·되메우기 자재', amount: gMat },
+        { id: 'groundwork_equip', category: '장비', name: '굴삭기·다짐 장비', detail: `${Math.round(G.equipRate * 100)}% 반영`, amount: gEquip }
+      );
+      scopeNames.push('기초·정지');
+    }
+    const customScopeNames = scopes.filter((s) => typeof s === 'string' && s.startsWith('x:')).map((s) => s.slice(2));
+    if (customScopeNames.length) scopeNames.push(...customScopeNames);
     const excludedText =
       Array.isArray(c?.excludedScopes) && c.excludedScopes.length
         ? ` · ${c.excludedScopes.map((x) => (x === 'window' ? '창호' : x)).join('·')} 제외`
@@ -678,6 +758,7 @@ export function computeEstimate(c) {
 
     if (hasPlan) {
       const laborCost = Math.round(ppl * days * wage);
+      crewDays += ppl * days;
       if (laborCost) items.push({ id: 'labor', category: '노무', name: `인부 ${ppl}명 × ${days}일`, detail: `일당 ${wage}만`, amount: laborCost });
       if (materialIn) items.push({ id: 'mat', category: '자재', name: '자재비 (직접 입력)', detail: `${label} 자재`, amount: materialIn });
       if (equipIn) items.push({ id: 'equip', category: '장비', name: '장비·운반 (직접 입력)', detail: '장비·반출', amount: equipIn });
@@ -690,6 +771,7 @@ export function computeEstimate(c) {
     } else {
       const pyung = toPyung(sizeVal, sizeUnit, 15);
       const laborCost = Math.round(50 + pyung * 6);
+      crewDays += Math.max(1, Math.round((pyung / 8) * 10) / 10);
       const matCost = Math.round(60 + pyung * 8);
       laborTotal += laborCost;
       materialTotal += matCost;
@@ -773,9 +855,12 @@ export function computeEstimate(c) {
   }
   if (surveyOn(c, 'afterCare')) {
     const pyungForClean = toPyung(c?.sizeValue, c?.sizeUnit, 15);
-    const cleanup = surveyAmount(c, 'afterCare', Math.max(20, Math.round(pyungForClean * 1.3)));
-    addSurcharge('clean', '추가(현장)', '준공 청소', `오염 제거·바닥 청소 (${pyungForClean}평 기준)`, cleanup);
+    const cleanPeople = Math.max(1, Math.ceil(pyungForClean / 20));
+    const cleanRate = getRate(rates, ['labor', 'cleaner'], 19);
+    const cleanup = surveyAmount(c, 'afterCare', Math.round(cleanPeople * cleanRate));
+    addSurcharge('clean', '추가(현장)', '준공 청소', `청소 ${cleanPeople}명 × 1일 × ${cleanRate}만 (${pyungForClean}평 기준)`, cleanup);
     laborTotal += cleanup;
+    crewDays += cleanPeople;
   }
 
   // ---- 직접 추가한 실측 항목 ----
@@ -818,6 +903,45 @@ export function computeEstimate(c) {
       isAdjust: true,
     });
   }
+
+  // ---- 교통비·식비 — 현장 거리와 총 연인원(명·일)으로 자동 계산 ----
+  // 기준 거리(기본 15km)를 넘으면 (거리 ÷ 기준거리, 내림) × 연인원 × 1인당 추가금이 붙는다.
+  const distanceKm = Math.max(0, toNum(c?.distanceKm));
+  const baseKm = Math.max(1, getRate(rates, ['travel', 'baseKm'], 15));
+  const travelPer = Math.max(0, getRate(rates, ['travel', 'perWorker'], 1));
+  const mealPer = Math.max(0, getRate(rates, ['meal', 'perWorker'], 1));
+  const crewDayCount = Math.max(0, Math.round(crewDays * 10) / 10);
+  const travelUnits = distanceKm >= baseKm ? Math.floor(distanceKm / baseKm) : 0;
+  const travelCost = Math.round(travelUnits * crewDayCount * travelPer);
+  const mealCost = Math.round(crewDayCount * mealPer);
+  const crewCost = travelCost + mealCost;
+  if (crewCost > 0) {
+    items.push({
+      id: 'crew_cost',
+      category: '노무',
+      name: '교통비 · 식비',
+      detail: [
+        `연인원 ${crewDayCount}명·일`,
+        mealPer ? `식비 ${mealPer}만/인·일` : '',
+        travelUnits ? `원거리 ${distanceKm}km ÷ ${baseKm}km ${travelUnits}회 × ${travelPer}만` : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      amount: crewCost,
+    });
+    laborTotal += crewCost;
+  }
+  const crew = {
+    days: crewDayCount,
+    distanceKm,
+    baseKm,
+    travelUnits,
+    travelPer,
+    mealPer,
+    travelCost,
+    mealCost,
+    total: crewCost,
+  };
 
   // ---- 실전 원가 절감 스위치 (보조 인력 1명 감축 — 사람을 쓰는 공종만) ----
   const helperTrades = ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'plaster', 'tilewaterproof', 'combined', 'custom'];
@@ -969,6 +1093,7 @@ export function computeEstimate(c) {
     surchargeTotal,
     detailSurcharge: detail,
     lifting,
+    crew,
     totalDirectCost,
     bufferRate,
     costBuffer,

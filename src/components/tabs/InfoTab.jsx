@@ -22,12 +22,24 @@ import {
 } from '../ui.jsx';
 import WasteVehicleSwitch from '../WasteVehicleSwitch.jsx';
 import { analyzeCaseWithGemini, getGeminiKey } from '../../lib/gemini.js';
-import { ratesOf } from '../../lib/rates.js';
+import { ratesOf, LABOR_ROLES } from '../../lib/rates.js';
+
+// 여러 공종을 함께 켰을 때 복합으로 계산해 주는 공종 (pricing.js combined 와 같은 목록)
+const MULTI_SCOPES = [
+  { id: 'demolition', label: '철거' },
+  { id: 'groundwork', label: '기초·정지' },
+  { id: 'wallpaper', label: '도배·장판' },
+  { id: 'bathroom', label: '욕실' },
+  { id: 'kitchen', label: '주방' },
+  { id: 'entrance', label: '현관' },
+  { id: 'plaster', label: '바닥 미장' },
+];
 
 // 1단계 — 정보: 현장 이름 · 받은 내용(정리본/원문) · 사진 OCR · 공종·규모 · 고객 정보만.
 export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [ocrHint, setOcrHint] = useState('');
+  const [newScope, setNewScope] = useState('');
   const fileRef = useRef(null);
   const info = TRADES[c.trade] || TRADES.unclassified;
   const isWaste = calc.trade === 'waste' || c.trade === 'waste';
@@ -35,6 +47,17 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
   const aiOn = !!getGeminiKey();
   const plan = c.customPlan || {};
   const setPlan = (patch) => update({ customPlan: { ...(c.customPlan || {}), ...patch } });
+  const customScopes = (c.subScopes || []).filter((x) => typeof x === 'string' && x.startsWith('x:'));
+  // 칩을 켜고 끌 때 공종을 다시 잡는다 — 2개 이상이면 복합(combined)으로 계산
+  const toggleScope = (id) => {
+    const cur = c.subScopes || [];
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    const priced = next.filter((x) => !String(x).startsWith('x:'));
+    update({
+      subScopes: next,
+      ...(priced.length >= 2 ? { trade: 'combined' } : priced.length === 1 ? { trade: priced[0] } : {}),
+    });
+  };
 
   // 🤖 Gemini가 읽은 결과를 현장에 반영
   const applyAi = (a) => {
@@ -325,6 +348,80 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
             />
           </div>
 
+          {/* 여러 공종 동시에 — 철거 + 정지처럼 한 현장에 일이 둘이면 둘 다 켠다 */}
+          <Field
+            label="함께 하는 공종 (여러 개 켜기)"
+            hint="철거+정지처럼 같이 하는 일은 둘 다 켜세요. 2개 이상이면 복합 현장으로 계산합니다."
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {MULTI_SCOPES.map((s) => {
+                const on = (c.subScopes || []).includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    aria-label={`${s.label} ${on ? '빼기' : '넣기'}`}
+                    onClick={() => toggleScope(s.id)}
+                    className={cx(
+                      'min-h-9 rounded-full border px-3 text-xs font-extrabold',
+                      on ? 'border-brand bg-brand text-white' : 'border-slate-200 bg-white text-slate-600'
+                    )}
+                  >
+                    {on ? '✓ ' : '+ '}
+                    {s.label}
+                  </button>
+                );
+              })}
+              {customScopes.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  aria-label={`${tag.slice(2)} 빼기`}
+                  onClick={() => update({ subScopes: (c.subScopes || []).filter((x) => x !== tag) })}
+                  className="min-h-9 rounded-full border border-amber-300 bg-amber-50 px-3 text-xs font-extrabold text-amber-900"
+                >
+                  ✓ {tag.slice(2)} ✕
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 flex gap-1.5">
+              <TextInput
+                value={newScope}
+                onChange={(e) => setNewScope(e.target.value)}
+                placeholder="목록에 없는 공종 (예) 부지 정지, 배수로 정비"
+                aria-label="직접 공종 추가"
+              />
+              <SmallButton
+                className="shrink-0"
+                onClick={() => {
+                  const name = newScope.trim().slice(0, 20);
+                  if (!name) return;
+                  const tag = `x:${name}`;
+                  if ((c.subScopes || []).includes(tag)) {
+                    setNewScope('');
+                    return;
+                  }
+                  update({
+                    subScopes: [...(c.subScopes || []), tag],
+                    customChecklist: [
+                      ...(c.customChecklist || []),
+                      { id: `x-${Date.now()}`, label: name, memo: '직접 추가한 공종 — 답사에서 금액을 넣고 체크하세요', amount: 0 },
+                    ],
+                  });
+                  setNewScope('');
+                  showToast(`'${name}' 공종을 넣었습니다 — 금액은 답사에서 직접 추가하세요`);
+                }}
+              >
+                + 추가
+              </SmallButton>
+            </div>
+            {customScopes.length ? (
+              <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-2xs font-bold leading-4 text-amber-900">
+                직접 적은 공종은 단가표에 없습니다. 견적에 넣으려면 <b>3. 답사 → 직접 추가 항목</b>에 금액을 적고 체크하세요.
+              </p>
+            ) : null}
+          </Field>
+
           {c.trade === 'demolition' ? (
             <Field
               label="철거 범위"
@@ -435,17 +532,11 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
               <p className="text-sm font-extrabold text-ink">이 현장에 들어가는 공종</p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {(c.subScopes || []).map((x) => {
-                  const label = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배·장판', entrance: '현관', demolition: '철거', plaster: '바닥 미장', window: '창호' }[x] || x;
+                  const label = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배·장판', entrance: '현관', demolition: '철거', plaster: '바닥 미장', groundwork: '기초·정지', window: '창호' }[x] || String(x).replace(/^x:/, '');
                   return (
-                    <button
-                      key={x}
-                      type="button"
-                      onClick={() => update({ subScopes: (c.subScopes || []).filter((y) => y !== x) })}
-                      className="rounded-lg bg-white px-2 py-1 text-2xs font-extrabold text-ink-2 ring-1 ring-slate-200"
-                      aria-label={`${label} 빼기`}
-                    >
-                      포함 · {label} ✕
-                    </button>
+                    <span key={x} className="rounded-lg bg-white px-2 py-1 text-2xs font-extrabold text-ink-2 ring-1 ring-slate-200">
+                      포함 · {label}
+                    </span>
                   );
                 })}
                 {(c.excludedScopes || []).map((x) => {
@@ -463,7 +554,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
                   );
                 })}
               </div>
-              <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">잘못 잡힌 항목은 눌러서 빼거나 다시 넣으세요. 견적·문서가 바로 바뀝니다.</p>
+              <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">위 칩을 눌러 넣거나 빼면 견적·문서가 바로 바뀝니다.</p>
             </div>
           ) : null}
 
@@ -486,6 +577,49 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
         </div>
       </SectionCard>
 
+      {/* 🏛️ 관공서 공고에서 가져온 현장 */}
+      {c.bid ? (
+        <Card className="p-3.5">
+          <p className="flex items-center gap-1.5 text-base font-extrabold text-ink">🏛️ 관공서 공고</p>
+          <div className="mt-1.5 space-y-1 text-[13px] font-semibold text-ink-2">
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">발주처</span>
+              <b className="text-right text-ink">{c.bid.org || '-'}</b>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">공고번호</span>
+              <b className="text-right text-ink">{c.bid.noticeNo || '-'}</b>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">추정가격</span>
+              <b className="text-right text-ink">{Math.round((Number(c.bid.estPrice) || 0) / 10000).toLocaleString('ko-KR')}만원</b>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">추천 투찰가 (88%)</span>
+              <b className="text-right text-brand-strong">{Math.round((Number(c.bid.bidPrice) || 0) / 10000).toLocaleString('ko-KR')}만원</b>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">마감일</span>
+              <b className="text-right text-ink">{String(c.bid.deadline || '').slice(0, 10) || '-'}</b>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">지역</span>
+              <b className="text-right text-ink">{c.bid.region || '-'}</b>
+            </div>
+          </div>
+          {c.bid.url ? (
+            <a
+              href={c.bid.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 flex min-h-10 items-center justify-center rounded-xl bg-blue-50 text-[13px] font-extrabold text-blue-900"
+            >
+              나라장터 공고 열기
+            </a>
+          ) : null}
+        </Card>
+      ) : null}
+
       {/* 만능 견적 모드 — 공종이 안 잡혀도 6단계가 그대로 돌아간다 */}
       {customMode ? (
         <SectionCard
@@ -495,6 +629,24 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
           status={<Pill tone="warn">직접 입력</Pill>}
         >
           <div className="space-y-2">
+            <Field label="인부 종류" hint="고르면 그 직종 일당을 아래 일당 칸에 넣습니다. 설정의 일당이 그대로 쓰입니다.">
+              <Select
+                value={plan.worker || ''}
+                onChange={(e) => {
+                  const key = e.target.value;
+                  const rate = key ? ratesOf(c)?.labor?.[key] : '';
+                  setPlan({ worker: key, ...(rate !== '' && rate !== undefined ? { wage: String(rate) } : {}) });
+                }}
+                aria-label="인부 종류"
+              >
+                <option value="">직접 입력</option>
+                {LABOR_ROLES.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label} · {ratesOf(c)?.labor?.[r.key]}만
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <div className="grid grid-cols-2 gap-2">
               <Field label="인부 수" hint="명">
                 <TextInput inputMode="numeric" value={plan.people ?? ''} onChange={(e) => setPlan({ people: e.target.value })} placeholder="예) 2" aria-label="인부 수" />
@@ -627,6 +779,18 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
               aria-label="현장 주소"
             />
           </Field>
+          <Field
+            label="현장까지 거리 (km)"
+            hint={`사무실에서 현장까지 편도. 기준 ${ratesOf(c)?.travel?.baseKm ?? 15}km를 넘으면 교통비가 연인원만큼 자동으로 붙습니다.`}
+          >
+            <TextInput
+              inputMode="decimal"
+              value={c.distanceKm ?? ''}
+              onChange={(e) => update({ distanceKm: e.target.value })}
+              placeholder="예) 40 (모르면 비워두세요 = 0km)"
+              aria-label="현장까지 거리"
+            />
+          </Field>
         </div>
       </SectionCard>
 
@@ -636,10 +800,6 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
           여기까지 넣으면 <b className="text-ink">2단계 가견적</b>에서 금액이 바로 나옵니다. 답사 뒤에 고칠 수 있으니 대충 넣어도 됩니다.
         </p>
       </Card>
-
-      <SmallButton className="w-full" variant="white" onClick={() => onGoEstimate && onGoEstimate()}>
-        <Copy className="h-4 w-4" /> 2단계 가견적 보기
-      </SmallButton>
     </div>
   );
 }

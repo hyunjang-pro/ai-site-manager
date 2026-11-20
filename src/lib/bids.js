@@ -95,6 +95,25 @@ export function bidToCase(bid, rates = DEFAULT_RATES) {
   const info = TRADES[trade];
   const p = bidPreview(bid);
   const siteParts = String(bid.site || '').split(' 일원')[0];
+  const manwon = (n) => `${Math.round(Number(n) / 10000).toLocaleString('ko-KR')}만원`;
+  const deadline = String(bid.deadline || '').slice(0, 16).replace('T', ' ');
+  // 공고 내용을 그대로 '받은 내용'에 넣는다 — 1.정보 화면에 보이고, AI도 예산·조건을 이걸로 읽는다.
+  const rawInput = [
+    `[나라장터 공고] ${bid.title}`,
+    `발주처: ${bid.org || '-'}`,
+    `공고번호: ${bid.noticeNo || '-'}`,
+    `추정가격: ${manwon(p.est)} (부가세 포함 ${manwon(p.est + p.vat)})`,
+    `추천 투찰가: ${manwon(p.bidPrice)} (추정가의 88%) · 낙찰하한 ${manwon(p.floor)}`,
+    `마감일: ${deadline || '-'}${bid.status === 'closed' ? ' (이미 마감)' : ''}`,
+    `지역: ${bid.region || '-'}${bid.site ? ` · 현장: ${bid.site}` : ''}`,
+    `공사 종류: ${(bid.workTypes || []).join(', ') || '-'}`,
+    `면허: ${(bid.licenses || []).join(', ') || '제한 없음'}`,
+    bid.restrictionNote ? `투찰 제한: ${bid.restrictionNote}` : '',
+    bid.summary ? `공고 요약: ${bid.summary}` : '',
+    `공고 링크: ${bid.url || bid.g2b || '-'}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
   return {
     title: bid.title,
     clientName: bid.org,
@@ -104,7 +123,7 @@ export function bidToCase(bid, rates = DEFAULT_RATES) {
     sizeValue: '',
     sizeUnit: info.defaultUnit,
     notes: `${bid.summary}\n[공고 ${bid.noticeNo}] ${bid.restrictionNote || ''}\n면허: ${(bid.licenses || []).join(', ') || '제한 없음'}`,
-    rawInput: bid.title,
+    rawInput,
     customClientPrice: Math.round(p.bidPrice / 10000), // 만원 단위
     stage: 'prelim',
     collection: 'deposit_wait',
@@ -116,6 +135,10 @@ export function bidToCase(bid, rates = DEFAULT_RATES) {
       org: bid.org,
       url: bid.url,
       g2b: bid.g2b,
+      site: bid.site || '',
+      region: bid.region || '',
+      workTypes: bid.workTypes || [],
+      status: bid.status || '',
       estPrice: p.est,
       bidPrice: p.bidPrice,
       floor: p.floor,

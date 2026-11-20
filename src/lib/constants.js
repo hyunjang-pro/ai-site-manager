@@ -121,8 +121,8 @@ export const TRADES = {
   },
   groundwork: {
     id: 'groundwork',
-    label: '기초·토목 (맨땅)',
-    short: '토목',
+    label: '기초·정지 (토목)',
+    short: '기초·정지',
     emoji: '⛏️',
     defaultMargin: 22,
     defaultUnit: '㎡',
@@ -291,7 +291,7 @@ export const SURVEY_GROUPS = [
       { id: 'wasteIncluded', label: '폐기물 전부 내보내기 포함', hint: '생활폐기물 제외 명시' },
       { id: 'protectLevel', label: '가리기·먼지막이 필요(보양)', hint: '복도·엘베 보양' },
       { id: 'scopeCreep', label: '추가 요구 가능성 있음', hint: '범위 명시·4종 서면화' },
-      { id: 'afterCare', label: '준공 청소 요구', hint: '34평 기준 45만' },
+      { id: 'afterCare', label: '준공 청소 요구', hint: '청소 인원 일당 × 2명(34평)' },
     ],
   },
 ];
@@ -315,7 +315,7 @@ export const MISSING_LINES = [
   { id: 'adminDeposit', label: '관리사무소 신고', amount: 8, hint: '동의서 대행' },
   { id: 'materialLift', label: '자재 올리기', amount: 15, hint: '자재를 층까지' },
   { id: 'ladderSmall', label: '사다리차 소형', amount: 12, hint: '4층 규모 1회' },
-  { id: 'afterCare', label: '준공 청소', amount: 45, hint: '34평 기준' },
+  { id: 'afterCare', label: '준공 청소', amount: 38, hint: '34평 · 청소 2명 × 19만' },
 ];
 
 export const EVIDENCE_SPOTS = [
