@@ -9,7 +9,7 @@ export const SUBSIDY_RULES = {
   phone: '1533-0100',
 };
 
-const STORE_TEXT = /상가|점포|매장|폐업|원상복구|철거|임차/;
+const STORE_TEXT = /상가|점포|매장|폐업|원상복구|임차|사무실/;
 
 export function subsidyInfo(c) {
   const text = `${c?.title || ''} ${c?.notes || ''} ${c?.rawInput || ''} ${c?.location || ''}`;
@@ -66,5 +66,5 @@ export const SUBSIDY_AGENCY = {
 };
 
 export function subsidyLimitText(info) {
-  return info.pyung ? `${info.pyung}평 × 20만원 = ${info.limit}만원` : `최대 ${SUBSIDY_RULES.cap}만원`;
+  return info.pyung ? `전용면적 ${info.pyung}평 × 평당 20만원 = ${info.limit}만원 · 최대 600만원` : '전용면적 확인 후 계산 · 최대 600만원';
 }

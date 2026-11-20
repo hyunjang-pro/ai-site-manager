@@ -98,13 +98,13 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-base font-extrabold text-ink">시공 일정</p>
-            <p className="mt-0.5 text-xs font-semibold text-ink-3">
-              시작일을 넣으면 그날부터 공사기간({workDays}일) 날씨를 맞춰 보여드립니다.
+            <p className="mt-0.5 text-xs font-semibold leading-5 text-ink-3">
+              시작일을 넣으면 그날부터 {workDays}일간 날씨를 맞춰 보여드립니다.
             </p>
           </div>
           <Pill tone={startDate ? 'info' : 'warn'}>{startDate ? `${workDays}일 공사` : '날짜 미정'}</Pill>
         </div>
-        <div className="mt-2.5 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <Field label="시공 시작일">
             <TextInput
               type="date"

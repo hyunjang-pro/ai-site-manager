@@ -172,7 +172,8 @@ export default function Workspace({ activeCase, updateCase, tab, setTab, showToa
         ) : null}
       </div>
 
-      {/* 다음 단계 */}
+      {/* 다음 단계 — 1단계는 견적 화면 안에 자체 이동 버튼(가견적→답사)이 있어 겹치지 않게 숨긴다 */}
+      {tab === 1 ? null : (
       <div className="bottom-bar fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/70 bg-white/92 px-4 pt-2.5 backdrop-blur no-print">
         <div className="mx-auto max-w-3xl">
           <BigButton variant={tab === 4 ? 'ghost' : 'primary'} className="w-full" onClick={goNext}>
@@ -191,6 +192,7 @@ export default function Workspace({ activeCase, updateCase, tab, setTab, showToa
           </p>
         </div>
       </div>
+      )}
     </main>
   );
 }

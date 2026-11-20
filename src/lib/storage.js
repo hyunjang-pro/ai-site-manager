@@ -177,7 +177,7 @@ const SEED_CASES = [
     lifting: { floor: 8, elevator: 'yes', ladderAllowed: 'unknown', carryDistance: 20, mode: 'elevator' },
     survey: { protectLevel: true, wasteIncluded: true },
     marginRate: 30,
-    customClientPrice: 480,
+    customClientPrice: 560,
     stage: 'prelim',
     collection: 'deposit_wait',
     paidAmount: 0,

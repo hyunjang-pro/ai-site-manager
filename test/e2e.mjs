@@ -186,7 +186,7 @@ async function main() {
     await page.getByText('가견적 (답사 전 예상)').waitFor();
     const t = await mainText();
     record('겸적: 1차 가견적 라벨', t.includes('1차 가견적 (답사 전 · 변동 가능)'));
-    record('욕실: 견적 480만', t.includes('480'));
+    record('욕실: 견적 560만', t.includes('560'));
     record('욕실: 추천 자재 세트 3종', t.includes('국산 실속') && t.includes('브랜드 표준') && t.includes('포세린 고급'));
     record('욕실: 자재 사양', t.includes('600×1200') && t.includes('매립수전'));
     record('욕실: 브랜드별 기준 가격', t.includes('브랜드별 기준 가격') && t.includes('아메리칸스탠다드'));
@@ -214,7 +214,7 @@ async function main() {
     const t = await mainText();
     record('자재: 실속 세트 선택 표시', t.includes('국산 실속'));
     record('자재: 실속 사양(300×600)', t.includes('300×600 무광 국산 타일'));
-    record('자재: 견적 금액 변경', !t.includes('480'));
+    record('자재: 견적 금액 변경', !t.includes('560'));
     await shotAt('02c-material.png', '추천 자재 세트', -120);
 
     // 3단계 발주 리스트에 실속 자재가 반영

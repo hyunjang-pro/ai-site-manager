@@ -1253,6 +1253,8 @@ function SubsidyCard({ c, update, showToast, onOpenDoc }) {
   const checks = c.subsidyCheck || {};
   const done = SUBSIDY_CHECKS.filter((q) => checks[q.id]).length;
   const toggle = (id) => update && update({ subsidyCheck: { ...checks, [id]: !checks[id] } });
+  // 상가·점포 철거 현장에서만 보여준다 (욕실·도배 등 주거 공사에는 해당 없음)
+  if (!info.storeish) return null;
 
   return (
     <Card className="overflow-hidden">
@@ -1276,7 +1278,7 @@ function SubsidyCard({ c, update, showToast, onOpenDoc }) {
             {Math.round(info.limit).toLocaleString('ko-KR')}
             <span className="ml-0.5 text-sm font-bold">만원</span>
           </p>
-          <p className="mt-0.5 text-2xs leading-4 text-brand">{subsidyLimitText(info)} · 최대 600만원 · 부가세 제외</p>
+          <p className="mt-0.5 text-2xs leading-4 text-brand">{subsidyLimitText(info)} · 부가세 제외</p>
         </div>
 
         {/* 1) 대상 판별 체크리스트 */}
