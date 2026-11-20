@@ -39,7 +39,8 @@ export function wonText(n) {
 // 투찰가 미리보기 — 사용자가 정한 기준: 추정가격 × 88%, 낙찰하한 87.745%
 export function bidPreview(bid) {
   const est = Number(bid?.price) || 0;
-  const ratio = Number(bid?.costRatio) || (bid?.trade === '폐기물' ? 0.86 : 0.8);
+  // 공공공사는 낙찰가의 88~93%가 실제 원가로 나가는 경우가 많다 — 보수적으로 잡는다.
+  const ratio = Number(bid?.costRatio) || (bid?.trade === '폐기물' ? 0.93 : 0.88);
   const bidPrice = Math.round(est * 0.88);
   const floor = Math.round(est * 0.87745);
   const cost = Math.round(bidPrice * ratio);

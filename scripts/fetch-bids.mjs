@@ -74,7 +74,7 @@ function normalizeFromNarais(raw) {
     licenses: raw.licenses || [],
     licenseRequired: true,
     restricted: regionKey === 'andong',
-    restrictionNote: regionKey === 'andong' ? '안동시 지역제한' : '',
+    restrictionNote: raw.restriction || (regionKey === 'andong' ? '안동시 지역제한' : ''),
     preference: '',
     status: new Date(raw.deadline).getTime() > Date.now() ? 'open' : 'closed',
     result: null,
@@ -111,6 +111,46 @@ function parseNaraisList(html) {
       licenses: [],
     });
   });
+  return out;
+}
+
+// 공공데이터포털 나라장터 입찰공고정보서비스 (서비스키가 있을 때)
+async function collectG2B(key) {
+  const fmt = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const end = new Date();
+  const begin = new Date(Date.now() - 7 * 864e5);
+  const base = 'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk';
+  const out = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const url = `${base}?serviceKey=${encodeURIComponent(key)}&numOfRows=100&pageNo=${page}&inqryDiv=1&inqryBgnDt=${fmt(begin)}0000&inqryEndDt=${fmt(end)}2359&type=json`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
+    if (!res.ok) throw new Error(`G2B HTTP ${res.status}`);
+    const data = await res.json();
+    const items = data?.response?.body?.items?.item;
+    const list = Array.isArray(items) ? items : items ? [items] : [];
+    if (!list.length) break;
+    for (const it of list) {
+      const title = it.bidNtceNm || '';
+      const org = it.ntceInsttNm || it.dminsttNm || '';
+      const regionText = `${it.prtcptLmtRgnNm || ''} ${it.cnstrtsiteRgnNm || ''} ${org}`;
+      if (!KEYWORD.test(title)) continue;
+      if (!/경상북도|경북|안동/.test(regionText)) continue;
+      const price = Number(it.presmptPrce) || 0;
+      const dl = String(it.bidClseDt || it.bidClseDate || '').replace(' ', 'T');
+      out.push({
+        id: String(it.bidNtceNo || '').trim(),
+        title,
+        org,
+        price,
+        deadline: /^\d{4}-\d{2}-\d{2}T/.test(dl) ? `${dl.slice(0, 16)}:00+09:00` : '',
+        postedAt: String(it.bidNtceDt || '').slice(0, 10),
+        licenses: it.indstrytyLmtNm ? [String(it.indstrytyLmtNm)] : [],
+        restriction: it.prtcptLmtRgnNm ? `${it.prtcptLmtRgnNm} 지역제한` : '',
+      });
+    }
+    if (list.length < 100) break;
+    await sleep(400);
+  }
   return out;
 }
 
@@ -154,9 +194,19 @@ async function main() {
   const merged = new Map((current.bids || []).map((b) => [b.noticeNo || b.id, b]));
 
   let candidates = [];
+  if (process.env.G2B_API_KEY) {
+    try {
+      candidates = await collectG2B(process.env.G2B_API_KEY);
+      console.log(`나라장터 OpenAPI에서 ${candidates.length}건 후보`);
+    } catch (e) {
+      console.warn(`나라장터 API 실패 — 공개 목록으로 대체: ${e.message}`);
+    }
+  }
   try {
-    candidates = await collectNarais();
-    console.log(`narais 경북 공사 7일 내 마감에서 ${candidates.length}건 후보`);
+    const fallback = await collectNarais();
+    console.log(`narais 경북 공사 7일 내 마감에서 ${fallback.length}건 후보`);
+    const known = new Set(candidates.map((c) => c.id));
+    candidates = [...candidates, ...fallback.filter((b) => !known.has(b.id))];
   } catch (e) {
     console.warn(`narais 수집 실패: ${e.message}`);
   }
@@ -169,7 +219,7 @@ async function main() {
       merged.set(raw.id, { ...prev, deadline: raw.deadline, price: raw.price || prev.price, status: new Date(raw.deadline).getTime() > Date.now() ? 'open' : 'closed' });
       continue;
     }
-    raw.licenses = await enrich(raw.id);
+    if (!raw.licenses?.length) raw.licenses = await enrich(raw.id);
     await sleep(1000);
     const bid = normalizeFromNarais(raw);
     merged.set(bid.noticeNo, bid);
