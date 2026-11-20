@@ -1,8 +1,34 @@
-// Gemini 2.5 Flash 멀티모달 — 사용자가 설정에 넣은 자기 키로만 호출한다.
+// Gemini 멀티모달 — 사용자가 설정에 넣은 자기 키로만 호출한다.
 // GitHub Pages 공개 저장소이므로 키는 절대 코드에 넣지 않고, 이 브라우저(localStorage)에만 둔다.
 // 키가 없거나 호출이 실패하면 앱은 기존 로컬 규칙·만능 계산기로 그대로 동작한다.
-const MODEL = 'gemini-2.5-flash';
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+//
+// 모델 이름은 구글이 자주 바꾼다. 이름 하나만 치면 gemini_http_404가 나므로
+//  1) 알려진 이름을 앞에서부터 시도하고
+//  2) 404가 나면 GET /v1beta/models 로 '지금 이 키로 실제 쓸 수 있는 모델'을 찾아 자동 전환한다.
+// 성공한 모델 이름은 이 탭(sessionStorage)과 메모리에 기억해 다음부터 바로 쓴다.
+const API_ROOT = 'https://generativelanguage.googleapis.com';
+const API_VERSION = 'v1beta';
+const API_VERSIONS = ['v1beta', 'v1'];
+
+export const TEXT_MODEL_CANDIDATES = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-latest',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+];
+
+export const IMAGE_MODEL_CANDIDATES = [
+  'gemini-2.5-flash-image',
+  'gemini-2.5-flash-image-preview',
+  'gemini-2.0-flash-exp-image-generation',
+  'gemini-2.0-flash-preview-image-generation',
+];
+
+export const GEMINI_MODEL_STORAGE = 'aiSiteManager.geminiModel.v1';
 export const GEMINI_KEY_STORAGE = 'aiSiteManager.geminiKey';
 export const GEMINI_KEY_URL = 'https://aistudio.google.com/apikey';
 
@@ -48,6 +74,222 @@ export function hasGeminiKey() {
   return !!getGeminiKey();
 }
 
+// ---- 모델 자동 탐색·기억 ----
+// 키 자체는 저장하지 않고, 키 지문(해시)·길이만 모델 이름과 함께 기억한다.
+let modelMemo = { fp: '', text: '', image: '', version: '' };
+
+function keyFingerprint(key) {
+  const s = String(key || '');
+  let h = 5381;
+  for (let i = 0; i < s.length; i += 1) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${h.toString(36)}-${s.length}`;
+}
+
+function readModelCache(key) {
+  const fp = keyFingerprint(key);
+  if (modelMemo.fp === fp) return modelMemo;
+  let found = { fp, text: '', image: '', version: '' };
+  try {
+    const raw = sessionStorage.getItem(GEMINI_MODEL_STORAGE);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && parsed.fp === fp) {
+      found = { fp, text: String(parsed.text || ''), image: String(parsed.image || ''), version: String(parsed.version || '') };
+    }
+  } catch (e) {
+    // sessionStorage를 못 쓰면 메모리 캐시만 쓴다.
+  }
+  modelMemo = found;
+  return found;
+}
+
+export function rememberModel(apiKey, kind, model, version = API_VERSION) {
+  const key = String(apiKey || '').trim();
+  const name = String(model || '').trim();
+  if (!key || !name) return;
+  const cur = readModelCache(key);
+  const next = { fp: cur.fp, text: cur.text, image: cur.image, version: version || cur.version || API_VERSION };
+  if (kind === 'image') next.image = name;
+  else next.text = name;
+  modelMemo = next;
+  try {
+    sessionStorage.setItem(GEMINI_MODEL_STORAGE, JSON.stringify(next));
+  } catch (e) {
+    // ignore
+  }
+}
+
+export function clearModelCache(apiKey) {
+  const key = String(apiKey || '').trim();
+  modelMemo = { fp: key ? keyFingerprint(key) : '', text: '', image: '', version: '' };
+  try {
+    sessionStorage.removeItem(GEMINI_MODEL_STORAGE);
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readApiError(res) {
+  try {
+    const text = await res.text();
+    try {
+      const json = JSON.parse(text);
+      return String(json?.error?.message || '').slice(0, 200);
+    } catch (e) {
+      return String(text || '').slice(0, 200);
+    }
+  } catch (e) {
+    return '';
+  }
+}
+
+// 모델 하나에 generateContent를 한 번 보낸다. 네트워크·HTTP 오류는 던지지 않고 결과로 돌려준다.
+async function postGenerate(apiKey, model, body, timeoutMs = 25000, version = '') {
+  const url = `${API_ROOT}/${version || API_VERSION}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      url,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      timeoutMs
+    );
+  } catch (e) {
+    return { ok: false, model, reason: e?.name === 'AbortError' ? 'timeout' : e?.message || 'network', status: 0, notFound: false };
+  }
+  if (!res.ok) {
+    const detail = await readApiError(res);
+    return { ok: false, model, reason: `gemini_http_${res.status}`, status: res.status, detail, notFound: res.status === 404 };
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    return { ok: false, model, reason: 'bad_json', status: 0, notFound: false };
+  }
+  return { ok: true, model, data };
+}
+
+async function listModelsAt(version, apiKey, timeoutMs) {
+  const models = [];
+  let pageToken = '';
+  for (let page = 0; page < 3; page += 1) {
+    const q = new URLSearchParams({ pageSize: '100', key: apiKey });
+    if (pageToken) q.set('pageToken', pageToken);
+    const res = await fetchWithTimeout(`${API_ROOT}/${version}/models?${q.toString()}`, { method: 'GET' }, timeoutMs);
+    if (!res.ok) throw new Error(`models_http_${res.status}`);
+    const data = await res.json();
+    const batch = Array.isArray(data?.models) ? data.models : [];
+    for (const m of batch) {
+      models.push({
+        id: String(m?.name || '').replace(/^models\//, ''),
+        methods: Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods.map(String) : [],
+      });
+    }
+    pageToken = String(data?.nextPageToken || '');
+    if (!pageToken || !batch.length) break;
+  }
+  return models;
+}
+
+// GET /v1beta/models — 이 키로 실제 쓸 수 있는 모델 목록. v1beta가 막히면 v1도 시도한다.
+export async function listGeminiModels(apiKey, { timeoutMs = 12000 } = {}) {
+  const key = String(apiKey || '').trim();
+  if (!key) throw new Error('no_key');
+  const cachedVersion = readModelCache(key).version;
+  const versions = [...new Set([cachedVersion, ...API_VERSIONS].filter(Boolean))];
+  let lastError = null;
+  for (const version of versions) {
+    try {
+      const models = await listModelsAt(version, key, timeoutMs);
+      if (models.length) return { version, models };
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error('models_empty');
+}
+
+function modelVersion(id) {
+  const m = String(id).match(/^gemini-(\d+(?:\.\d+)?)/);
+  if (m) return parseFloat(m[1]) || 0;
+  return /^gemini-flash/.test(String(id)) ? 1.5 : 0;
+}
+
+// 404면 이 목록에서 'flash' 계열 텍스트 모델 중 최신을 고른다. (image·embedding·tts 제외)
+function textModelScore(id) {
+  const s = String(id || '');
+  if (!/^gemini/i.test(s)) return -1;
+  if (/image|embedding|embed|aqa|tts|audio|live|imagen|veo|robotics|computer-use/i.test(s)) return -1;
+  if (!/flash/i.test(s)) return -1;
+  let score = modelVersion(s) * 100;
+  if (/-lite/i.test(s)) score -= 60; // lite는 한 세대 아래 full flash보다도 뒤로
+  if (/preview|exp/i.test(s)) score -= 12;
+  if (/-thinking/i.test(s)) score -= 8;
+  if (/-8b/i.test(s)) score -= 5;
+  if (/-latest$/.test(s)) score += 6;
+  if (/[-_]\d{3}$/.test(s)) score -= 4;
+  return score;
+}
+
+export function pickTextModel(ids = []) {
+  const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+  const scored = list.map((id) => ({ id, score: textModelScore(id) })).filter((x) => x.score > 0);
+  if (!scored.length) return '';
+  // 가장 높은 점수(최신 flash) 안에서만 알려진 이름 순서를 따른다.
+  const best = Math.max(...scored.map((x) => x.score));
+  const tied = scored.filter((x) => x.score === best).map((x) => x.id);
+  for (const name of TEXT_MODEL_CANDIDATES) if (tied.includes(name)) return name;
+  return tied.sort((a, b) => a.localeCompare(b))[0];
+}
+
+// 404면 'image'가 들어간 gemini 이미지 모델 중 최신을 고른다. (imagen은 :predict라 제외)
+function imageModelScore(id) {
+  const s = String(id || '');
+  if (!/^gemini/i.test(s) || !/image/i.test(s)) return -1;
+  let score = modelVersion(s) * 100;
+  if (/-image$/.test(s)) score += 20;
+  if (/preview|exp/i.test(s)) score -= 10;
+  return score;
+}
+
+export function pickImageModel(ids = []) {
+  const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+  const scored = list.map((id) => ({ id, score: imageModelScore(id) })).filter((x) => x.score > 0);
+  if (!scored.length) return '';
+  const best = Math.max(...scored.map((x) => x.score));
+  const tied = scored.filter((x) => x.score === best).map((x) => x.id);
+  for (const name of IMAGE_MODEL_CANDIDATES) if (tied.includes(name)) return name;
+  return tied.sort((a, b) => a.localeCompare(b))[0];
+}
+
+// 404 뒤에 부를 목록 조회. 실패해도 예외를 던지지 않는다(정적 후보로 계속 시도).
+async function discoverModels(apiKey, kind, timeoutMs) {
+  try {
+    const { version, models } = await listGeminiModels(apiKey, { timeoutMs: Math.min(timeoutMs || 12000, 12000) });
+    const usable = models.filter((m) => m.methods.includes('generateContent')).map((m) => m.id);
+    const preferred = kind === 'image' ? pickImageModel(usable) : pickTextModel(usable);
+    return { ok: true, version, ids: usable, preferred };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'models_failed', ids: [], preferred: '' };
+  }
+}
+
+function geminiError(attempt) {
+  const err = new Error(attempt?.reason || 'gemini_failed');
+  err.status = attempt?.status || 0;
+  err.detail = attempt?.detail || '';
+  return err;
+}
+
 // ```json ... ``` 울타리·앞뒤 설명이 섞여도 JSON만 뽑아낸다.
 export function parseGeminiJson(raw) {
   const text = String(raw || '').trim();
@@ -73,31 +315,52 @@ function photoParts(photos = []) {
     .filter(Boolean);
 }
 
+// 텍스트 호출 — 기억한 모델 → 알려진 이름 → (404면) 실제 모델 목록 순서.
+// 429·500처럼 모델을 바꿔도 같은 오류는 다른 모델을 시도하지 않고 바로 알린다.
 export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature = 0.2 }) {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('no_key');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: { temperature, responseMimeType: 'application/json' },
-      }),
-    });
-    if (!res.ok) throw new Error(`gemini_http_${res.status}`);
-    const data = await res.json();
-    const raw = (data?.candidates?.[0]?.content?.parts || [])
-      .map((p) => p?.text || '')
-      .filter(Boolean)
-      .join('\n');
-    return { raw, json: parseGeminiJson(raw) };
-  } finally {
-    clearTimeout(timer);
+  const body = {
+    contents: [{ role: 'user', parts }],
+    generationConfig: { temperature, responseMimeType: 'application/json' },
+  };
+
+  const cache = readModelCache(key);
+  const firstModel = cache.text || TEXT_MODEL_CANDIDATES[0];
+  let attempt = await postGenerate(key, firstModel, body, timeoutMs, cache.version);
+  const tried = [firstModel];
+
+  if (!attempt.ok && attempt.notFound) {
+    const found = await discoverModels(key, 'text', timeoutMs);
+    const queue = [];
+    if (found.ok) {
+      if (found.preferred) queue.push(found.preferred);
+      // 목록에서 flash 계열을 최신순으로, 그다음 알려진 이름
+      const ranked = found.ids
+        .map((id) => ({ id, score: textModelScore(id) }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((x) => x.id);
+      queue.push(...ranked);
+    }
+    queue.push(...TEXT_MODEL_CANDIDATES);
+    for (const model of queue) {
+      if (!model || tried.includes(model)) continue;
+      if (tried.length >= 4) break;
+      tried.push(model);
+      attempt = await postGenerate(key, model, body, timeoutMs, found.ok ? found.version : '');
+      if (attempt.ok) break;
+      if (!attempt.notFound) break;
+    }
   }
+
+  if (!attempt.ok) throw geminiError(attempt);
+  rememberModel(key, 'text', attempt.model, cache.version);
+  const raw = (attempt.data?.candidates?.[0]?.content?.parts || [])
+    .map((p) => p?.text || '')
+    .filter(Boolean)
+    .join('\n');
+  return { raw, json: parseGeminiJson(raw), model: attempt.model };
 }
 
 
@@ -281,24 +544,37 @@ export async function analyzeSurveyWithGemini({ apiKey, memo = '', photos = [], 
   }
 }
 
+// 실패 이유를 사장님이 읽을 수 있는 한 줄로 바꾼다.
+function geminiHint(e) {
+  const status = Number(e?.status) || 0;
+  const reason = String(e?.message || '');
+  if (reason === 'no_key') return '';
+  if (status === 404) return '이 키로 쓸 수 있는 모델을 찾지 못했습니다. 잠시 뒤 다시 누르거나 키 발급 페이지에서 새 키를 만들어 보세요.';
+  if (status === 400) return '키가 올바르지 않거나 Gemini API에서 쓸 수 없는 키입니다. 키를 다시 확인하세요.';
+  if (status === 403) return '이 키에 Gemini API 사용 권한이 없습니다. Google AI Studio에서 API 사용 설정을 확인하세요.';
+  if (status === 429) return '무료 사용량 한도를 넘었습니다. 잠시 후 다시 시도하세요.';
+  if (reason === 'timeout') return '응답이 없습니다. 인터넷 연결을 확인하고 다시 눌러 주세요.';
+  return '';
+}
+
+// 연결 테스트 — 실제로 어떤 모델에 붙었는지(model)까지 돌려준다.
 export async function testGeminiKey(apiKey) {
   const key = String(apiKey || '').trim();
   if (!key) return { ok: false, reason: 'no_key' };
   try {
-    const { json } = await callGemini({
+    const { model } = await callGemini({
       apiKey: key,
-      parts: [{ text: 'JSON만 답해. {"ok":true,"model":"gemini-2.5-flash"}' }],
+      parts: [{ text: 'JSON만 답해. {"ok":true}' }],
       timeoutMs: 15000,
     });
-    return { ok: true, model: json?.model || MODEL };
+    return { ok: true, model: model || 'gemini' };
   } catch (e) {
-    return { ok: false, reason: e?.message || 'failed' };
+    return { ok: false, reason: e?.message || 'failed', status: e?.status || 0, detail: e?.detail || '', hint: geminiHint(e) };
   }
 }
 
 // ---- Before → After 완공 예상 이미지 ----
-// 이미지 모델은 응답 형태가 달라서 모델을 바꿔가며 시도한다.
-const IMAGE_MODELS = ['gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'];
+// 이미지 모델은 응답 형태가 달라서 모델을 바꿔가며 시도한다(404면 목록에서 자동 탐색).
 
 function afterPrompt(caseInfo = {}, style = {}) {
   const trade = caseInfo.tradeLabel || caseInfo.trade || '인테리어';
@@ -350,36 +626,53 @@ export async function generateAfterPreview({ apiKey, beforeImage, caseInfo = {},
     generationConfig: { responseModalities: ['IMAGE', 'TEXT'], temperature: 0.4 },
   };
 
+  const cache = readModelCache(key);
+  const tried = [];
   let lastReason = 'failed';
-  for (const model of IMAGE_MODELS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify(body),
-        }
-      );
-      if (!res.ok) {
-        lastReason = `http_${res.status}`;
-        continue;
+  let version = cache.version;
+  let worthDiscovering = false;
+
+  const tryModel = async (model) => {
+    if (!model || tried.includes(model)) return null;
+    tried.push(model);
+    const r = await postGenerate(key, model, body, timeoutMs, version);
+    lastReason = r.ok ? 'no_image_in_response' : r.reason;
+    return r;
+  };
+
+  const accept = (r) => {
+    if (!r || !r.ok) return null;
+    const dataUrl = extractInlineImage(r.data);
+    if (!dataUrl) return null;
+    rememberModel(key, 'image', r.model, version);
+    return { ok: true, dataUrl, model: r.model };
+  };
+
+  // 1) 기억한 이미지 모델 → 알려진 이미지 모델
+  const firstModels = [...new Set([cache.image, ...IMAGE_MODEL_CANDIDATES].filter(Boolean))];
+  for (const model of firstModels) {
+    const r = await tryModel(model);
+    const good = accept(r);
+    if (good) return good;
+    if (!r) continue;
+    if (r.ok || (!r.notFound && r.status !== 400)) break; // 응답은 왔는데 이미지가 없거나 429·500이면 모델을 바꿔도 같다
+    if (r.notFound || r.status === 400) worthDiscovering = true;
+  }
+
+  // 2) 404·400이면 실제 목록에서 이미지 모델 자동 탐색
+  if (worthDiscovering) {
+    const found = await discoverModels(key, 'image', timeoutMs);
+    if (found.ok) {
+      version = found.version;
+      const queue = [found.preferred, ...found.ids.filter((id) => imageModelScore(id) > 0)];
+      for (const model of queue) {
+        const r = await tryModel(model);
+        const good = accept(r);
+        if (good) return good;
+        if (r && !r.ok && !r.notFound && r.status !== 400) break;
       }
-      const data = await res.json();
-      const dataUrl = extractInlineImage(data);
-      if (!dataUrl) {
-        lastReason = 'no_image_in_response';
-        continue;
-      }
-      return { ok: true, dataUrl, model };
-    } catch (e) {
-      lastReason = e?.message || 'network';
-    } finally {
-      clearTimeout(timer);
     }
   }
+
   return { ok: false, reason: lastReason };
 }

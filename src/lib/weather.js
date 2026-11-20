@@ -1,5 +1,6 @@
 // 무료·무인증 날씨 (Open-Meteo). 실패하면 조용히 넘어가고 앱은 계속 동작한다.
 import { REGIONS } from './constants.js';
+import { korMonthDay } from './date.js';
 
 const COORDS = {
   안동: { lat: 36.5684, lon: 128.7294 },
@@ -48,8 +49,8 @@ function emojiFor(code) {
 const dayLabel = (iso, idx) => {
   if (idx === 0) return '오늘';
   if (idx === 1) return '내일';
-  const d = new Date(`${iso}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? iso.slice(5) : `${d.getMonth() + 1}/${d.getDate()}`;
+  const md = korMonthDay(iso);
+  return md === iso ? String(iso).slice(5) : md;
 };
 
 export async function fetchWeather(region, { days = 4 } = {}) {

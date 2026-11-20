@@ -142,6 +142,15 @@ export const RATE_FIELDS = [
   },
 ];
 
+// 1평 = 3.305785㎡ — ㎡ 단가를 평당으로 바꿔 암산 없이 보여준다.
+const SQM_PER_PYEONG = 3.305785;
+export function perPyeong(perSqm) {
+  const v = Number(perSqm) * SQM_PER_PYEONG;
+  if (!Number.isFinite(v) || v <= 0) return '0';
+  const rounded = Math.round(v * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 export function cloneRates(rates) {
   return JSON.parse(JSON.stringify(rates));
 }

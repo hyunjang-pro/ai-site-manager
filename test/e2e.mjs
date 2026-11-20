@@ -9,7 +9,9 @@ import { cleanOcrText, evaluateOcr, scenePhotoNote } from '../src/lib/ocr.js';
 import { classifyRequest, summarizeRequest } from '../src/lib/classify.js';
 import { surveyWasteDrafts } from '../src/lib/parse.js';
 import { wasteVehicle } from '../src/lib/waste.js';
-import { kstToday, addDaysISO, korDateLabel } from '../src/lib/date.js';
+import { kstToday, addDaysISO, korDateLabel, korMonthDay } from '../src/lib/date.js';
+import { pickTextModel, pickImageModel, GEMINI_MODEL_STORAGE } from '../src/lib/gemini.js';
+import { perPyeong } from '../src/lib/rates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '..', 'dist');
@@ -54,10 +56,8 @@ async function step(name, fn) {
 }
 
 const TODAY = kstToday();
-const mmdd = (iso) => {
-  const d = new Date(`${iso}T00:00:00+09:00`);
-  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
-};
+// 시공일 날씨 카드의 '11/21' 표기 — UTC/KST 어긋남 없이 (예전 getUTCDate 방식은 하루 밀렸다)
+const mmdd = (iso) => korMonthDay(iso);
 
 // 1x1 PNG (모킹된 이미지 응답용)
 const PNG_1PX =
@@ -170,6 +170,42 @@ async function main() {
     record('날짜: 한글 라벨', /^\d{1,2}\/\d{1,2}\([일월화수목금토]\)$/.test(korDateLabel(TODAY)), korDateLabel(TODAY));
   });
 
+  // 34-build.png: 11/21 선택 → 11/20(금) 로 하루 밀리던 버그의 회귀 테스트
+  await step('단위: 날짜가 하루 밀리지 않는지', async () => {
+    const fixed = [
+      ['2026-11-21', '11/21(토)'],
+      ['2026-11-20', '11/20(금)'],
+      ['2026-11-22', '11/22(일)'],
+      ['2026-01-01', '1/1(목)'],
+      ['2024-02-29', '2/29(목)'],
+    ];
+    for (const [iso, want] of fixed) record(`날짜: ${iso} → ${want}`, korDateLabel(iso) === want, korDateLabel(iso));
+    record('날짜: 월말 +1일', addDaysISO('2026-11-30', 1) === '2026-12-01', addDaysISO('2026-11-30', 1));
+    record('날짜: 연말 +1일', addDaysISO('2026-12-31', 1) === '2027-01-01', addDaysISO('2026-12-31', 1));
+    record('날짜: 윤년 2/28 +1일', addDaysISO('2024-02-28', 1) === '2024-02-29', addDaysISO('2024-02-28', 1));
+    record('날짜: 이틀 뒤 라벨', korDateLabel(addDaysISO('2026-11-21', 2)) === '11/23(월)', korDateLabel(addDaysISO('2026-11-21', 2)));
+    record('날짜: 잘못된 값은 그대로', korDateLabel('') === '' && korDateLabel('2026-2-3') === '2026-2-3');
+  });
+
+  // gemini_http_404 대응: 목록에서 실제 쓸 수 있는 모델을 고르는지
+  await step('단위: Gemini 모델 자동 선택', async () => {
+    record('모델: 알려진 이름 우선', pickTextModel(['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro']) === 'gemini-2.5-flash');
+    record('모델: 더 새 flash가 있으면 그것', pickTextModel(['gemini-2.0-flash', 'gemini-3.0-flash']) === 'gemini-3.0-flash', pickTextModel(['gemini-2.0-flash', 'gemini-3.0-flash']));
+    record('모델: lite는 flash보다 뒤', pickTextModel(['gemini-2.5-flash-lite', 'gemini-2.0-flash']) === 'gemini-2.0-flash', pickTextModel(['gemini-2.5-flash-lite', 'gemini-2.0-flash']));
+    record('모델: pro는 고르지 않음', pickTextModel(['gemini-2.5-pro', 'gemini-2.5-flash-lite']) === 'gemini-2.5-flash-lite', pickTextModel(['gemini-2.5-pro', 'gemini-2.5-flash-lite']));
+    record('모델: 이미지 모델은 텍스트에서 제외', pickTextModel(['gemini-2.5-flash-image', 'gemini-2.0-flash']) === 'gemini-2.0-flash', pickTextModel(['gemini-2.5-flash-image', 'gemini-2.0-flash']));
+    record('모델: 이미지 모델 선택', pickImageModel(['gemini-3.0-flash-image', 'gemini-2.0-flash']) === 'gemini-3.0-flash-image', pickImageModel(['gemini-3.0-flash-image', 'gemini-2.0-flash']));
+    record('모델: 이미지 모델 없으면 빈 값', pickImageModel(['gemini-2.5-flash', 'imagen-4.0-generate-001']) === '', pickImageModel(['gemini-2.5-flash', 'imagen-4.0-generate-001']));
+  });
+
+  // 만원/㎡ → 평당(3.305785㎡) 암산 없이
+  await step('단위: ㎡ 단가를 평당으로', async () => {
+    record('평당: 타일 시공 4.5 → 14.9', perPyeong(4.5) === '14.9', perPyeong(4.5));
+    record('평당: 창호 28 → 92.6', perPyeong(28) === '92.6', perPyeong(28));
+    record('평당: 미장 2.8 → 9.3', perPyeong(2.8) === '9.3', perPyeong(2.8));
+    record('평당: 빈 값은 0', perPyeong('') === '0' && perPyeong(undefined) === '0');
+  });
+
   // ---------- 1. 브라우저 ----------
   const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR', deviceScaleFactor: 1 });
@@ -198,6 +234,11 @@ async function main() {
     if (await back.count()) await back.first().click();
     await page.waitForTimeout(350);
   };
+  const openSettings = async () => {
+    await goHome();
+    await page.getByLabel('설정').click();
+    await page.getByText('AI 정밀 분석 (무료 Gemini API 키)').waitFor();
+  };
   const consoleErrors = [];
   page.on('console', (m) => {
     if (m.type() === 'error') consoleErrors.push(m.text());
@@ -206,7 +247,7 @@ async function main() {
 
   // Gemini 모킹 (키가 있을 때) — 이미지/답사/현장분석 응답을 나눠 보낸다.
   let geminiCalls = 0;
-  await context.route('https://generativelanguage.googleapis.com/**', async (route) => {
+  const geminiMock = async (route) => {
     geminiCalls += 1;
     let body = {};
     try {
@@ -225,7 +266,8 @@ async function main() {
       payload = { candidates: [{ content: { parts: [{ text: '```json\n' + JSON.stringify(CASE_JSON) + '\n```' }] } }] };
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
-  });
+  };
+  await context.route('https://generativelanguage.googleapis.com/**', geminiMock);
 
   // Open-Meteo 모킹 — 오늘(KST)부터 16일
   await context.route('https://api.open-meteo.com/**', (route) => {
@@ -614,6 +656,123 @@ async function main() {
     await page.waitForTimeout(500);
     const savedKey = await page.evaluate(() => localStorage.getItem('aiSiteManager.geminiKey'));
     record('설정: 키가 이 기기에 저장됨', savedKey === 'AIzaTESTKEY123', String(savedKey));
+  });
+
+  // IMG_1545: gemini-2.5-flash 가 404를 돌려주는 키 — 목록에서 쓸 수 있는 모델을 찾아 붙는지.
+  const geminiModelMock = ({ list, open }) => async (route) => {
+    const req = route.request();
+    const url = req.url();
+    if (req.method() === 'GET' && /\/models(\?|$)/.test(url)) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ models: list }) });
+    }
+    const name = decodeURIComponent((url.match(/\/models\/([^:]+):generateContent/) || [])[1] || '');
+    if (open.includes(name)) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+      });
+    }
+    return route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 404, message: `models/${name} is not found for API version v1beta, or is not supported for generateContent.`, status: 'NOT_FOUND' },
+      }),
+    });
+  };
+
+  await step('Gemini — 404가 나도 쓸 수 있는 모델로 자동 전환', async () => {
+    await context.route(
+      'https://generativelanguage.googleapis.com/**',
+      geminiModelMock({
+        list: [
+          { name: 'models/gemini-2.0-flash', supportedGenerationMethods: ['generateContent', 'countTokens'] },
+          { name: 'models/gemini-2.0-flash-lite', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
+        ],
+        open: ['gemini-2.0-flash'],
+      })
+    );
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    await openSettings();
+    await page.getByLabel('Gemini API 키').fill('AIzaTESTKEY123');
+    await page.getByRole('button', { name: '연결 테스트' }).click();
+    await page.getByText('연결됨', { exact: false }).waitFor({ timeout: 20000 });
+    const said = await page.locator('[role=dialog]').innerText();
+    record('404: 쓸 수 있는 모델로 연결', said.includes('연결됨 · gemini-2.0-flash'), said.match(/연결됨[^\n]*/)?.[0] || '');
+    record('404: 키가 잘못됐다는 안내가 아님', !said.includes('github') && !said.includes('실패 ('));
+    const cached = await page.evaluate((k) => sessionStorage.getItem(k), GEMINI_MODEL_STORAGE);
+    record('404: 고른 모델을 기억', String(cached || '').includes('gemini-2.0-flash'), String(cached || ''));
+    await shot('49-gemini-404-fallback.png');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  await step('Gemini — 이름이 바뀜 새 모델도 목록에서 찾음', async () => {
+    await context.route(
+      'https://generativelanguage.googleapis.com/**',
+      geminiModelMock({
+        list: [
+          { name: 'models/gemini-3.0-pro', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/gemini-3.0-flash', supportedGenerationMethods: ['generateContent', 'countTokens'] },
+        ],
+        open: ['gemini-3.0-flash'],
+      })
+    );
+    await page.evaluate((k) => sessionStorage.removeItem(k), GEMINI_MODEL_STORAGE);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    await openSettings();
+    await page.getByLabel('Gemini API 키').fill('AIzaTESTKEY123');
+    await page.getByRole('button', { name: '연결 테스트' }).click();
+    await page.getByText('연결됨', { exact: false }).waitFor({ timeout: 20000 });
+    const said2 = await page.locator('[role=dialog]').innerText();
+    record('탐색: 목록에서 새 flash 모델 선택', said2.includes('연결됨 · gemini-3.0-flash'), said2.match(/연결됨[^\n]*/)?.[0] || '');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  await step('설정 — 상호 입력칸을 한 곳으로', async () => {
+    await context.route('https://generativelanguage.googleapis.com/**', geminiMock);
+    await page.evaluate((k) => sessionStorage.removeItem(k), GEMINI_MODEL_STORAGE);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    await openSettings();
+    const modal = page.locator('[role=dialog]');
+    const modalTxt = await modal.innerText();
+    record('설정: 업체 상호 입력칸 1개', (await page.getByLabel('업체 상호').count()) === 1, String(await page.getByLabel('업체 상호').count()));
+    record('설정: 상호 칸에 사업장 이름 표기', modalTxt.includes('상호 (사업장 이름)'));
+    record('설정: 같은 상호칸 중복 없음', (await page.getByPlaceholder('예) ○○철거·인테리어').count()) === 1, String(await page.getByPlaceholder('예) ○○철거·인테리어').count()));
+    await page.getByLabel('업체 상호').fill('안동가족철거');
+    await page.getByRole('button', { name: '저장하기' }).click();
+    await page.waitForTimeout(600);
+    const stored = JSON.parse((await page.evaluate(() => localStorage.getItem('aiSiteManager.v1'))) || '{}');
+    record('설정: 상호가 사업장 이름으로도 저장', stored?.settings?.businessName === '안동가족철거', String(stored?.settings?.businessName));
+    const sup = JSON.parse((await page.evaluate(() => localStorage.getItem('aiSiteManager.supplier'))) || '{}');
+    record('설정: 업체 정보에 상호 저장', sup?.name === '안동가족철거', String(sup?.name));
+  });
+
+  await step('설정 — 스크롤해도 붙는 상단 헤더·평당 환산', async () => {
+    await openSettings();
+    const modal = page.locator('[role=dialog]');
+    const scroller = modal.locator('div.overflow-y-auto').first();
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(500);
+    const head = modal.locator('.modal-top');
+    const box = await head.boundingBox();
+    const stuck = !!box && box.y > -1 && box.y + box.height <= 845;
+    record('설정: 스크롤해도 상단 헤더 그대로', stuck, box ? `y=${Math.round(box.y)} h=${Math.round(box.height)}` : '헤더 없음');
+    const headTxt = await head.innerText();
+    record('설정: 헤더에 [← 닫기]·설정', headTxt.includes('설정') && headTxt.includes('닫기'), headTxt.replace(/\n/g, ' '));
+    record('설정: 평당 환산 5곳', (await modal.getByText(/\(평당 약 [\d.]+만\)/).count()) === 5, String(await modal.getByText(/\(평당 약 [\d.]+만\)/).count()));
+    record('설정: 타일 시공 4.5 → (평당 약 14.9만)', (await modal.getByText('(평당 약 14.9만)').count()) >= 1);
+    await shot('50-settings-sticky.png');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
   });
 
   await step('Gemini — 새 현장 정밀 분석', async () => {

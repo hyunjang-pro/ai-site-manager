@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowUpFromLine, ExternalLink, HardHat, Loader2, MapPin, Truck } from 'lucide-react';
 import { BUFFER_OPTIONS, REGIONS } from '../lib/constants.js';
-import { DEFAULT_RATES, RATE_FIELDS, cloneRates, getRate, mergeRates, setRate } from '../lib/rates.js';
+import { DEFAULT_RATES, RATE_FIELDS, cloneRates, getRate, mergeRates, perPyeong, setRate } from '../lib/rates.js';
 import { resetState } from '../lib/storage.js';
 import { GEMINI_KEY_URL, getGeminiKey, setGeminiKey, testGeminiKey } from '../lib/gemini.js';
 import { getSupplier, saveSupplier } from '../lib/supplier.js';
@@ -14,21 +14,31 @@ const GROUP_ICON = {
   '최소 공사비': MapPin,
 };
 
+// 1평 = 3.305785㎡ (환산은 lib/rates.js perPyeong)
+
 export default function SettingsModal({ open, onClose, state, setState, showToast }) {
   const [region, setRegion] = useState(state.settings.region || '안동');
-  const [businessName, setBusinessName] = useState(state.settings.businessName || '');
   const [apiKey, setApiKey] = useState(state.settings.apiKey || getGeminiKey() || '');
-  const [aiTest, setAiTest] = useState(null); // null | 'busy' | {ok, msg}
+  const [aiTest, setAiTest] = useState(null); // null | 'busy' | {ok, msg, hint}
   const runAiTest = async () => {
     setAiTest('busy');
     const res = await testGeminiKey(apiKey);
-    setAiTest(res.ok ? { ok: true, msg: `연결됨 · ${res.model}` } : { ok: false, msg: `실패 (${res.reason})` });
+    setAiTest(res.ok ? { ok: true, msg: `연결됨 · ${res.model}` } : { ok: false, msg: `실패 (${res.reason})`, hint: res.hint || '' });
   };
   const [agencyFeeRate, setAgencyFeeRate] = useState(state.settings.agencyFeeRate ?? 10);
-  const [supplier, setSupplier] = useState(() => getSupplier());
+  // 상호는 '우리 업체 정보' 한 곳에서만 받는다(예전에 따로 있던 '상호(사업장 이름)' 칸은 통합).
+  // 예전에 그 칸에 직접 적어 둔 이름이 있으면 업체 상호로 옮겨 온다(기본값 '경북 철거·인테리어'는 제외).
+  const [supplier, setSupplier] = useState(() => {
+    const saved = getSupplier();
+    const legacy = String(state.settings.businessName || '').trim();
+    const carried = legacy && legacy !== '경북 철거·인테리어' ? legacy : '';
+    return { ...saved, name: saved.name || carried };
+  });
   const [rates, setRates] = useState(() => mergeRates(DEFAULT_RATES, state.settings.rates || {}));
 
   const save = () => {
+    const businessName = String(supplier.name || '').trim();
+    const supplierInfo = { ...supplier, name: businessName };
     setState((prev) => ({
       ...prev,
       settings: {
@@ -42,7 +52,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
       },
     }));
     setGeminiKey(apiKey.trim());
-    saveSupplier(supplier);
+    saveSupplier(supplierInfo);
     showToast(apiKey.trim() ? '설정을 저장했습니다 — AI 정밀 분석이 켜졌습니다' : '설정을 저장했습니다 (로컬 규칙 모드)');
     onClose();
   };
@@ -52,6 +62,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
       open={open}
       onClose={onClose}
       title="설정"
+      backLabel="닫기"
       footer={
         <BigButton className="w-full" onClick={save}>
           저장하기
@@ -101,10 +112,13 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
           </a>
         </div>
         {aiTest && aiTest !== 'busy' ? (
-          <p className={cx('mt-1.5 text-2xs font-extrabold', aiTest.ok ? 'text-emerald-700' : 'text-rose-700')}>
-            {aiTest.ok ? '✅ ' : '⚠ '}
-            {aiTest.msg}
-          </p>
+          <div className="mt-1.5">
+            <p className={cx('text-2xs font-extrabold', aiTest.ok ? 'text-emerald-700' : 'text-rose-700')}>
+              {aiTest.ok ? '✅ ' : '⚠ '}
+              {aiTest.msg}
+            </p>
+            {!aiTest.ok && aiTest.hint ? <p className="mt-0.5 text-2xs font-semibold leading-4 text-rose-700/80">{aiTest.hint}</p> : null}
+          </div>
         ) : null}
         <p className="mt-1.5 text-2xs font-semibold leading-4 text-ink-3">
           키는 이 기기 브라우저(localStorage)에만 저장됩니다. 코드·서버로 보내지 않습니다.
@@ -125,7 +139,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
         <p className="text-base font-extrabold text-ink">우리 업체 정보 (공급자)</p>
         <p className="mt-1 text-xs leading-5 text-ink-3">한 번 저장하면 모든 현장의 견적서·점포철거비 공사내역서·공사 안내문에 자동으로 들어갑니다.</p>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <Field label="상호"><TextInput value={supplier.name} onChange={(e) => setSupplier({ ...supplier, name: e.target.value })} aria-label="업체 상호" /></Field>
+          <Field label="상호 (사업장 이름)"><TextInput value={supplier.name} onChange={(e) => setSupplier({ ...supplier, name: e.target.value })} placeholder="예) ○○철거·인테리어" aria-label="업체 상호" /></Field>
           <Field label="대표자"><TextInput value={supplier.owner} onChange={(e) => setSupplier({ ...supplier, owner: e.target.value })} aria-label="업체 대표자" /></Field>
           <Field label="사업자등록번호"><TextInput value={supplier.bizNo} onChange={(e) => setSupplier({ ...supplier, bizNo: e.target.value })} inputMode="numeric" aria-label="업체 사업자번호" /></Field>
           <Field label="연락처"><TextInput value={supplier.phone} onChange={(e) => setSupplier({ ...supplier, phone: e.target.value })} inputMode="tel" aria-label="업체 연락처" /></Field>
@@ -133,10 +147,6 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
           <Field label="입금 계좌" className="col-span-2"><TextInput value={supplier.account || ''} onChange={(e) => setSupplier({ ...supplier, account: e.target.value })} placeholder="예) 농협 123-4567-8901 (예금주)" aria-label="업체 계좌" /></Field>
         </div>
       </div>
-
-      <Field label="상호(사업장 이름)">
-        <TextInput value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="예) ○○철거·인테리어" />
-      </Field>
 
       <div className="rounded-2xl border-2 border-blue-900/10 bg-white p-3.5">
         <p className="flex items-center gap-1.5 text-base font-extrabold text-ink">🛡️ 보수적 견적 보호</p>
@@ -184,6 +194,11 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
                         aria-label={f.label}
                         className="num w-full border-0 bg-transparent p-0 text-base font-extrabold text-ink outline-none focus:ring-0"
                       />
+                      {String(f.unit).includes('㎡') ? (
+                        <span className="mt-0.5 block text-[10px] font-bold leading-3 text-brand/80">
+                          (평당 약 {perPyeong(getRate(rates, f.path))}만)
+                        </span>
+                      ) : null}
                     </label>
                   ))}
                 </div>

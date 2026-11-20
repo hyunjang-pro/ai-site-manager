@@ -1,14 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { CalendarDays, CloudSun } from 'lucide-react';
 import { fetchWeather, seasonalNote } from '../lib/weather.js';
-import { addDaysISO, kstToday } from '../lib/date.js';
+import { addDaysISO, kstToday, korMonthDay, korMonth } from '../lib/date.js';
 import { Card, Pill } from './ui.jsx';
 
-const fmt = (iso) => {
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-};
+const fmt = (iso) => korMonthDay(iso);
 
 export default function WeatherStrip({ region, startDate, days = 3 }) {
   const [data, setData] = useState(null);
@@ -71,7 +67,7 @@ export default function WeatherStrip({ region, startDate, days = 3 }) {
   }
 
   const inRange = data.list.filter((d) => d.date >= startDate && d.date <= endDate);
-  const season = seasonalNote(new Date(`${startDate}T00:00:00`).getMonth() + 1);
+  const season = seasonalNote(korMonth(startDate));
 
   // 예보 범위 밖(16일 이후)이면 계절 기준 안내
   if (!inRange.length) {
