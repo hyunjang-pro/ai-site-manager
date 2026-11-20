@@ -266,7 +266,8 @@ function BidDetail({ bid, onClose, onImport }) {
       </div>
 
       <div className="rounded-2xl bg-slate-50 p-3.5">
-        <p className="text-sm leading-6 text-ink-2">{bid.summary}</p>
+        <h3 className="text-base font-extrabold leading-6 text-ink">{bid.title}</h3>
+        <p className="mt-1 text-sm leading-6 text-ink-2">{bid.summary}</p>
         <p className="mt-1.5 text-2xs font-bold text-amber-700">{bid.note}</p>
       </div>
 
