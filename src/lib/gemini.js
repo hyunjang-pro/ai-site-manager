@@ -327,11 +327,13 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
 
   const cache = readModelCache(key);
   const firstModel = cache.text || TEXT_MODEL_CANDIDATES[0];
-  let attempt = await postGenerate(key, firstModel, body, timeoutMs, cache.version);
+  let usedVersion = cache.version;
+  let attempt = await postGenerate(key, firstModel, body, timeoutMs, usedVersion);
   const tried = [firstModel];
 
   if (!attempt.ok && attempt.notFound) {
     const found = await discoverModels(key, 'text', timeoutMs);
+    if (found.ok) usedVersion = found.version;
     const queue = [];
     if (found.ok) {
       if (found.preferred) queue.push(found.preferred);
@@ -348,14 +350,14 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
       if (!model || tried.includes(model)) continue;
       if (tried.length >= 4) break;
       tried.push(model);
-      attempt = await postGenerate(key, model, body, timeoutMs, found.ok ? found.version : '');
+      attempt = await postGenerate(key, model, body, timeoutMs, usedVersion);
       if (attempt.ok) break;
       if (!attempt.notFound) break;
     }
   }
 
   if (!attempt.ok) throw geminiError(attempt);
-  rememberModel(key, 'text', attempt.model, cache.version);
+  rememberModel(key, 'text', attempt.model, usedVersion);
   const raw = (attempt.data?.candidates?.[0]?.content?.parts || [])
     .map((p) => p?.text || '')
     .filter(Boolean)
