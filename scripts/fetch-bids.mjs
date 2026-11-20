@@ -18,7 +18,7 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'src', 'data', 'bids.json');
 const DRY = process.argv.includes('--dry-run');
 const STRONG = /철거|해체|도배|장판|타일|방수|미장|수선|개보수|리모델링|인테리어|폐기물|창호|샤시|폴딩|석면|화장실|교실|사무실|청사|복지센터|주택|아파트|상가|건물/;
-const EXCLUDE = /교량|배수로|포장공|농로|하천|사면|도로|가로수|조경|산림|벌채|사방|용수|관로|상수|하수|펌프|전기공|소방|통신|냉난방|승강기|가스|지붕|외벽|정비공사|준설|관급|감리|설계/;
+const EXCLUDE = /교량|배수로|포장공|농로|하천|사면|도로|가로수|조경|산림|벌채|사방|용수|관로|상수|하수|펌프|전기|기계설비|소방|통신|냉난방|승강기|가스|지붕|외벽|암거|안전시설|정비공사|준설|관급|감리|설계/;
 const KEYWORD = { test: (t) => STRONG.test(t) && !EXCLUDE.test(t) };
 const UA = { 'User-Agent': 'ai-site-manager-bid-collector/1.0 (+personal use; contact via site)' };
 
