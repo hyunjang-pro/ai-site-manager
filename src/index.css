@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    font-family: Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic',
+      system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    background: #d6e9ff;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary {
+    list-style: none;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+  }
+  input[type='range'] {
+    accent-color: #3182f6;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+  strong,
+  b {
+    font-weight: 700;
+  }
+}
+
+@layer components {
+  .field-input {
+    @apply w-full min-h-14 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-slate-400;
+  }
+  .field-input:focus {
+    @apply border-brand bg-white ring-4 ring-brand/10;
+  }
+  .chip {
+    @apply inline-flex min-h-12 items-center justify-center rounded-xl border px-3.5 text-sm font-bold transition;
+  }
+  .card {
+    @apply rounded-2xl border border-slate-200/70 bg-white shadow-card;
+  }
+  /* 진한 네이비 히어로 — 시선이 바로 꽂히는 핵심 카드 */
+  .hero-card {
+    background-image: linear-gradient(135deg, #0a1120 0%, #0f1d36 48%, #0b2f66 100%);
+    background-color: #0f1d36;
+    box-shadow: 0 20px 44px -20px rgba(3, 18, 48, 0.7);
+  }
+  .hero-card .num {
+    letter-spacing: -0.03em;
+  }
+  /* 모달 시트 — 사파리 하단 바와 겹치지 않는 여백 */
+  .modal-sheet {
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  .modal-top {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  .modal-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .bottom-bar {
+    padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .hairline {
+    @apply border-slate-200/70;
+  }
+}
+
+/* 인쇄(견적서 PDF 저장) */
+@media (max-width: 420px) {
+  /* 작은 폰에서도 숫자가 한 줄에 들어가게 */
+  .hero-card .num {
+    font-size: 34px;
+    line-height: 42px;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
