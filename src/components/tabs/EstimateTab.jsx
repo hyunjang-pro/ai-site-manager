@@ -605,6 +605,8 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
             <p className="text-sm font-extrabold text-ink">빠진 비용 체크</p>
             {missingNow.length ? <Pill tone="bad">{missingNow.length}가지 빠짐</Pill> : <Pill tone="ok">모두 반영</Pill>}
           </div>
+          {/* 다 반영됐으면 목록을 접어 스크롤을 줄인다 (3단계 '빠뜨리기 쉬운 비용'과 중복 방지) */}
+          {missingNow.length ? (
           <div className="grid grid-cols-2 gap-1.5">
             {verify.missing.map((m) => (
               <div
@@ -620,11 +622,16 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
               </div>
             ))}
           </div>
+          ) : null}
           {missingNow.length ? (
             <BigButton className="mt-2 w-full" onClick={fillMissing}>
               <Wand2 className="h-5 w-5" /> 빠진 비용 한 번에 넣기 ({missingNow.length}가지)
             </BigButton>
-          ) : null}
+          ) : (
+            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-2xs font-bold leading-4 text-emerald-800">
+              보양·폐기물·양중·관리실 신고·준공 청소까지 견적에 들어가 있습니다. 현장에서 달라진 것만 3. 답사에 적으세요.
+            </p>
+          )}
         </div>
 
         <div className="mt-3 rounded-2xl border border-amber-300 bg-amber-50 p-3">

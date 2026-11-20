@@ -512,7 +512,13 @@ function ChangeQuick({ c, update, calc, showToast }) {
     <SectionCard
       num="1"
       title="답사 메모·사진"
-      subtitle="글·사진만 넣으면 항목·금액·일정을 앱이 잡습니다. 예) “폐기물 두 차는 나올듯”, “벽에 물기 많아 방수 필요”"
+      subtitle={`글·사진만 넣으면 항목·금액·일정을 앱이 잡습니다. 예) ${
+        hasScope(c, 'demolition') || calc.trade === 'waste'
+          ? '“폐기물 두 차는 나올듯”, “집게차 하루 더 필요”'
+          : hasScope(c, 'bathroom')
+          ? '“아래집 누수 흔적 있음”, “배관도 갈아야 할듯”'
+          : '“자재 입고 하루 늦어짐”, “작업 범위 한 곳 추가”'
+      }`}
       status={<Pill tone={calc.adjustmentTotal === 0 ? 'plain' : calc.adjustmentTotal > 0 ? 'warn' : 'ok'}>누적 {calc.adjustmentTotal > 0 ? '+' : ''}{calc.adjustmentTotal}만</Pill>}
     >
       <div className="space-y-2.5">
@@ -520,7 +526,13 @@ function ChangeQuick({ c, update, calc, showToast }) {
           rows={2}
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
-          placeholder="예) 폐기물 두 차는 나올듯 / 벽에 물기 많아 방수 필요 / 한 차 더 나올 수 있음"
+          placeholder={`예) ${
+            hasScope(c, 'demolition') || calc.trade === 'waste'
+              ? '폐기물 두 차는 나올듯 / 집게차 하루 더 필요'
+              : hasScope(c, 'bathroom')
+              ? '아래집 누수 흔적 있음 / 배관도 갈아야 할듯'
+              : '자재 입고 하루 늦어짐 / 작업 범위 한 곳 추가'
+          }`}
           aria-label="현장 변동 내용"
         />
 
