@@ -1,0 +1,59 @@
+name: 공고 갱신 · gh-pages 배포
+
+on:
+  schedule:
+    - cron: '0 */4 * * *' # 4시간마다
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-bids
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      # G2B_API_KEY(공공데이터포털 서비스키)가 있으면 전국 공고까지, 없으면 경북 공개 목록으로 수집합니다.
+      - name: 나라장터·경북 공고 수집
+        env:
+          G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
+        run: node scripts/fetch-bids.mjs
+
+      - name: 변경분 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- src/data/bids.json; then
+            echo "변경 없음"
+          else
+            git add src/data/bids.json
+            git commit -m "chore: 관공서 공고 자동 갱신"
+            git push
+          fi
+
+      - run: npm run build
+
+      - name: gh-pages 배포
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          force_orphan: false
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
