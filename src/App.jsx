@@ -11,6 +11,7 @@ import { Toast, cx } from './components/ui.jsx';
 import { loadState, saveState, newCase } from './lib/storage.js';
 import { BIDS, bidStats, bidToCase } from './lib/bids.js';
 import { TRADES } from './lib/constants.js';
+import { autoCaseTitle } from './lib/classify.js';
 import { setGeminiKey } from './lib/gemini.js';
 
 export default function App() {
@@ -74,9 +75,12 @@ export default function App() {
       const merged = { ...created, ...clean };
       if (!clean.title) {
         const size = clean.sizeValue ? `${clean.sizeValue}${clean.sizeUnit || ''}` : '';
-        const tail = (clean.rawInput || '').trim() ? clean.rawInput.split('\n')[0].slice(0, 18) : TRADES[trade]?.label || '새 현장';
-        merged.title = `${clean.region || created.region} ${size} ${tail}`.replace(/\s+/g, ' ').trim() || '새 현장';
+        merged.title =
+          autoCaseTitle({ ...merged, region: clean.region || created.region }) ||
+          `${clean.region || created.region} ${size} ${TRADES[trade]?.label || '새 현장'}`.replace(/\s+/g, ' ').trim();
       }
+      // 자동으로 만든 제목 — 1단계에서 공종을 바꾸면 제목도 같이 맞춘다(직접 고치면 고정)
+      merged.titleAuto = true;
       setState((prev) => ({ ...prev, cases: [merged, ...prev.cases] }));
       setActiveId(merged.id);
       setTab(1);
@@ -130,7 +134,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-canvas">
+    <div className="min-h-[100dvh] bg-canvas">
       <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur no-print">
         <div className="mx-auto flex max-w-3xl items-center gap-2.5 px-4 py-2.5">
           {screen === 'case' || screen === 'bids' ? (

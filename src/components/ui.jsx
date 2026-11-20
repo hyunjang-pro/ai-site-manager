@@ -452,7 +452,7 @@ export function Modal({ open, onClose, title, children, footer, subtitle, onBack
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-900/50 backdrop-blur-[2px] sm:items-center sm:p-6 no-print">
-      <div role="dialog" aria-modal="true" aria-label={title} className="animate-rise modal-sheet flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-float sm:rounded-3xl">
+      <div role="dialog" aria-modal="true" aria-label={title} className="animate-rise modal-sheet flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-float sm:max-h-[88dvh] sm:rounded-3xl">
         {/* 상단 바 — 스크롤해도 절대 가려지지 않는다 */}
         <div className="modal-top flex shrink-0 items-center gap-2 border-b border-slate-200/70 bg-white/95 px-3 py-2.5 backdrop-blur">
           <button
@@ -477,8 +477,10 @@ export function Modal({ open, onClose, title, children, footer, subtitle, onBack
             <X className="h-5 w-5" strokeWidth={2.6} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-6 pt-4">{children}</div>
-        {footer ? <div className="shrink-0 border-t border-slate-100 bg-white px-5 py-3 modal-bottom">{footer}</div> : null}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-8 pt-4">{children}</div>
+        {footer ? (
+          <div className="modal-bottom shrink-0 border-t border-slate-100 bg-white px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">{footer}</div>
+        ) : null}
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowRight, Check, ClipboardList, Compass, FileSignature, FileText, HardHat, TrendingUp } from 'lucide-react';
-import { STAGES, STAGE_LABEL, TRADES } from '../lib/constants.js';
+import { STAGES, STAGE_LABEL, TRADES, hasInteriorStyle, scopeList, workTypeLabel } from '../lib/constants.js';
 import { computeEstimate, sizeText } from '../lib/pricing.js';
 import { assessAsbestos } from '../lib/asbestos.js';
 import { computeWaste } from '../lib/waste.js';
 import { translateDesign } from '../lib/design.js';
 import { buildGates } from '../lib/gates.js';
+import { combinedTitle } from '../lib/classify.js';
 import InfoTab from './tabs/InfoTab.jsx';
 import EstimateTab from './tabs/EstimateTab.jsx';
 import SurveyTab from './tabs/SurveyTab.jsx';
@@ -44,7 +45,14 @@ export default function Workspace({
   const gates = useMemo(() => buildGates(activeCase, calc.trade), [activeCase, calc.trade]);
 
   const info = TRADES[calc.trade] || TRADES.unclassified;
-  const tradeLabel = activeCase.tradeName && (calc.trade === 'custom' || calc.trade === 'unclassified') ? activeCase.tradeName : info.label;
+  const bidLabel = activeCase.bid ? workTypeLabel(activeCase.bid.workTypes) || '공고' : '';
+  const tradeLabel = bidLabel
+    ? bidLabel
+    : activeCase.tradeName && (calc.trade === 'custom' || calc.trade === 'unclassified')
+      ? activeCase.tradeName
+      : calc.trade === 'combined'
+      ? combinedTitle(scopeList(activeCase)) // 철거+정지를 '복합 인테리어'로 부르지 않는다
+      : info.label;
   const stageIdx = STAGES.findIndex((s) => s.id === activeCase.stage);
 
   // 어느 단계로 가든 화면 맨 위부터 보여준다.

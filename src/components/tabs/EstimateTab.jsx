@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { AlertTriangle, Camera, Check, Copy, Info, Landmark, ShieldCheck, Sparkles, Trash2, Wand2 } from 'lucide-react';
-import { TRADES } from '../../lib/constants.js';
+import { TRADES, hasInteriorStyle } from '../../lib/constants.js';
 import { DESIGN_PRESETS } from '../../lib/design.js';
 import { BRAND_PRICES, combinedBrandPrices, combinedScopeSpecs, materialSetFor, materialSetsFor } from '../../lib/materials.js';
 import { DETAIL_LIBRARY } from '../../lib/details.js';
@@ -11,6 +11,7 @@ import { subsidyInfo, SUBSIDY_CHECKS, SUBSIDY_DOCS, SUBSIDY_AGENCY, subsidyLimit
 import { subsidyNotice, subsidyAgencyNotice } from '../../lib/docs.js';
 import { fileToThumb } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
+import { useSurveyGuide } from '../../lib/useSurveyGuide.js';
 import {
   BigButton,
   Card,
@@ -32,101 +33,6 @@ import WasteVehicleSwitch from '../WasteVehicleSwitch.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import { quoteSignal, parseBudget, aiSignalOf } from '../../lib/budget.js';
 
-// 답사 가서 '왜' 확인해야 하는지 — 놓치면 견적이 어디서 새는지까지 적는다.
-const SURVEY_GUIDE = {
-  demolition: [
-    { check: '사다리차 자리(주차·전선·소방통로)', why: '차를 못 세우면 인력으로 내려야 해서 양중비 15~35만이 붙습니다.', how: '건물 앞에 서서 창문까지 거리와 전선 높이를 눈으로 확인' },
-    { check: '천장 위 숨은 물량(텍스·단열재)', why: '보이지 않던 철거재가 나오면 폐기물 차량이 한 대 더 필요합니다.', how: '천장 한 칸을 손으로 들춰보고 사진' },
-    { check: '엘리베이터·복도 보양 필요 여부', why: '공용부 파손은 우리 배상입니다. 보양비 8만이 빠지면 그대로 손해.', how: '관리사무소에 보양 규정과 예치금 확인' },
-    { check: '석면 의심 자재(텍스·슬레이트)', why: '석면이면 조사·철거·처리비 300만 이상, 일정도 2주 늘어납니다.', how: '준공연도와 천장재를 확인해 앱 석면 경보에 입력' },
-  ],
-  waste: [
-    { check: '짐의 양과 성상(섞였는지)', why: '섞인 마대는 처리비가 3~6배가 됩니다. 1톤으로 될 일이 2.5톤이 됩니다.', how: '현장에 들어가 짐 더미 앞에서 사진, 마대별 재질 확인' },
-    { check: '반입 가능 시간·처리장', why: '처리장 마감 시간을 놓치면 차량이 하루 더 붙습니다.', how: '가까운 처리장 반입 시간을 확인하고 상차 시간을 정함' },
-    { check: '엘리베이터·계단 폭', why: '엘베가 없거나 좁으면 인력 양중비가 추가됩니다.', how: '엘베 유무와 문 폭을 확인, 필요하면 1톤차로 나눠 반출' },
-    { check: '재활용·고철 분리 가능 여부', why: '고철·종이를 나누면 처리비가 줄고 일부는 되팔 수 있습니다.', how: '고철·가전 유무를 확인해 분리 여부 결정' },
-  ],
-  labor: [
-    { check: '필요 인원과 숙련도', why: '결원 1명이면 일당 18만 + 공정 1일 지연입니다.', how: '작업량을 보고 몇 명·며칠인지 정해 문자로 확정' },
-    { check: '작업 범위(무엇까지)', why: '범위를 말로만 하면 “그건 안 했다” 분쟁이 생깁니다.', how: '사진과 함께 범위를 문자로 남김' },
-    { check: '집결 장소·주차·출입', why: '인부가 헛걸음하면 하루 일당을 그냥 잃습니다.', how: '집결 위치와 주차 가능 여부를 확인' },
-    { check: '기초안전보건교육 이수증', why: '미이수 인력을 투입하면 현장 지적·과태료 대상입니다.', how: '이수증 사진을 미리 받아 둠' },
-  ],
-  wallpaper: [
-    { check: '벽 곰팡이·누수 흔적', why: '초배·방수 보수가 추가되면 30만 이상 올라갑니다.', how: '창가·모서리·아래쪽 벽을 손으로 만져 확인' },
-    { check: '기존 벽지 층수(2겹 이상)', why: '겹이 많으면 제거비·시간이 늘어 공사 기간이 하루 늘어납니다.', how: '한쪽 벽지를 살짝 들춰 층수 확인' },
-    { check: '몰딩·걸레받이 교체 여부', why: '교체하면 자재·목공비가 따로 붙습니다.', how: '고객에게 “기존 것 그대로 쓸지” 확인' },
-    { check: '가구 이동 범위', why: '거주 중이면 보양·가구 이동 12만이 필요합니다.', how: '가구가 남는지, 누가 옮기는지 확인' },
-  ],
-  bathroom: [
-    { check: '아래층 누수 이력', why: '누수 흔적이 있으면 방수 보강비 30만이 붙습니다.', how: '아래층 천장 사진을 요청하거나 직접 확인' },
-    { check: '담수 시험 가능 여부', why: '담수 48시간을 못 하면 하자 책임을 우리가 다 집니다.', how: '세대 출입 가능 시간과 물 사용 가능 여부 확인' },
-    { check: '기존 배관 부식', why: '배관까지 교체하면 25만 이상 추가입니다.', how: '수전을 열어 물색·수압 확인' },
-    { check: '바닥 단차·문턱 높이', why: '단차가 크면 미장·방수 두께가 늘어 자재비가 올라갑니다.', how: '문턱과 바닥 높이를 재어 기록' },
-  ],
-  kitchen: [
-    { check: '급수·배수 위치 변경 여부', why: '위치를 바꾸면 배관 이설 25만 이상입니다.', how: '싱크볼·수전 위치를 사진으로 남기고 고객에게 확인' },
-    { check: '가스 배관 이설·차단', why: '가스 이설은 허가·차단 비용이 따로 듭니다.', how: '가스레인지 위치와 밸브 위치 확인' },
-    { check: '상판 실측(수전 홀·싱크볼)', why: '상판은 가공 후 변경이 안 됩니다. 틀리면 상판값을 우리가 냅니다.', how: '벽에서 중심까지 실측해 앱에 입력' },
-    { check: '후드·가전 재사용', why: '재사용하면 자재비를 줄일 수 있습니다.', how: '후드·식세기 상태와 재사용 여부 확인' },
-  ],
-  tilewaterproof: [
-    { check: '기존 방수층 상태', why: '방수층이 죽어 있으면 철거 후 재방수가 필수입니다.', how: '담수 흔적·들뜸을 확인' },
-    { check: '담수시험 가능 여부', why: '시험을 못 하면 누수 배상 책임이 고스란히 남습니다.', how: '배수구·문턱 높이 확인' },
-    { check: '배수구 구배·트렌치', why: '물이 고이면 재시공입니다.', how: '물을 부어 흐름을 확인' },
-    { check: '대형 타일 로스', why: '600각 이상은 로스가 15%까지 늘어 자재비가 올라갑니다.', how: '시공 면적과 타일 규격을 함께 기록' },
-  ],
-  plaster: [
-    { check: '바닥 단차·들뜸', why: '단차가 크면 미장 두께가 늘어 자재·인건비가 올라갑니다.', how: '수평자를 대어 단차 확인' },
-    { check: '난방배관 매설 위치', why: '배관을 건드리면 보수비 35만이 붙습니다.', how: '분배기 위치와 배관 방향 확인' },
-    { check: '문턱 높이(미장 두께)', why: '미장 후 문이 안 닫히면 문턱까지 손봐야 합니다.', how: '문턱과 바닥 높이 비교' },
-    { check: '양생 기간·출입 통제', why: '양생 전 출입하면 바닥이 깨져 재시공입니다.', how: '며칠 출입 통제가 가능한지 확인' },
-  ],
-  window: [
-    { check: '창틀 폭·철거 가능 여부', why: '틀 폭이 좁으면 시공 방식이 바뀌어 단가가 올라갑니다.', how: '줄자로 창틀 안쪽 폭 실측' },
-    { check: '외벽 균열·누수', why: '외벽 실리콘 보수는 별도 비용입니다.', how: '창 주변 외벽을 눈으로 확인' },
-    { check: '방충망·방범창 재사용', why: '재사용하면 자재비를 줄일 수 있습니다.', how: '상태 확인 후 고객과 결정' },
-    { check: '층고·양중 장비', why: '고층은 사다리차나 양중 장비가 필요합니다.', how: '층수와 창 아래 주차 공간 확인' },
-  ],
-  combined: null, // 철거·마감이 섞인 현장은 철거 가이드를 그대로 쓴다
-  custom: [
-    { check: '작업 범위 서면화', why: '말로만 정하면 나중에 “그건 빼고 했잖아”가 됩니다.', how: '범위를 문자·사진으로 남김' },
-    { check: '자재 반입·양중', why: '양중비가 견적에서 가장 자주 빠집니다.', how: '엘베·계단·주차 확인' },
-    { check: '폐기물 처리 주체', why: '누가 버리는지 정하지 않으면 우리가 떠안습니다.', how: '고객과 처리 주체를 확인' },
-    { check: '추가 요구 가능성', why: '현장에서 늘어나는 요구가 수익을 지웁니다.', how: '애매한 부분을 미리 목록으로 확인' },
-  ],
-};
-
-function SurveyGuideCard({ calc }) {
-  const rows = SURVEY_GUIDE[calc.trade] || SURVEY_GUIDE.demolition;
-  return (
-    <SectionCard
-      num="3"
-      title="답사 시 왜·뭘 확인해야 하나"
-      subtitle="현장에서 이 4가지만 눈으로 보면, 나중에 돈이 새는 곳을 미리 막을 수 있습니다."
-      status={<Pill tone="warn">확인 4가지</Pill>}
-    >
-      <div className="space-y-2">
-        {rows.map((r, i) => (
-          <div key={i} className="rounded-2xl bg-slate-50 p-3">
-            <p className="flex items-center gap-1.5 text-sm font-extrabold text-ink">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-900 text-[10px] font-black text-white">
-                {i + 1}
-              </span>
-              {r.check}
-            </p>
-            <p className="mt-1 text-[13px] font-semibold leading-5 text-rose-800">왜: {r.why}</p>
-            <p className="mt-0.5 text-[13px] font-semibold leading-5 text-ink-2">이렇게: {r.how}</p>
-          </div>
-        ))}
-        <p className="rounded-xl bg-amber-50 px-3 py-2 text-2xs font-bold leading-4 text-amber-900">
-          확인한 내용은 3단계 답사에 한 줄로 적으면 최종 견적에 바로 반영됩니다. (예: “폐기물 두 차는 나올듯”, “벽에 물기 많아 방수 필요”)
-        </p>
-      </div>
-    </SectionCard>
-  );
-}
-
 // 2단계 — 가견적: 1차 금액 · (마감 공종만) 스타일·자재 · 3자 시세 검증 · 답사 가이드.
 export default function EstimateTab({ c, update, calc, design, showToast, completedCases = [], onGoDoc, onGoSurvey }) {
   const verify = useMemo(() => verifyEstimate(c, calc), [c, calc]);
@@ -135,10 +41,8 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
   const info = TRADES[c.trade] || TRADES.unclassified;
   const mset = materialSetFor(c, calc.trade);
   const msets = materialSetsFor(calc.trade);
-  // 마감 공종만 스타일·자재 카드를 보여준다 (폐기물·철거·인력·방수·미장은 자재 등급 개념이 없다)
-  const showStyleCard =
-    ['wallpaper', 'bathroom', 'kitchen', 'tilewaterproof', 'window', 'combined'].includes(calc.trade) &&
-    !(calc.trade === 'tilewaterproof' && (c.tileWork?.mode || 'both') === 'waterproof');
+  // 인테리어·마감 공종만 스타일·자재 카드를 보여준다 (철거·폐기물·기초·정지·인력은 자재 등급 개념이 없다)
+  const showStyleCard = hasInteriorStyle(c);
 
   // 복합(집 전체)이면 포함 공종별 자재 사양을 등급마다 전부 보여준다.
   const scopesForSpec = Array.isArray(c.subScopes) ? c.subScopes : [];
@@ -626,8 +530,6 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
 
       <VerifyCard verify={verify} calc={calc} c={c} update={update} showToast={showToast} />
 
-      <SurveyGuideCard calc={calc} />
-
       <SubsidyCard c={c} update={update} showToast={showToast} onOpenDoc={onGoDoc} />
 
       <Card className="p-4">
@@ -640,26 +542,12 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
   );
 }
 
-const SURVEY_TIPS = {
-  demolition: ['사다리차 진입로·전선·주차 가능 여부', '천장 위 숨은 물량(텍스·단열재)', '석면 의심 자재(텍스·슬레이트)', '엘베 보양·관리실 예치금'],
-  bathroom: ['아래층 누수 이력·담수 가능 여부', '기존 배관 부식(교체하면 추가)', '바닥 단차·문턱 높이', '환풍기·배기 통로'],
-  wallpaper: ['벽 곰팡이·누수 흔적(초배 추가)', '기존 벽지 층수(2겹 이상이면 제거비)', '몰딩·걸레받이 교체 여부', '가구 이동 범위'],
-  kitchen: ['급수·배수 위치 변경 여부', '가스 배관 이설·차단', '상판 실측(수전 홀·싱크볼)', '후드·가전 재사용'],
-  tilewaterproof: ['기존 방수층 상태', '담수시험 가능 여부', '배수구 구배·트렌치', '대형 타일 로스 15%'],
-  plaster: ['바닥 단차·들뜸', '난방배관 매설 위치', '문턱 높이(미장 두께)', '양생 기간·출입 통제'],
-  window: ['창틀 폭·철거 가능 여부', '외벽 균열·누수', '방충망·방범창 재사용', '층고·양중 장비'],
-  waste: ['성상 분리 상태(혼합 시 3~6배)', '반입 시간 제한', '허가 처리업체 확인', '계량증명서'],
-  labor: ['기초안전보건교육 이수증', '숙련도·인원 확정(전날 18시)', '집결 장소·주차', '작업 범위 서면화'],
-  repair: ['보수 부위 규격·단종 여부', '기존 색상·재질 일치', '숨은 손상 범위', 'A/S 기간'],
-  combined: ['철거 범위와 남길 부분', '창호·가전 제외 항목', '욕실 담수·아래층 확인', '일정 겹침(인력 대기)'],
-  custom: ['작업 범위 서면화', '자재 반입·양중', '폐기물 처리 주체', '추가 요구 가능성'],
-};
-
 const MISSING_TO_SURVEY = { protect: 'protectLevel', admin: 'adminDeposit', lift: 'materialLift', clean: 'afterCare', waste: 'wasteIncluded' };
 
 function VerifyCard({ verify, calc, c, update, showToast }) {
   const tone = verify.verdict.tone === 'ok' ? 'good' : verify.verdict.tone === 'bad' ? 'bad' : verify.verdict.tone === 'info' ? 'info' : 'warn';
   const missingNow = verify.missing.filter((m) => !m.ok);
+  const { aiOn, busy, guide, retry } = useSurveyGuide(c, calc, update);
   const fillMissing = () => {
     const next = { ...(c?.survey || {}) };
     missingNow.forEach((m) => {
@@ -669,7 +557,7 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
     if (update) update({ survey: next });
     if (showToast) showToast(`빠진 비용 ${missingNow.length}가지를 견적에 넣었습니다`);
   };
-  const tips = SURVEY_TIPS[calc?.trade] || SURVEY_TIPS.custom;
+  const tips = guide.tips;
 
   return (
     <Card className="overflow-hidden">
@@ -740,9 +628,18 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
         </div>
 
         <div className="mt-3 rounded-2xl border border-amber-300 bg-amber-50 p-3">
-          <p className="flex items-center gap-1.5 text-sm font-extrabold text-amber-900">
-            <AlertTriangle className="h-4 w-4" /> 답사 시 꼭 확인하세요 (추가 비용 발생 경우의 수)
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-sm font-extrabold text-amber-900">
+              <AlertTriangle className="h-4 w-4" /> 답사 시 꼭 확인하세요 (추가 비용 발생 경우의 수)
+            </p>
+            {guide.source === 'ai' ? (
+              <Pill tone="info">{busy ? 'AI가 고르는 중' : '🤖 AI 맞춤'}</Pill>
+            ) : aiOn ? (
+              <Pill tone="plain">{busy ? 'AI가 고르는 중' : '기본 가이드'}</Pill>
+            ) : (
+              <Pill tone="plain">공종별 기본</Pill>
+            )}
+          </div>
           <ul className="mt-1.5 space-y-1">
             {tips.map((t, i) => (
               <li key={i} className="flex gap-1.5 text-[13px] font-semibold leading-5 text-amber-900">
@@ -751,14 +648,24 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
               </li>
             ))}
           </ul>
+          {guide.comment ? (
+            <p className="mt-2 rounded-lg bg-white/70 px-2.5 py-2 text-2xs font-semibold leading-4 text-amber-900">
+              🤖 {guide.comment}
+            </p>
+          ) : null}
           <p className="mt-2 text-2xs font-bold leading-4 text-amber-800">
-            이 중 하나라도 걸리면 견적이 올라갑니다. 확인한 내용은 ② 현장 답사에 적으면 바로 반영됩니다.
+            이 중 하나라도 걸리면 견적이 올라갑니다. 확인한 내용은 3. 답사에 적으면 바로 반영됩니다.
+            {aiOn ? (
+              <button type="button" onClick={retry} className="ml-1 underline underline-offset-2">
+                AI로 다시 뽑기
+              </button>
+            ) : null}
           </p>
         </div>
 
         <p className="mt-2.5 text-xs leading-5 text-ink-2">{verify.advice}</p>
         <p className="mt-1 text-2xs text-ink-4">
-          근거: 2026 하반기 대한건설협회 노임(철거공 261,108원·타일공 294,379원) · 2026.1.1 건설폐기물 중간처리단가(혼합 72,721원/톤) · 우리 실견적 60건
+          근거: 2026 하반기 대한건설협회 노임(철거공 261,108원·타일공 294,379원) · 2026.1.1 건설폐기물 중간처리단가(혼합 72,721원/톤) · 우리 실견적 419건 DB
         </p>
       </div>
     </Card>

@@ -9,6 +9,7 @@ import AfterPreview, { PREVIEW_TRADES } from '../AfterPreview.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import { finalSignal, aiSignalOf } from '../../lib/budget.js';
 import { materialSetFor, materialSetsFor } from '../../lib/materials.js';
+import { hasInteriorStyle } from '../../lib/constants.js';
 
 export default function ProfitTab({ c, update, calc, design, showToast, onOpenSettings }) {
   const listPrice = Math.round(calc.clientPrice);
@@ -51,6 +52,8 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   const itemAmount = (id) => Math.round((calc.items || []).find((i) => i.id === id)?.amount || 0);
   const mset = materialSetFor(c, calc.trade);
   const sets = materialSetsFor(calc.trade);
+  // 철거·폐기물·기초·정지·인력은 자재 등급이 견적을 바꾸지 않는다 → 대안 목록에도 넣지 않는다
+  const interior = hasInteriorStyle(c);
   const budgetSet = sets?.find((s) => s.tier === '실속');
   const gradeSaving =
     budgetSet && mset && mset.id !== budgetSet.id
@@ -95,7 +98,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
       on: !budgetSet || mset?.id === budgetSet.id,
       onLabel: '실속',
       offLabel: mset ? `${mset.tier}` : '표준',
-      show: !!budgetSet && !!mset,
+      show: interior && !!budgetSet && !!mset,
       action: () => update({ materialSet: budgetSet?.id || '' }),
     },
   ].filter((s) => s.show && Math.round(s.saving) > 0);
@@ -109,7 +112,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   const liftSaving = Math.round(calc.lifting?.cost || 0);
   const wasteSepSaving = itemAmount('mixedWaste');
   const alternatives = [
-    isFinishTrade && gradeSaving > 0
+    isFinishTrade && interior && gradeSaving > 0
       ? {
           id: 'grade',
           label: '자재 등급 한 단계 낮추기',

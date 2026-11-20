@@ -13,6 +13,13 @@ import { kstToday, addDaysISO, korDateLabel, korMonthDay } from '../src/lib/date
 import { pickTextModel, pickImageModel, GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE } from '../src/lib/gemini.js';
 import { perPyeong, DEFAULT_RATES, RATE_FIELDS } from '../src/lib/rates.js';
 import { computeEstimate } from '../src/lib/pricing.js';
+import { hasInteriorStyle } from '../src/lib/constants.js';
+import { surveyGuideFor } from '../src/lib/surveyGuide.js';
+import { buildOrderGroups } from '../src/lib/orders.js';
+import { buildQuote, constructionNoticeText } from '../src/lib/docs.js';
+import { buildTimeline, evidenceFor } from '../src/lib/gates.js';
+import { translateDesign } from '../src/lib/design.js';
+import { autoCaseTitle } from '../src/lib/classify.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '..', 'dist');
@@ -94,6 +101,17 @@ const SURVEY_JSON = {
     { item: '누수 의심 방수 보수', reason: '벽 물기 확인', amount: 30, days: 1, type: 'increase' },
   ],
   signal: { level: 'red', title: '포기·패스 권장 (적자 또는 하자·분쟁 리스크)', reason: '답사 후 원가가 희망가를 넘었습니다' },
+};
+// 답사 가이드(AI) 모킹 응답 — AI 연동 여부를 눈으로 확인하려고 표식을 넣는다.
+const AI_GUIDE_JSON = {
+  rows: [
+    { check: 'AI 확인 1 · 상판 수전 홀 위치', why: 'AI 판단: 가공 후 변경 불가 · 상판값 51만', how: 'AI 방법: 벽에서 중심까지 실측' },
+    { check: 'AI 확인 2 · 가스 배관 이설', why: 'AI 판단: 이설 시 허가·차단 25만', how: 'AI 방법: 밸브 위치 사진' },
+    { check: 'AI 확인 3 · 후드 재사용', why: 'AI 판단: 교체 시 25만 추가', how: 'AI 방법: 후드 오염 확인' },
+    { check: 'AI 확인 4 · 급수·배수 위치', why: 'AI 판단: 변경 시 배관 이설 25만', how: 'AI 방법: 싱크볼 위치 확인' },
+  ],
+  tips: ['AI 꿀팁 · 상판 실측', 'AI 꿀팁 · 가스 밸브', 'AI 꿀팁 · 후드 재사용', 'AI 꿀팁 · 배수 위치'],
+  comment: 'AI 코멘트: 이 주방은 상판 가공 뒤 변경이 안 되니 실측을 먼저 확정하세요.',
 };
 
 async function main() {
@@ -224,6 +242,128 @@ async function main() {
     record('복합: 요약에 철거·기초·정지', est.targetSummary.includes('철거') && est.targetSummary.includes('기초·정지'), est.targetSummary);
     const noGround = computeEstimate({ trade: 'combined', sizeValue: '20', sizeUnit: '평', subScopes: ['demolition'] });
     record('복합: 정지 없으면 원가 더 작음', est.totalDirectCost > noGround.totalDirectCost, `${noGround.totalDirectCost} → ${est.totalDirectCost}`);
+  });
+
+  await step('단위: 스타일·자재는 인테리어·마감 공종만', async () => {
+    const on = (c) => hasInteriorStyle(c);
+    ['wallpaper', 'bathroom', 'kitchen', 'carpentry', 'film', 'window', 'repair', 'plaster'].forEach((trade) => {
+      record(`스타일: ${trade} 표시`, on({ trade }) === true, String(on({ trade })));
+    });
+    ['demolition', 'waste', 'groundwork', 'labor', 'electric', 'plumbing'].forEach((trade) => {
+      record(`스타일: ${trade} 숨김`, on({ trade }) === false, String(on({ trade })));
+    });
+    record('스타일: 타일·방수(타일 시공) 표시', on({ trade: 'tilewaterproof', tileWork: { mode: 'both' } }) === true);
+    record('스타일: 방수만 하는 현장은 숨김', on({ trade: 'tilewaterproof', tileWork: { mode: 'waterproof' } }) === false);
+    record('스타일: 철거+정지 복합 숨김', on({ trade: 'combined', subScopes: ['demolition', 'groundwork'] }) === false);
+    record('스타일: 철거+도배+욕실 복합 표시', on({ trade: 'combined', subScopes: ['demolition', 'wallpaper', 'bathroom'] }) === true);
+    record('스타일: 복합 세부공종 미선택은 표시', on({ trade: 'combined', subScopes: [] }) === true);
+    record('스타일: 기타(인테리어 키워드 없음) 숨김', on({ trade: 'custom', title: '부지 정지', notes: '철거 폐기물 반출' }) === false);
+    record('스타일: 기타(현관 중문) 표시', on({ trade: 'custom', title: '현관 중문 교체' }) === true);
+    record('스타일: 견적에도 같은 판단', computeEstimate({ trade: 'waste', sizeValue: '1', sizeUnit: '톤' }).interiorStyle === false);
+  });
+
+  await step('단위: 철거·폐기물·철거+정지는 등급이 견적을 안 바꿈', async () => {
+    const combinedCase = (set, preset) =>
+      computeEstimate({
+        trade: 'combined',
+        sizeValue: '20',
+        sizeUnit: '평',
+        subScopes: ['demolition', 'groundwork'],
+        materialSet: set,
+        design: { preset },
+      });
+    const prem = combinedCase('comb-premium', 'premium');
+    const budget = combinedCase('comb-budget', 'value');
+    record('복합(철거+정지): 고급·실속 자재세트가 견적을 안 바꿈', prem.clientPrice === budget.clientPrice, `${prem.clientPrice} vs ${budget.clientPrice}`);
+    record('복합(철거+정지): 원가도 그대로', prem.totalDirectCost === budget.totalDirectCost, `${prem.totalDirectCost} vs ${budget.totalDirectCost}`);
+    const demoP = computeEstimate({ trade: 'demolition', sizeValue: '15', sizeUnit: '평', materialSet: 'demo-premium', design: { preset: 'premium' } });
+    const demoB = computeEstimate({ trade: 'demolition', sizeValue: '15', sizeUnit: '평', materialSet: 'demo-budget', design: { preset: 'value' } });
+    record('철거: 등급을 바꿔도 견적 그대로', demoP.clientPrice === demoB.clientPrice, `${demoP.clientPrice} vs ${demoB.clientPrice}`);
+    record('철거: 공종 철거면 자재 배율 1.0', demoP.interiorStyle === false && demoP.materialTotal === demoB.materialTotal, `${demoP.materialTotal} vs ${demoB.materialTotal}`);
+    const bathP = computeEstimate({ trade: 'bathroom', sizeValue: '1', sizeUnit: '칸', materialSet: 'bath-premium', design: { preset: 'premium' } });
+    const bathB = computeEstimate({ trade: 'bathroom', sizeValue: '1', sizeUnit: '칸', materialSet: 'bath-budget', design: { preset: 'value' } });
+    record('욕실: 자재 세트를 바꾸면 견적이 바뀐다', bathP.clientPrice > bathB.clientPrice, `${bathB.clientPrice} → ${bathP.clientPrice}`);
+    const wallP = computeEstimate({ trade: 'wallpaper', sizeValue: '24', sizeUnit: '평', materialSet: 'wall-premium' });
+    const wallB = computeEstimate({ trade: 'wallpaper', sizeValue: '24', sizeUnit: '평', materialSet: 'wall-budget' });
+    record('도배: 자재 세트를 바꾸면 견적이 바뀐다', wallP.clientPrice > wallB.clientPrice, `${wallB.clientPrice} → ${wallP.clientPrice}`);
+    // 공종을 철거로 바꿔도 예전 '고급' 세트가 남아 견적을 흔들지 않아야 한다
+    const switched = computeEstimate({ trade: 'demolition', sizeValue: '15', sizeUnit: '평', materialSet: 'comb-premium' });
+    const clean = computeEstimate({ trade: 'demolition', sizeValue: '15', sizeUnit: '평', materialSet: '' });
+    record('공종 전환: 남아 있는 고급 세트 무시', switched.clientPrice === clean.clientPrice, `${switched.clientPrice} vs ${clean.clientPrice}`);
+  });
+
+  await step('단위: 철거+정지 발주·타임라인·안내문에 인테리어가 안 섞임', async () => {
+    const ground = { trade: 'combined', sizeValue: '20', sizeUnit: '평', subScopes: ['demolition', 'groundwork'], region: '안동', title: '안동 20평 철거·기초·정지', lifting: { floor: 1, elevator: 'no' } };
+    const calc = computeEstimate(ground);
+    const design = translateDesign(ground);
+    const orders = buildOrderGroups(ground, calc, design, calc.materialSet);
+    const orderText = orders.map((g) => `${g.vendor} ${g.items.map((i) => i.name).join(' ')}`).join(' | ');
+    record('발주: 철거+정지에 합지·포세린·도기 0건', !/합지|실크|포세린|도기/.test(orderText), orderText.slice(0, 90));
+    record('발주: 마대·보양재 나옴', /마대/.test(orderText) && /보양/.test(orderText));
+    record('발주: 골재·시멘트·굴삭기 나옴', /골재|쇄석/.test(orderText) && /시멘트/.test(orderText) && /굴삭기/.test(orderText));
+    const timeline = buildTimeline(ground, calc, []).map((p) => `${p.label} ${p.items.join(' ')}`).join(' | ');
+    record('타임라인: 철거+정지에 담수·타일 없음', !/담수|타일/.test(timeline), timeline);
+    record('타임라인: 터파기·성상 분리 있음', /터파기/.test(timeline) && /성상/.test(timeline));
+    record('사진: 철거 전 6곳', evidenceFor('combined', ground).title.includes('철거 전'));
+    const notice = constructionNoticeText(ground, calc);
+    ['실행원가', '수주금액', '만원', '인테리어'].forEach((bad) => record(`안내문: '${bad}' 0건`, !notice.includes(bad), notice.split('\n').find((l) => l.includes(bad)) || ''));
+    record('안내문: 공사 내용 = 철거·기초·정지', /공사 내용: .*철거.*기초·정지/.test(notice), notice.match(/공사 내용:.*/)?.[0] || '');
+    record('안내문: 야외 현장은 안전 펜스', notice.includes('안전 펜스'));
+    const quote = buildQuote(ground, calc, design, null);
+    record('견적서: 제목이 복합 인테리어 아님', !quote.title.includes('인테리어') && quote.title.includes('철거'), quote.title);
+    record('견적서: 사양에 합지·포세린 없음', !(quote.materialSpecs || []).join(' ').match(/합지|포세린|도기/), (quote.materialSpecs || []).join(' / ').slice(0, 60));
+    const full = { trade: 'combined', sizeValue: '24', sizeUnit: '평', subScopes: ['demolition', 'wallpaper', 'bathroom', 'kitchen'] };
+    const fullCalc = computeEstimate(full);
+    const fullOrders = buildOrderGroups(full, fullCalc, translateDesign(full), fullCalc.materialSet).map((g) => g.items.map((i) => i.name).join(' ')).join(' | ');
+    record('발주: 전체 인테리어는 벽지·타일·싱크대 나옴', /합지/.test(fullOrders) && /포세린/.test(fullOrders) && /싱크대|상판/.test(fullOrders), fullOrders.slice(0, 60));
+    const bathOrders = buildOrderGroups({ trade: 'bathroom', sizeValue: '1', sizeUnit: '칸' }, computeEstimate({ trade: 'bathroom', sizeValue: '1', sizeUnit: '칸' }), { combo: [] }, null).map((g) => g.items.map((i) => i.name).join(' ')).join(' | ');
+    record('발주: 욕실은 방수·타일·도기', /방수/.test(bathOrders) && /포세린|타일/.test(bathOrders) && /도기/.test(bathOrders), bathOrders.slice(0, 60));
+  });
+
+  await step('단위: 공고 현장 안내문·견적서에 원가 메모 없음', async () => {
+    const bid = {
+      trade: 'combined',
+      sizeValue: '200',
+      sizeUnit: '㎡',
+      subScopes: ['demolition', 'groundwork'],
+      title: '안동 OO동 철거 및 기초 정지 공사',
+      location: '안동시',
+      bid: { bidPrice: 27200000, noticeNo: 'R25BK0001', title: '안동 OO동 철거 및 기초 정지 공사', workTypes: ['철거', '토목'] },
+    };
+    const calc = computeEstimate(bid);
+    const notice = constructionNoticeText(bid, calc);
+    ['실행원가', '수주금액', '만원', '80%'].forEach((bad) => record(`공고 안내문: '${bad}' 없음`, !notice.includes(bad), notice.split('\n').find((l) => l.includes(bad)) || ''));
+    record('공고 안내문: 공고 공사 종류 표기', /공사 내용: 철거 · 토목/.test(notice), notice.match(/공사 내용:.*/)?.[0] || '');
+    const quote = buildQuote(bid, calc, translateDesign(bid), null);
+    record('공고 견적서: 손님 문서에 실행원가 없음', !JSON.stringify(quote).includes('실행원가'));
+    record('공고: 내부 메모는 calc.bidNote로만', calc.bidNote.includes('실행원가') && !calc.targetSummary.includes('실행원가'), calc.bidNote);
+  });
+
+  await step('단위: 현장 제목이 공종과 맞음', async () => {
+    const g = classifyRequest('안동 20평 상가 철거랑 부지 정지 작업 같이 해야 함');
+    record('제목: 철거+정지 → 전체 인테리어 아님', !g.title.includes('인테리어') && g.title.includes('철거'), g.title);
+    record('제목: 분류표에도 철거·기초·정지', g.rows.some((r) => r.label === '공종' && r.value.includes('철거') && r.value.includes('기초·정지')), JSON.stringify(g.rows[0]));
+    const bath = classifyRequest('구미 24평 아파트 욕실 1칸 전체 철거 후 타일·도기 교체');
+    record('공종: 욕실 철거는 복합이 아니라 욕실', bath.trade === 'bathroom', bath.trade);
+    record('제목: 공종 바꾸면 제목도 바뀜', autoCaseTitle({ trade: 'combined', region: '안동', sizeValue: '20', sizeUnit: '평' }, 'demolition') === '안동 20평 철거', autoCaseTitle({ trade: 'combined', region: '안동', sizeValue: '20', sizeUnit: '평' }, 'demolition'));
+  });
+
+  await step('단위: 답사 가이드는 AI가 있으면 AI, 없으면 공종 폴백', async () => {
+    const local = surveyGuideFor({ trade: 'demolition' }, { trade: 'demolition' });
+    record('가이드: AI 없으면 공종 기본값', local.source === 'local' && local.rows.length === 4 && local.rows[0].check.includes('사다리차'), local.rows[0]?.check);
+    const aiPlan = {
+      trade: 'kitchen',
+      surveyPlan: { rows: [{ check: 'AI 확인 A', why: 'AI 이유 A', how: 'AI 방법 A' }], tips: ['AI 팁 A'], comment: 'AI 코멘트 A' },
+    };
+    const ai = surveyGuideFor(aiPlan, { trade: 'kitchen' });
+    record('가이드: AI 결과를 그대로 쓴다', ai.source === 'ai' && ai.rows[0].check === 'AI 확인 A' && ai.tips[0] === 'AI 팁 A' && ai.comment === 'AI 코멘트 A', JSON.stringify(ai.rows[0]));
+    const fromAnalysis = surveyGuideFor(
+      { trade: 'bathroom', aiAnalysis: { surveyChecks: [{ label: 'AI 분석 확인', why: '왜', how: '이렇게' }] } },
+      { trade: 'bathroom' }
+    );
+    record('가이드: 새 현장 AI 분석의 확인 항목도 사용', fromAnalysis.source === 'ai' && fromAnalysis.rows[0].check === 'AI 분석 확인', JSON.stringify(fromAnalysis.rows[0]));
+    const waste = surveyGuideFor({ trade: 'waste' }, { trade: 'waste' });
+    record('가이드: 공종이 다르면 내용이 다르다', waste.rows[0].check !== local.rows[0].check, `${waste.rows[0].check}`);
   });
 
   await step('단위: 첫 통화 질문이 케이스마다 다름', async () => {
@@ -362,6 +502,8 @@ async function main() {
       payload = { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_1PX } }] } }] };
     } else if (text.includes('답사 기록')) {
       payload = { candidates: [{ content: { parts: [{ text: JSON.stringify(SURVEY_JSON) }] } }] };
+    } else if (text.includes('답사 코치')) {
+      payload = { candidates: [{ content: { parts: [{ text: '```json\n' + JSON.stringify(AI_GUIDE_JSON) + '\n```' }] } }] };
     } else if (text.includes('JSON만 답해')) {
       payload = { candidates: [{ content: { parts: [{ text: '{"ok":true,"model":"gemini-2.5-flash"}' }] } }] };
     } else {
@@ -436,7 +578,8 @@ async function main() {
     const t = await mainText();
     record('가견적: 1차 가견적 히어로', t.includes('1차 가견적 (답사 전 · 변동 가능)'));
     record('가견적: 3자 시세 검증', t.includes('2026 최신 시세 3자 검증'));
-    record('가견적: 답사 가이드', t.includes('답사 시 왜·뭘 확인해야 하나') && t.includes('이렇게:'));
+    record('가견적: 3자 검증 확인 포인트', t.includes('답사 시 꼭 확인하세요'));
+    record('가견적: 답사 가이드 중복 없음(3단계로 일원화)', !t.includes('답사 시 왜·뭘 확인해야 하나'));
     record('가견적: 스타일·자재(욕실)', t.includes('스타일·자재 정하기') && t.includes('추천 자재 세트'));
     record('가견적: 입력칸 제거', !t.includes('무엇을 하는지 적어주세요') && !(await page.getByLabel('받은 내용').count()));
     record('가견적: 신호등 배지', /🟢|🟡|🔴/.test(t) && (t.includes('적극 추천') || t.includes('해볼 만함') || t.includes('비추천')));
@@ -549,7 +692,8 @@ async function main() {
       };
     });
     record('견적서: 공정 줄 합계 = 공급가', sum.lines === sum.subtotal && sum.count >= 2, `${sum.lines} vs ${sum.subtotal}`);
-    record('문서: 지원금 내역서 탭', (await page.getByRole('button', { name: '지원금 내역서' }).count()) === 1);
+    // 욕실 현장은 점포철거비 지원금 대상이 아니라 탭을 숨긴다 (상가·철거 현장에서만)
+    record('문서: 욕실엔 지원금 내역서 탭 없음', (await page.getByRole('button', { name: '지원금 내역서' }).count()) === 0);
     record('문서: 공사 안내문 탭', (await page.getByRole('button', { name: '공사 안내문', exact: true }).count()) === 1);
     await shotAt('36-doc.png', '손님에게 보낼 견적서', -100);
     await page.getByRole('button', { name: '공사 안내문', exact: true }).click();
@@ -592,6 +736,44 @@ async function main() {
   });
 
   // ---------- 새 현장: 생활폐기물 한차 ----------
+  await step('철거 현장 — 스타일·자재 카드 숨김 · 답사 가이드는 3단계로', async () => {
+    await goHome();
+    await page.getByText('안동 풍산읍 15평 상가 원상복구 철거').click();
+    await page.getByLabel('받은 내용').waitFor();
+    await goTab(2);
+    const est = await mainText();
+    record('철거: 가견적에 스타일·자재 카드 없음', !est.includes('스타일·자재 정하기') && !est.includes('추천 자재 세트'));
+    record('철거: 3자 검증은 그대로', est.includes('2026 최신 시세 3자 검증'));
+    record('철거: 가견적에 답사 가이드 중복 없음', !est.includes('답사 시 왜·뭘 확인해야 하나'));
+    record('실견적 근거 419건 DB', est.includes('우리 실견적 419건 DB') && !est.includes('실견적 60건'));
+    await goTab(3);
+    const survey = await mainText();
+    record('답사: 왜·뭘 확인 카드가 3단계에 있음', survey.includes('답사 시 왜·뭘 확인해야 하나') && survey.includes('사다리차 자리'));
+    record('답사: 현장 점검은 3번', survey.includes('현장 점검 (운반·실측·폐기물)'));
+    // 1단계에서 '기초·정지'를 켜면 철거+정지 → 스타일 카드 계속 숨김
+    await goTab(1);
+    await page.getByLabel('기초·정지 넣기').click();
+    await page.waitForTimeout(400);
+    await goTab(2);
+    const afterGround = await mainText();
+    record('철거+정지: 스타일 카드 숨김', !afterGround.includes('스타일·자재 정하기'));
+    // 여기에 '도배·장판'까지 켜면 인테리어 복합 → 카드가 나온다
+    await goTab(1);
+    await page.getByLabel('도배·장판 넣기').click();
+    await page.waitForTimeout(400);
+    await goTab(2);
+    const afterWall = await mainText();
+    record('철거+정지+도배: 스타일 카드 표시', afterWall.includes('스타일·자재 정하기') && afterWall.includes('추천 자재 세트'));
+    await shot('41c-ground-style-card.png');
+    // 원래대로 (철거 단독)
+    await goTab(1);
+    await page.getByLabel('도배·장판 빼기').click();
+    await page.getByLabel('기초·정지 빼기').click();
+    await page.waitForTimeout(400);
+    await goTab(2);
+    record('철거 복귀: 스타일 카드 다시 숨김', !(await mainText()).includes('스타일·자재 정하기'));
+  });
+
   await step('새 현장 — 생활폐기물 한차', async () => {
     await goHome();
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
@@ -952,6 +1134,27 @@ async function main() {
     record('설정: 평당 환산 5곳', (await modal.getByText(/\(평당 약 [\d.]+만\)/).count()) === 5, String(await modal.getByText(/\(평당 약 [\d.]+만\)/).count()));
     record('설정: 타일 시공 4.5 → (평당 약 14.9만)', (await modal.getByText('(평당 약 14.9만)').count()) >= 1);
     await shot('50-settings-sticky.png');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  await step('새 현장 — 사진만 올리고 AI 정밀 분석', async () => {
+    await goHome();
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    // 글자 없이 사진만 붙인다 (사용자 제보: '붙여넣은 내용이나 사진이 없습니다' 오류)
+    await page.locator('[role=dialog] input[type=file]').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+    await page.waitForTimeout(400);
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 }).catch(() => {});
+    const attached = await page.locator('[role=dialog]').innerText();
+    record('사진만: 첨부 후 바로 분석', /자동으로 잡았습니다|공종/.test(attached), attached.split('\n').slice(0, 3).join(' / '));
+    const btn = page.getByLabel('AI 정밀 분석');
+    if (await btn.count()) await btn.first().click();
+    await page.waitForTimeout(1500);
+    const dialogText = await page.locator('[role=dialog]').innerText();
+    record('사진만: 빈 입력 경고 안 뜸', !dialogText.includes('붙여넣은 내용이나 사진이 없습니다'), dialogText.match(/확인이 필요합니다[^\n]*/)?.[0] || '');
+    record('사진만: AI가 공종을 잡음', /자동으로 잡았습니다|공종/.test(dialogText), dialogText.split('\n').slice(0, 4).join(' / '));
+    await shot('41b-photo-only.png');
     await page.getByLabel('닫기').first().click();
     await page.waitForTimeout(300);
   });

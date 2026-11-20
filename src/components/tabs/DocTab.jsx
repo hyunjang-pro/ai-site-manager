@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Copy, Landmark, Printer, Send } from 'lucide-react';
-import { TRADES } from '../../lib/constants.js';
+import { TRADES, hasScope, workTypeLabel } from '../../lib/constants.js';
+import { tradeShortOf } from '../../lib/docs.js';
 import { buildQuote, buildSubsidySheet, contentCertDraft, constructionNotice, constructionNoticeText, dispatchMessage, estimateSms, neighborMessage, quoteText, subsidyNotice, subsidySheetText, tileWalkNotice, waterproofNotice } from '../../lib/docs.js';
 import { subsidyInfo, SUBSIDY_DOCS } from '../../lib/subsidy.js';
 import { BigButton, Card, Details, Field, Pill, SectionCard, SmallButton, TextInput, Toggle, cx } from '../ui.jsx';
@@ -30,7 +31,17 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
   const sheet = useMemo(() => buildSubsidySheet(c, calc), [c, calc, supplierTick]);
   const notice = useMemo(() => constructionNotice(c, calc), [c, calc]);
   const noticeTextOut = useMemo(() => constructionNoticeText(c, calc), [c, calc]);
-  const bodyText = view === 'quote' ? text : view === 'subsidy' ? subsidySheetText(sheet) : noticeTextOut;
+  // 이 현장에 실제로 있는 공정의 문서만 보여준다 (철거·정지에 방수·타일 안내가 붙으면 안 된다)
+  const bathJob = hasScope(c, 'bathroom');
+  const storeJob = subsidyInfo(c).storeish;
+  const letters = LETTERS.filter((l) => (l.id === 'water' || l.id === 'walk' ? bathJob : l.id === 'subsidy' ? storeJob : true));
+  const views = [
+    { id: 'quote', label: '견적서' },
+    ...(storeJob ? [{ id: 'subsidy', label: '지원금 내역서' }] : []),
+    { id: 'notice', label: '공사 안내문' },
+  ];
+  const activeView = view === 'subsidy' && !storeJob ? 'quote' : view;
+  const bodyText = activeView === 'quote' ? text : activeView === 'subsidy' ? subsidySheetText(sheet) : noticeTextOut;
 
   const info = TRADES[calc.trade] || TRADES.unclassified;
   const activeLetter = LETTERS.find((l) => l.id === letter);
@@ -43,33 +54,29 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
     <div className="space-y-4">
       <Card className="p-4 no-print">
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-200/60 p-1">
-          {[
-            { id: 'quote', label: '견적서' },
-            { id: 'subsidy', label: '지원금 내역서' },
-            { id: 'notice', label: '공사 안내문' },
-          ].map((v) => (
+          {views.map((v) => (
             <button
               key={v.id}
               type="button"
               onClick={() => changeView(v.id)}
-              className={cx('min-h-10 rounded-lg px-1 text-[12.5px] font-extrabold', view === v.id ? 'bg-white text-ink shadow-card' : 'text-ink-3')}
+              className={cx('min-h-10 rounded-lg px-1 text-[12.5px] font-extrabold', activeView === v.id ? 'bg-white text-ink shadow-card' : 'text-ink-3')}
             >
               {v.label}
             </button>
           ))}
         </div>
         <p className="mt-2 text-base font-bold text-slate-600">
-          {view === 'quote' ? '손님에게 보낼 견적서' : view === 'subsidy' ? '점포철거비 지원금 제출용 공사내역서' : '엘리베이터·현관에 붙이는 공사 안내문'}
+          {activeView === 'quote' ? '손님에게 보낼 견적서' : activeView === 'subsidy' ? '점포철거비 지원금 제출용 공사내역서' : '엘리베이터·현관에 붙이는 공사 안내문'}
         </p>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <Pill tone="ok">{info.short} 자재만 표시</Pill>
+          <Pill tone="ok">{(c.bid && workTypeLabel(c.bid.workTypes)) || tradeShortOf(c, calc)} 자재만 표시</Pill>
           <Pill tone="info">원가·마진 숨김</Pill>
         </div>
         <p className="mt-2 text-sm text-slate-500">
           각 공정 금액은 고객 청구 단가로만 나뉘어 있고 합계는 최종 견적가와 같습니다. 원가·남는 돈·일당은 문서에 나오지 않습니다.
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <BigButton variant="primary" className="whitespace-nowrap text-base" onClick={() => copyText(bodyText, showToast, view === 'notice' ? '공사 안내문을 복사했습니다' : '문서를 복사했습니다')}>
+          <BigButton variant="primary" className="whitespace-nowrap text-base" onClick={() => copyText(bodyText, showToast, activeView === 'notice' ? '공사 안내문을 복사했습니다' : '문서를 복사했습니다')}>
             <Copy className="h-5 w-5" /> 복사
           </BigButton>
           <BigButton variant="ghost" className="whitespace-nowrap text-base" onClick={() => window.print()}>
@@ -79,9 +86,9 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
       </Card>
 
       {/* 견적서 미리보기 */}
-      {view === 'notice' ? (
+      {activeView === 'notice' ? (
         <NoticeSheet notice={notice} showToast={showToast} text={noticeTextOut} />
-      ) : view === 'quote' ? (
+      ) : activeView === 'quote' ? (
       <Card className="print-area p-5">
         <div className="border-b-2 border-slate-900 pb-3">
           <h2 className="text-2xl font-extrabold text-slate-900">{doc.title}</h2>
@@ -242,7 +249,7 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
         </div>
       )}
 
-      {view === 'quote' && PREVIEW_TRADES.includes(calc.trade) ? (
+      {activeView === 'quote' && PREVIEW_TRADES.includes(calc.trade) ? (
         <AfterPreview c={c} update={update} calc={calc} design={design} showToast={showToast} title="AI 완공 예상 (손님께 함께 보여주기)" />
       ) : null}
 
@@ -256,7 +263,7 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
           className="mb-3"
         />
         <div className="grid grid-cols-2 gap-2">
-          {LETTERS.map((l, idx) => (
+          {letters.map((l, idx) => (
             <button
               key={l.id}
               type="button"

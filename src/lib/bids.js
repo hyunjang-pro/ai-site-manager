@@ -129,6 +129,8 @@ export function bidToCase(bid, rates = DEFAULT_RATES) {
     collection: 'deposit_wait',
     marginRate: info.defaultMargin,
     bufferRate: rates?.buffer ?? 6,
+    // 공고는 준공·검사 후 대금 지급이 일반적이다 (계약금 30/중도 40 기본값을 쓰지 않는다)
+    paymentPlan: { deposit: 0, mid: 0, balance: 100 },
     bid: {
       noticeNo: bid.noticeNo,
       title: bid.title,

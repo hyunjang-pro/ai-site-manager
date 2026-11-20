@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Camera, Check, Copy, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { BATHROOM_METHODS, DEMOLITION_SCOPES, SIZE_UNITS, TRADES, TRADE_LIST } from '../../lib/constants.js';
-import { classifyRequest, summarizeRequest } from '../../lib/classify.js';
+import { classifyRequest, summarizeRequest, autoCaseTitle } from '../../lib/classify.js';
 import { ocrAnalyzeWithTimeout, scenePhotoNote } from '../../lib/ocr.js';
 import { fileToThumb } from '../../lib/image.js';
 import {
@@ -53,9 +53,12 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
     const cur = c.subScopes || [];
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
     const priced = next.filter((x) => !String(x).startsWith('x:'));
+    const nextTrade = priced.length >= 2 ? 'combined' : priced.length === 1 ? priced[0] : c.trade;
     update({
       subScopes: next,
-      ...(priced.length >= 2 ? { trade: 'combined' } : priced.length === 1 ? { trade: priced[0] } : {}),
+      ...(priced.length >= 2 || priced.length === 1 ? { trade: nextTrade } : {}),
+      // 제목을 직접 고치지 않았으면 공종에 맞춰 제목도 바꿔준다 (철거+정지 → '전체 인테리어'로 남지 않게)
+      ...(c.titleAuto ? { title: autoCaseTitle(c, nextTrade, next) } : {}),
     });
   };
 
@@ -216,7 +219,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
           <Field label="현장 이름">
             <TextInput
               value={c.title}
-              onChange={(e) => update({ title: e.target.value })}
+              onChange={(e) => update({ title: e.target.value, titleAuto: false })}
               placeholder="예) 안동 풍산읍 15평 상가 철거"
               aria-label="현장 이름"
             />
@@ -343,6 +346,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
                   trade: v,
                   sizeUnit: SIZE_UNITS.includes(c.sizeUnit) && c.sizeUnit !== '모름' ? c.sizeUnit : t.defaultUnit,
                   marginRate: c.marginRate || t.defaultMargin,
+                  ...(c.titleAuto ? { title: autoCaseTitle(c, v, c.subScopes) } : {}),
                 });
               }}
             />

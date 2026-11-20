@@ -1,3 +1,4 @@
+import { hasScope } from './constants.js';
 // 공사순서·선행조건 잠금 게이트
 export const LEAK_PRECEDENT_WARNING =
   '아래층 누수 배상 판례: 1,050,000원 ~ 60,760,533원(서울동부지법 2022나33816, 책임 70% 제한). 방수 하자보수 책임은 3년입니다.';
@@ -59,6 +60,16 @@ export const STEP_GUIDES = {
       '숨은 물량(천장 위·벽 속)이 나오면 사진부터 찍습니다.',
     ],
     tell: '철거 기공에게 “성상별로 마대 분리해서 담고, 천장 위 숨은 물량 나오면 바로 사진 찍어 주세요.”',
+  },
+  groundwork: {
+    what: '땅을 파고 고르고 다지는 단계입니다. 파기 전에 배관·전선 위치를 확인하지 않으면 복구비를 우리가 냅니다.',
+    checks: [
+      '터파기 전 지반과 매설 배관·전선 위치를 사진으로 남깁니다(도면·탐지기 확인).',
+      '굴삭기 진입로 폭과 상부 전선 높이를 확인합니다.',
+      '잔토(남는 흙) 반출업체와 계량증명서를 미리 정합니다.',
+      '되메우기는 30cm씩 나눠 다집니다(한 번에 넣으면 나중에 꺼집니다).',
+    ],
+    tell: '장비 기사에게 “매설 배관 위치 표시했으니 그 선은 건드리지 마시고, 잔토는 따로 모아 주세요. 되메우기는 30cm씩 다져주세요.”',
   },
   waste: {
     what: '폐기물을 성상별로 나눠 상차하고 처리장으로 보내는 단계입니다. 계량증명서·처리확인서가 남아야 나중에 “어디에 버렸냐”는 말을 막을 수 있습니다.',
@@ -297,9 +308,10 @@ export function buildGates(c, trade) {
       warning: '단종 자재는 같은 규격으로 대체됩니다. 손님 승인을 먼저 받으세요.',
       done: !!(g.demo && g.evidence),
     };
-  } else if (trade === 'demolition' || trade === 'combined') {
+  } else if (trade === 'demolition' || (trade === 'combined' && hasScope(c, 'demolition'))) {
     const prereqs = [{ id: 'separate', label: '마대 성상 분리(5종)', done: !!g.separate }];
     if (estTons >= 5) prereqs.push({ id: 'plan', label: `5톤 이상 처리계획서 신고 (${estTons}톤)`, done: !!g.plan });
+    if (hasScope(c, 'groundwork')) prereqs.push({ id: 'buried', label: '지하 매설물·굴삭기 진입 확인', done: !!g.buried });
     prereqs.push({ id: 'evidence', label: '철거 전 6부위 촬영', done: !!g.evidence });
     gate3 = {
       id: 'g3',
@@ -387,17 +399,51 @@ export function buildTimeline(c, calc, gates = []) {
       { label: '완료 · 작업 확인·정산', done: gate4Done, items: ['작업 완료 확인', '추가 요구 정리', '잔금 정산'] },
     ];
   }
-  const waterproof = trade === 'bathroom' || trade === 'combined';
+  // 공종/세부 공종에 실제로 있는 공정만 보여준다 — 철거+정지에 '담수·타일'이 나오면 안 된다.
+  const demo = hasScope(c, 'demolition');
+  const ground = hasScope(c, 'groundwork');
+  const bath = hasScope(c, 'bathroom');
+  const finish = hasScope(c, 'wallpaper') || hasScope(c, 'kitchen') || bath || hasScope(c, 'plaster');
+
+  if (trade === 'combined' && !finish) {
+    // 철거·정지·부지 정리처럼 마감이 없는 복합
+    return [
+      {
+        label: 'D-2 · D-1 사전 준비',
+        done: depositDone,
+        items: ['반출 차량·장비 배차', '관리실 신고·보양', '성상 분리 마대 준비'],
+      },
+      {
+        label: '당일 · 반출·터파기',
+        done: gate3Done,
+        items: [
+          ...(demo ? ['철거·해체', '성상 분리 반출'] : []),
+          ...(ground ? ['터파기·정지', '다짐·되메우기'] : []),
+          ...(!demo && !ground ? ['현장 작업', '반출·정리'] : []),
+        ],
+      },
+      {
+        label: '완료 · 확인·잔금',
+        done: gate4Done,
+        items: ['계량증명서·처리확인서', '철거 후 사진', '잔금 입금'],
+      },
+    ];
+  }
+
   return [
     {
       label: 'D-2 · D-1 사전 준비',
       done: depositDone,
-      items: ['자재 발주', '관리실 신고·보양', '사다리차 승인'],
+      items: ['자재 발주', '관리실 신고·보양', ...(hasScope(c, 'window') || !finish ? ['사다리차 승인'] : ['양중·반입 확인'])],
     },
     {
       label: '시공 당일',
       done: gate3Done,
-      items: waterproof ? ['철거·양중', '방수 2회', '담수 48시간', '타일·마감'] : ['철거·반출', '주공정 시공', '마감 정리'],
+      items: bath
+        ? ['철거·양중', '방수 2회', '담수 48시간', '타일·마감']
+        : demo
+        ? ['철거·반출', '주공정 시공', '마감 정리']
+        : ['바탕 정리', '주공정 시공', '마감 정리'],
     },
     { label: '완료 · 잔금', done: gate4Done, items: ['준공 사진', '하자 정리', '잔금 입금'] },
   ];
@@ -437,6 +483,16 @@ export const EVIDENCE_BY_TRADE = {
       { id: 'neighbor', label: '아래집·옆집', hint: '기존 균열·누수 흔적' },
     ],
   },
+  groundwork: {
+    title: '터파기 전·후 기록',
+    hint: '땅을 파기 전 지반·매설물 사진이 없으면 배관 파손·잔토 분쟁에서 우리가 집니다.',
+    spots: [
+      { id: 'before', label: '터파기 전 지반', hint: '전체샷 + 기준점' },
+      { id: 'buried', label: '매설 배관·전선 위치', hint: '탐지·도면 확인 후' },
+      { id: 'access', label: '장비 진입로', hint: '굴삭기 폭·전선 높이' },
+      { id: 'after', label: '되메우기·다짐 후', hint: '터파기 전과 같은 각도' },
+    ],
+  },
   finish: {
     title: '작업 전·후 기록',
     hint: '작업 전·후를 같은 각도로 남겨두면 “네 공사 때문에 생긴 것”이라는 말을 막을 수 있습니다.',
@@ -449,9 +505,15 @@ export const EVIDENCE_BY_TRADE = {
   },
 };
 
-export function evidenceFor(trade) {
+export function evidenceFor(trade, c = null) {
   if (trade === 'waste') return EVIDENCE_BY_TRADE.waste;
   if (trade === 'labor') return EVIDENCE_BY_TRADE.labor;
-  if (trade === 'demolition' || trade === 'combined') return EVIDENCE_BY_TRADE.demolition;
+  if (trade === 'demolition') return EVIDENCE_BY_TRADE.demolition;
+  if (trade === 'groundwork') return EVIDENCE_BY_TRADE.groundwork;
+  if (trade === 'combined') {
+    const demo = c ? hasScope(c, 'demolition') : true;
+    if (demo) return EVIDENCE_BY_TRADE.demolition;
+    if (c && hasScope(c, 'groundwork')) return EVIDENCE_BY_TRADE.groundwork;
+  }
   return EVIDENCE_BY_TRADE.finish;
 }

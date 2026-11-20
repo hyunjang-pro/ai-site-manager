@@ -355,6 +355,68 @@ export const REGION_DEFAULT = '안동';
 export const BUFFER_OPTIONS = [0, 5, 6, 8];
 export const BUFFER_DEFAULT = 6;
 
+// ── 스타일·자재(분위기·등급)를 고르는 '인테리어·마감' 공종 판별 ──
+// 철거·폐기물·기초·정지·인력에는 자재 등급(실속/표준/고급) 개념이 없다.
+// 그런 현장에 '고급·호텔 느낌' 같은 자재 세트가 붙으면 견적이 엉뚱하게 올라간다.
+export const INTERIOR_STYLE_TRADES = [
+  'wallpaper',
+  'bathroom',
+  'kitchen',
+  'carpentry',
+  'film',
+  'window',
+  'repair',
+  'plaster',
+];
+
+// 복합(집 전체)에서 '마감'으로 쳐주는 세부 공종 — 하나라도 있으면 인테리어 현장이다.
+export const INTERIOR_SCOPES = ['wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster'];
+
+// 직접 입력·기타 현장에서 인테리어로 볼 키워드 (철거·폐기물·토목 단어는 넣지 않는다)
+const INTERIOR_WORDS =
+  /도배|벽지|장판|마루|욕실|화장실|주방|부엌|싱크|타일|창호|샷시|목공|몰딩|필름|시트지|수선|보수|미장|마감|인테리어|리모델링|도장|페인트|중문|신발장|걸레받이|문틀|도어/;
+
+/**
+ * 이 현장이 스타일·자재(분위기 등급)를 고르는 인테리어·마감 현장인지.
+ * - 마감 공종(도배·욕실·주방·목공·필름·창호·수선·미장·타일) → true
+ * - 타일·방수는 방수만 하는 현장이면 false
+ * - 복합은 세부 공종에 마감이 하나라도 있어야 true (철거+정지뿐이면 false)
+ * - 철거·폐기물·기초·정지·인력·전기·설비 → false
+ * - 직접 입력·미분류는 적힌 내용에 인테리어 키워드가 있을 때만 true
+ */
+export function hasInteriorStyle(c) {
+  const trade = c && TRADES[c.trade] ? c.trade : 'unclassified';
+  if (INTERIOR_STYLE_TRADES.includes(trade)) return true;
+  if (trade === 'tilewaterproof') return (c?.tileWork?.mode || 'both') !== 'waterproof';
+  if (trade === 'combined') {
+    const scopes = (Array.isArray(c?.subScopes) ? c.subScopes : []).filter((s) => typeof s === 'string');
+    if (!scopes.length) return true; // 세부 공종을 안 골랐으면 복합 인테리어로 본다
+    return scopes.some((s) => INTERIOR_SCOPES.includes(s) || (s.startsWith('x:') && INTERIOR_WORDS.test(s)));
+  }
+  if (trade === 'custom' || trade === 'unclassified') {
+    const text = `${c?.title || ''} ${c?.tradeName || ''} ${c?.notes || ''} ${c?.rawInput || ''}`;
+    return INTERIOR_WORDS.test(text);
+  }
+  return false;
+}
+
+export const WORK_TYPE_LABEL = {
+  all: '전체',
+  demolition: '철거·해체',
+  wallpaper: '도배·장판',
+  tilewaterproof: '타일·방수',
+  window: '창호·발코니',
+  interior: '실내건축·수선',
+  waste: '폐기물',
+  labor: '인력',
+};
+
+// 공고의 공사 종류(영문 id)를 한글로
+export function workTypeLabel(types) {
+  const list = (Array.isArray(types) ? types : [types]).filter(Boolean).map((t) => WORK_TYPE_LABEL[t] || String(t));
+  return list.join(' · ');
+}
+
 export const WORK_TYPES = [
   { id: 'all', label: '전체' },
   { id: 'demolition', label: '철거·해체', trades: ['demolition'] },
@@ -365,3 +427,26 @@ export const WORK_TYPES = [
   { id: 'waste', label: '폐기물', trades: ['waste'] },
   { id: 'labor', label: '인력', trades: ['labor'] },
 ];
+
+// 이 현장에 함께 켠 세부 공종 (복합 현장용)
+export function scopeList(c) {
+  return (Array.isArray(c?.subScopes) ? c.subScopes : []).filter((s) => typeof s === 'string');
+}
+
+// 이 현장에 그 공종이 들어 있는지 — 복합이면 세부 공종까지 본다.
+export function hasScope(c, id) {
+  const trade = c?.trade;
+  if (trade === id) return true;
+  if (trade === 'combined') {
+    if (id === 'bathroom' || id === 'kitchen' || id === 'wallpaper') {
+      const scopes = scopeList(c);
+      if (scopes.length) return scopes.includes(id);
+      // 세부 공종을 안 골랐을 때만 기존처럼 넓게 본다(복합 = 집 전체)
+      return true;
+    }
+    return scopeList(c).includes(id);
+  }
+  if (id === 'bathroom' && trade === 'tilewaterproof') return (c?.tileWork?.mode || 'both') !== 'waterproof';
+  if (id === 'bathroom' && trade === 'plaster') return !!c?.plaster?.tile;
+  return false;
+}

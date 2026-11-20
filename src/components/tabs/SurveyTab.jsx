@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Camera, Check, Copy, Loader2, Trash2, Wand2 } from 'lucide-react';
-import { SURVEY_GROUPS, TRADES } from '../../lib/constants.js';
+import { SURVEY_GROUPS, TRADES, hasScope, scopeList } from '../../lib/constants.js';
 import { toPyung } from '../../lib/pricing.js';
 import { ratesOf } from '../../lib/rates.js';
 import { computeWaste, WASTE_SCOPES, vehicleRealCost } from '../../lib/waste.js';
 import { assessAsbestos, ASBESTOS_CLAUSE } from '../../lib/asbestos.js';
 import { parseAdjustment, PROCESS_KEYWORDS, PROCESS_TO_SURVEY, surveyDrafts } from '../../lib/parse.js';
 import { analyzeSurveyWithGemini, getGeminiKey } from '../../lib/gemini.js';
+import { useSurveyGuide } from '../../lib/useSurveyGuide.js';
 import { ocrAnalyzeWithTimeout } from '../../lib/ocr.js';
 import { fileToThumb } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
@@ -33,14 +34,18 @@ export default function SurveyTab({ c, update, calc, showToast }) {
   const waste = useMemo(() => computeWaste(c.waste, c), [c]);
   const asbestos = useMemo(() => assessAsbestos(c.asbestos), [c.asbestos]);
   const trade = calc.trade;
-  const isDemolition = trade === 'demolition' || trade === 'combined';
+  // 석면·폐기물 블록은 철거가 실제로 들어간 현장만 (도배+욕실 복합에 철거 얘기를 붙이지 않는다)
+  const isDemolition = trade === 'demolition' || hasScope(c, 'demolition');
+  const isGroundwork = trade === 'groundwork' || hasScope(c, 'groundwork');
 
   return (
     <div className="space-y-4">
       <ChangeQuick c={c} update={update} calc={calc} showToast={showToast} />
 
+      <SurveyGuideCard c={c} update={update} calc={calc} />
+
       <SectionCard
-        num="2"
+        num="3"
         title="현장 점검 (운반·실측·폐기물)"
         subtitle="여기서 체크한 것이 견적과 순서에 바로 반영됩니다."
         status={<Pill tone={calc.lifting.warnings.length ? 'warn' : 'ok'}>{calc.lifting.warnings.length ? '확인 필요' : '기본'}</Pill>}
@@ -73,6 +78,7 @@ export default function SurveyTab({ c, update, calc, showToast }) {
           </Details>
 
           <WasteBlock c={c} update={update} waste={waste} showToast={showToast} />
+          {isGroundwork ? <GroundworkBlock c={c} update={update} /> : null}
           {isDemolition ? <AsbestosBlock c={c} update={update} asbestos={asbestos} showToast={showToast} /> : null}
 
           <CustomChecklist c={c} update={update} showToast={showToast} />
@@ -84,10 +90,90 @@ export default function SurveyTab({ c, update, calc, showToast }) {
   );
 }
 
+// 답사 현장에서 '왜·뭘' 확인해야 하는지 — AI가 연결되어 있으면 이 현장에 맞춰 만든 4가지를 보여준다.
+function SurveyGuideCard({ c, update, calc }) {
+  const { aiOn, busy, guide, retry } = useSurveyGuide(c, calc, update);
+  return (
+    <SectionCard
+      num="2"
+      title="답사 시 왜·뭘 확인해야 하나"
+      subtitle={
+        guide.source === 'ai'
+          ? 'AI가 이 현장(공종·규모·건물·관공서 여부)에 맞춰 고른 확인 포인트입니다.'
+          : '현장에서 이 4가지만 눈으로 보면, 나중에 돈이 새는 곳을 미리 막을 수 있습니다.'
+      }
+      status={
+        guide.source === 'ai' ? (
+          <Pill tone="info">{busy ? 'AI 확인 중' : '🤖 AI 맞춤'}</Pill>
+        ) : aiOn ? (
+          <Pill tone="plain">{busy ? 'AI 확인 중' : '기본 가이드'}</Pill>
+        ) : (
+          <Pill tone="warn">확인 4가지</Pill>
+        )
+      }
+    >
+      <div className="space-y-2">
+        {guide.rows.map((r, i) => (
+          <div key={i} className="rounded-2xl bg-slate-50 p-3">
+            <p className="flex items-center gap-1.5 text-sm font-extrabold text-ink">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-900 text-[10px] font-black text-white">
+                {i + 1}
+              </span>
+              {r.check}
+            </p>
+            {r.why ? <p className="mt-1 text-[13px] font-semibold leading-5 text-rose-800">왜: {r.why}</p> : null}
+            {r.how ? <p className="mt-0.5 text-[13px] font-semibold leading-5 text-ink-2">이렇게: {r.how}</p> : null}
+          </div>
+        ))}
+        {guide.comment ? (
+          <p className="rounded-xl bg-brand-soft px-3 py-2 text-2xs font-bold leading-4 text-brand-strong">🤖 {guide.comment}</p>
+        ) : null}
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-2xs font-bold leading-4 text-amber-900">
+          확인한 내용은 위 <b>1. 답사 메모</b>에 한 줄로 적으면 최종 견적에 바로 반영됩니다. (예: “폐기물 두 차는 나올듯”, “벽에 물기 많아 방수 필요”)
+        </p>
+        {aiOn ? (
+          <button type="button" onClick={retry} className="text-2xs font-bold text-brand underline underline-offset-2">
+            {guide.source === 'ai' ? 'AI로 이 현장 다시 뽑기' : 'AI로 이 현장에 맞춰 뽑기'}
+          </button>
+        ) : (
+          <p className="text-2xs font-bold text-ink-3">설정에서 Gemini API 키를 연결하면 이 현장에 맞춰 AI가 다시 골라 줍니다.</p>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+// 기초·정지 현장에서 '이건 왜 없지?' 하는 실무 확인 — 돈이 아니라 사고를 막는 체크
+const GROUND_CHECKS = [
+  { id: 'gw_buried', label: '지하 매설 배관·전선 위치 확인', hint: '도면·탐지기 · 모르고 파면 복구비가 우리 몫' },
+  { id: 'gw_access', label: '굴삭기 진입로 폭·상부 전선 높이', hint: '안 맞으면 소형 장비로 나눠 공사해야 합니다' },
+  { id: 'gw_soil', label: '잔토(남는 흙) 반출처·계량증명서', hint: '허가업체 반출 · 처리 확인서 보관' },
+  { id: 'gw_compact', label: '되메우기 30cm씩 나눠 다짐', hint: '한 번에 넣으면 나중에 꺼져 재시공입니다' },
+];
+
+function GroundworkBlock({ c, update }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <p className="text-sm font-extrabold text-ink">기초·정지 현장 확인</p>
+      <p className="mt-0.5 text-xs font-semibold leading-4 text-ink-3">금액은 안 바뀌지만, 여기서 놓치면 나중에 배상으로 나갑니다.</p>
+      <div className="mt-2 space-y-2">
+        {GROUND_CHECKS.map((it) => (
+          <CheckRow
+            key={it.id}
+            checked={!!c.survey?.[it.id]}
+            onChange={(v) => update({ survey: { ...(c.survey || {}), [it.id]: v } })}
+            label={it.label}
+            hint={it.hint}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LiftingBlock({ c, update, calc }) {
   const lift = c.lifting || {};
-  const setLift = (patch) => update({ lifting: { ...lift, ...patch } });
-  return (
+  const setLift = (patch) => update({ lifting: { ...lift, ...patch } });  return (
     <div className="space-y-3">
       <p className="text-base font-extrabold text-slate-800">자재·폐기물 운반 4가지</p>
       <div className="grid grid-cols-2 gap-3">
@@ -592,7 +678,7 @@ function MissingLines({ c, update, calc }) {
   if (!noSiteCare) rows.push({ id: 'adminDeposit', label: '관리사무소 신고·동의서', detail: '신고 없이 착공하면 중단될 수 있음', amount: 8 });
   if (!noSiteCare && !hasElevator) rows.push({ id: 'materialLift', label: '자재를 층까지 올리는 인력', detail: '엘베 없음 · 계단 양중', amount: 15 });
   if (!noSiteCare && !hasElevator && !ladderOff) rows.push({ id: 'ladderHalf', label: '사다리차 반나절', detail: '자재·폐기물 반출', amount: 35 });
-  if (trade === 'demolition' || trade === 'waste' || trade === 'combined') {
+  if (trade === 'demolition' || trade === 'waste' || hasScope({ trade, subScopes: c?.subScopes }, 'demolition')) {
     rows.push({
       id: 'wasteMixed',
       label: '혼합 폐기물 있음',

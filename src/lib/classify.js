@@ -27,6 +27,36 @@ const TRADE_TITLE = {
   custom: '현장',
 };
 
+// 복합 현장의 제목 — 철거+정지를 '전체 인테리어'라고 부르면 현장과 안 맞는다.
+const SCOPE_TITLE = {
+  demolition: '철거',
+  groundwork: '기초·정지',
+  wallpaper: '도배·장판',
+  bathroom: '욕실',
+  kitchen: '주방',
+  entrance: '현관',
+  plaster: '바닥 미장',
+  carpentry: '문·몰딩',
+  electric: '전기·조명',
+};
+export function combinedTitle(scopes = []) {
+  const names = scopes.filter((s) => SCOPE_TITLE[s]).map((s) => SCOPE_TITLE[s]);
+  if (!names.length) return '전체 인테리어';
+  const interiorish = scopes.some((s) => ['wallpaper', 'bathroom', 'kitchen', 'entrance'].includes(s));
+  if (interiorish && names.length >= 3) return '전체 인테리어';
+  return names.slice(0, 3).join('·');
+}
+
+// 현장 제목 자동 만들기 — 공종을 바꾸면 제목도 같이 맞춘다(사용자가 직접 고친 제목은 건드리지 않는다).
+export function autoCaseTitle(c, tradeOverride, scopesOverride) {
+  const trade = tradeOverride || c?.trade;
+  const region = c?.region && c.region !== '기타' ? c.region : '';
+  const size = c?.sizeValue ? `${c.sizeValue}${c.sizeUnit || ''}` : '';
+  const scopes = scopesOverride || (Array.isArray(c?.subScopes) ? c.subScopes : []);
+  const label = trade === 'combined' ? combinedTitle(scopes) : TRADE_TITLE[trade] || TRADES[trade]?.short || '현장';
+  return [region, size, label].filter(Boolean).join(' ') || '새 현장';
+}
+
 export function classifyRequest(rawText = '') {
   const text = String(rawText || '')
     .replace(/\r/g, '\n')
@@ -77,8 +107,13 @@ export function classifyRequest(rawText = '') {
     ids.includes('groundwork') && ids.some((id) => ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster'].includes(id));
 
   let trade = 'unclassified';
+  // 욕실·주방 하나만 철거·교체하는 현장은 복합이 아니라 그 공종이다 (철거는 그 공정 안에 포함)
+  const oneRoom =
+    (ids.includes('bathroom') && !ids.includes('wallpaper') && !ids.includes('kitchen')) ||
+    (ids.includes('kitchen') && !ids.includes('wallpaper') && !ids.includes('bathroom'));
   if (fullInterior) trade = 'combined';
   else if (withGroundwork) trade = 'combined';
+  else if (oneRoom && (ids.includes('demolition') || ids.includes('tilewaterproof'))) trade = ids.includes('bathroom') ? 'bathroom' : 'kitchen';
   else if (core.length >= 2) trade = 'combined';
   else if (ids.includes('demolition')) trade = 'demolition';
   else if (ids.includes('labor')) trade = 'labor';
@@ -253,7 +288,12 @@ export function classifyRequest(rawText = '') {
       : '';
   const wasteVehicleLabel = { half: '반차(0.5톤)', ton1: '1톤 1차', ton25: '2.5톤' }[wasteVehicleId] || '';
 
-  const rows = [{ label: '공종', value: TRADES[trade]?.label || '미분류' }];
+  const rows = [
+    {
+      label: '공종',
+      value: trade === 'combined' ? `복합 (${combinedTitle(Array.from(new Set(subScopes)))})` : TRADES[trade]?.label || '미분류',
+    },
+  ];
   if (sizeValue) rows.push({ label: '규모', value: `${sizeValue}${sizeUnit}` });
   if (region || location) rows.push({ label: '지역', value: location || region });
   if (floorMatch) rows.push({ label: '층 / 엘베', value: `${floorMatch[1]}층 · ${elevator === 'no' ? '없음' : elevator === 'yes' ? '있음' : '확인 필요'}` });
@@ -266,7 +306,8 @@ export function classifyRequest(rawText = '') {
   if (region) titleParts.push(region);
   else if (locMatch?.[2]) titleParts.push(locMatch[2]);
   if (sizeValue) titleParts.push(`${sizeValue}${sizeUnit}`);
-  titleParts.push(TRADE_TITLE[trade] || '현장');
+  // 복합이면 실제로 켠 세부 공종으로 제목을 만든다 (철거+정지는 '전체 인테리어'가 아니다)
+  titleParts.push(trade === 'combined' ? combinedTitle(Array.from(new Set(subScopes))) : TRADE_TITLE[trade] || '현장');
   const suggestTitle = trade === 'unclassified' ? '새 현장' : titleParts.join(' ');
 
   const patch = {

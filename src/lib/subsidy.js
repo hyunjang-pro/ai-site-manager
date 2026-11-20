@@ -1,3 +1,5 @@
+import { hasScope } from './constants.js';
+
 // 폐업 소상공인 점포철거비 지원금 (희망리턴패키지 원스톱폐업지원)
 // 근거: 소상공인시장진흥공단 2026년 공고 — 전용면적 3.3㎡(1평)당 20만원, 최대 600만원(2025-07-11 이후 폐업), 부가세 제외.
 // 이 금액은 손님이 공단에서 돌려받는 돈이며, 우리 견적에 더하는 돈이 아니다.
@@ -13,7 +15,9 @@ const STORE_TEXT = /상가|점포|매장|폐업|원상복구|임차|사무실/;
 
 export function subsidyInfo(c) {
   const text = `${c?.title || ''} ${c?.notes || ''} ${c?.rawInput || ''} ${c?.location || ''}`;
-  const storeish = c?.trade === 'demolition' || c?.trade === 'combined' || STORE_TEXT.test(text);
+  // 점포철거비는 '철거'가 들어간 상가 현장만 — 폐기물 수거·욕실·도배 현장에는 해당 없음
+  const demoJob = c?.trade === 'demolition' || hasScope(c, 'demolition');
+  const storeish = demoJob && (c?.trade === 'demolition' || c?.trade === 'combined' || STORE_TEXT.test(text));
   const value = parseFloat(c?.sizeValue);
   const unit = c?.sizeUnit;
   let pyung = null;

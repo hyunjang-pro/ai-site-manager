@@ -1,6 +1,7 @@
 // 업체별 자재 발주 리스트 — "발주 문자" 하나로 뭉뚱그리지 않고, 거래처마다 따로 발주한다.
 // 각 업체 카드: 품명·규격·수량 + 저렴하게 사는 팁 + 그 업체에만 보낼 짧은 발주 내용.
 import { toPyung } from './pricing.js';
+import { scopeList } from './constants.js';
 
 const num = (v, f = 0) => {
   const n = parseFloat(v);
@@ -20,6 +21,208 @@ function group(id, vendor, tone, items, tips, extra = {}) {
     message: [`[자재 발주] ${vendor}`, ...lines, ...(extra.footer ? ['', extra.footer] : [])].join('\n'),
     ...extra,
   };
+}
+
+
+// 복합 현장의 세부 공종별 발주 — 켜 둔 공종의 품목만 만든다.
+function scopeOrderGroups(scope, c, calc, pyung, order, sizeVal, unit) {
+  const out = [];
+  if (scope === 'demolition') {
+    out.push(
+      group(
+        'demo-bag',
+        '철물점 / 건재상 (철거 준비물)',
+        'amber',
+        [
+          { name: order.bag || '마대 5종 분리', qty: `${ceil(pyung * 4)}장` },
+          { name: order.protect || '부직포 + 비닐 보양', qty: '각 1롤' },
+          { name: '커터날·바리깡 날', qty: '10개' },
+          { name: '방진마스크·작업장갑', qty: '인부 수만큼' },
+        ],
+        [
+          '마대를 5종(콘크리트·목재·석고·금속·비닐)으로 나누면 처리비가 최대 6배 차이 납니다.',
+          '보양재는 현장 근처 철물점이 온라인보다 빠릅니다. 착공 전날까지 준비하세요.',
+        ],
+        { footer: `철거 면적 ${pyung}평 기준 / 착공 전날까지` }
+      ),
+      group(
+        'demo-equip',
+        '장비·폐기물 업체',
+        'slate',
+        [
+          { name: '집게차(1회 출동)', qty: `${Math.max(1, Math.round(pyung / 10))}회` },
+          { name: '1톤/2.5톤 덤프', qty: `${Math.max(1, Math.round(pyung / 5))}대` },
+          { name: '처리확인서(올바로)', qty: '1부' },
+        ],
+        ['집게차는 오전 예약이 대기 없이 빠릅니다.', '폐기물 차량은 성상 분리 뒤에 부르세요. 섞이면 대수가 늘어납니다.'],
+        { footer: '방문: 착공일 오전 8시 / 주차·진입로 확인' }
+      )
+    );
+  } else if (scope === 'groundwork') {
+    const area = Math.max(1, +(pyung * 3.3).toFixed(1));
+    out.push(
+      group(
+        'ground-mat',
+        '골재상 / 건재상',
+        'orange',
+        [
+          { name: '쇄석·잡석(기초 골재)', qty: `${ceil(area * 0.12)}㎥` },
+          { name: '시멘트·레미탈(40kg)', qty: `${ceil(area * 0.6)}포` },
+          { name: '메쉬·철근(바닥 보강)', qty: `${ceil(area / 10)}롤` },
+        ],
+        ['골재는 ㎥ 단위로 주문합니다. 다짐 전에 물을 뿌려야 밀도가 나옵니다.', '잔토(남는 흙)는 반출 허가업체에 맡기고 계량증명서를 받으세요.'],
+        { footer: `${area}㎡ 기준 / 착공 D-2 발주` }
+      ),
+      group(
+        'ground-equip',
+        '장비 대여 / 반출',
+        'slate',
+        [
+          { name: '굴삭기(0.8㎥)', qty: `1대 · ${Math.max(1, Math.ceil(area / 60))}일` },
+          { name: '다짐기(콤팩터)', qty: '1대 · 1일' },
+          { name: '잔토 반출 덤프', qty: `${Math.max(1, Math.ceil(area / 40))}대` },
+        ],
+        ['굴삭기는 진입로 폭과 상부 전선 높이를 먼저 확인하세요.', '장비는 하루 단위로 빌립니다. 우천이면 다음 날로 미루세요.'],
+        { footer: `${area}㎡ 기준 / 장비 진입로·매설물 확인 후` }
+      )
+    );
+  } else if (scope === 'wallpaper') {
+    const wallPyung = +(pyung * 2.3).toFixed(1);
+    const rolls = ceil((wallPyung / num(order.rollPerPyung, 5)) * 1.15);
+    const floorSqm = Math.round(pyung * 2.3);
+    out.push(
+      group(
+        'wall',
+        '벽지 도매상',
+        'amber',
+        [
+          { name: order.wallpaper || '광폭 합지', spec: '롤당 5평', qty: `${rolls}롤 (로스 15%)` },
+          { name: '친환경 벽지풀', qty: `${ceil(rolls / 4)}말` },
+          { name: '초배지', qty: `${ceil(wallPyung / 10)}롤` },
+        ],
+        ['같은 로트로 받아야 색 차이가 없습니다.', '롤 단가는 30롤 이상 주문할 때 유리합니다.'],
+        { footer: `벽 ${wallPyung}평 기준 / 납기: 도배 D-2` }
+      ),
+      group(
+        'floor',
+        '장판 대리점',
+        'orange',
+        [{ name: order.floor || '2.0T 모노륨 장판', qty: `${ceil(floorSqm / 5.5)}롤 (${floorSqm}㎡)` }, { name: '장판 본드(수성)', qty: `${ceil(floorSqm / 25)}통` }],
+        ['장판은 폭 1.83m로 재단합니다. 이음새 위치를 먼저 정하세요.'],
+        { footer: `바닥 ${floorSqm}㎡ / 납기: 장판 D-2` }
+      )
+    );
+  } else if (scope === 'bathroom') {
+    const kans = unit === '칸' && sizeVal > 0 ? sizeVal : 1;
+    const area = +(kans * 5.9).toFixed(1);
+    const boxArea = num(order.tileBox, 3.6);
+    out.push(
+      group(
+        'bath-tile',
+        '타일·도기 대리점',
+        'cyan',
+        [
+          { name: order.tile || '600×600 포세린', spec: `1박스 ${boxArea}㎡`, qty: `${ceil((area * 1.1) / boxArea)}박스` },
+          { name: '타일 접착제', qty: `${ceil(area / 5)}포` },
+          { name: '줄눈재(무광)', qty: `${ceil(area / 8)}포` },
+          { name: order.fixture || '도기·수전 세트', qty: `${ceil(kans)}세트` },
+        ],
+        ['파손 대비 여유분 10%와 같은 로트는 기본입니다.', '도기·수전은 대리점 정품이 A/S됩니다.'],
+        { footer: `${kans}칸 기준 / 납기: 철거 D-1` }
+      ),
+      group(
+        'bath-water',
+        '방수 자재상',
+        'sky',
+        [
+          { name: order.waterproof || '2액형 우레탄 방수', qty: `${ceil(kans)}세트(20kg)` },
+          { name: '방수 프라이머', qty: `${ceil(kans)}통(4L)` },
+          { name: '보강테이프(모서리·배관)', qty: `${ceil(kans * 2)}롤` },
+        ],
+        ['방수는 프라이머와 같은 브랜드 세트로 사야 들뜸이 없습니다.'],
+        { footer: '담수 48시간 시험 전 도포' }
+      )
+    );
+  } else if (scope === 'kitchen') {
+    const meters = unit === 'm' && sizeVal > 0 ? sizeVal : 3.2;
+    out.push(
+      group(
+        'kitchen',
+        '싱크대·상판 업체',
+        'rose',
+        [
+          { name: order.sink || 'LPM 상·하부장', spec: 'm당', qty: `${meters}m` },
+          { name: order.top || '인조대리석 상판', qty: `${meters}m (수전 홀 가공)` },
+          { name: '수전·싱크볼 세트', qty: '1세트' },
+        ],
+        ['상판은 실측 확정 후 가공합니다. 수전 홀 위치를 문자로 남기세요.', '후드·가스레인지는 재사용 여부를 먼저 정하세요.'],
+        { footer: `${meters}m 기준 / 실측 후 발주` }
+      )
+    );
+  } else if (scope === 'entrance') {
+    out.push(
+      group(
+        'entrance',
+        '중문·신발장 업체',
+        'indigo',
+        [
+          { name: '3연동 중문', qty: '1세트 (실측)' },
+          { name: '신발장(맞춤)', qty: '1개 (실측)' },
+          { name: '현관 타일', qty: '2㎡' },
+        ],
+        ['중문은 실측 후 제작이라 납기 2주입니다. 현관 폭을 먼저 재세요.'],
+        { footer: '실측 후 발주 / 납기 2주' }
+      )
+    );
+  } else if (scope === 'plaster') {
+    const area = unit === '㎡' && sizeVal > 0 ? sizeVal : Math.max(1, +(pyung * 3.3).toFixed(1));
+    out.push(
+      group(
+        'mortar',
+        '건재상 / 레미탈 대리점',
+        'orange',
+        [
+          { name: order.mortar || '고강도 몰탈(25kg)', qty: `${ceil(area * 2)}포` },
+          { name: order.mesh || '전면 메쉬', qty: `${ceil(area / 10)}롤` },
+          { name: '양생 비닐', qty: '1롤' },
+        ],
+        ['몰탈은 ㎡당 2포대(30mm) 기준입니다.', '양생 전 출입하면 바닥이 깨져 재시공입니다.'],
+        { footer: `${area}㎡ 기준 / 납기: 미장 D-1` }
+      )
+    );
+  } else if (scope === 'carpentry') {
+    out.push(
+      group(
+        'wood',
+        '목재상 / 문·몰딩 업체',
+        'amber',
+        [
+          { name: '문틀·몰딩(MDF)', qty: '문 개수 실측 후' },
+          { name: '문짝·경첩·손잡이', qty: '문 개수만큼' },
+          { name: '도장재(문짝 페인트)', qty: '1식' },
+        ],
+        ['문틀 규격을 잘못 재면 맞춤 제작으로 자재비가 2~3배 붙습니다.'],
+        { footer: '문 개수·규격 실측 후 발주' }
+      )
+    );
+  } else if (scope === 'electric') {
+    const points = unit === '개소' && sizeVal > 0 ? sizeVal : 5;
+    out.push(
+      group(
+        'elec',
+        '전기 자재상',
+        'yellow',
+        [
+          { name: '스위치·콘센트', qty: `${ceil(points)}개소` },
+          { name: 'LED 조명', qty: `${Math.max(2, ceil(points))}개` },
+          { name: '전선·몰드', qty: '1식' },
+        ],
+        ['분전함 용량을 먼저 확인하세요. 증설이면 한전 승압 비용이 붙습니다.'],
+        { footer: '차단기 용량 확인 후 발주' }
+      )
+    );
+  }
+  return out;
 }
 
 // 공종별 발주 구성. calc·mset(선택한 자재 세트)에 따라 품명·수량이 바뀐다.
@@ -338,6 +541,28 @@ export function buildOrderGroups(c, calc, design, mset) {
         { footer: `${tons}톤 기준 / 방문: 반출일 08:00` }
       )
     );
+  } else if (trade === 'combined') {
+    // 복합은 켜 둔 세부 공종만 발주한다 — 철거+정지에 합지·타일·도기가 나오면 안 된다.
+    const scopes = scopeList(c);
+    if (!scopes.length) {
+      const bag = ceil(pyung * 3);
+      groups.push(
+        group(
+          'multi',
+          '건재상 (복합 자재 일괄)',
+          'indigo',
+          [
+            { name: order.wallpaper || '합지·장판', qty: `${pyung}평분` },
+            { name: order.tile || '타일', qty: '욕실·주방 실측 후' },
+            { name: '마대·보양재', qty: `${bag}장` },
+          ],
+          ['복합 공사는 자재를 한 건재상에서 묶어야 운반비가 한 번만 나갑니다.', '품목이 많으면 발주서를 문자로 남겨 두세요. 분쟁 때 근거가 됩니다.'],
+          { footer: `규모 ${pyung}평 기준 / 착공 D-3 발주` }
+        )
+      );
+    } else {
+      scopes.forEach((sc) => groups.push(...scopeOrderGroups(sc, c, calc, pyung, order, sizeVal, unit)));
+    }
   } else {
     const bag = ceil(pyung * 3);
     groups.push(

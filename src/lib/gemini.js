@@ -482,7 +482,7 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
 }
 
 
-// 조사한 2026 실견적 60건 · 현장 고충/노하우 84건 · 법령/판례에서 뽑은 기준 지식.
+// 조사한 2026 실견적 419건 DB · 현장 고충/노하우 84건 · 법령/판례에서 뽑은 기준 지식.
 // AI가 인터넷 평균값 대신 이 기준으로 판단하게 한다.
 export const GEMINI_KNOWLEDGE = `
 [2026 경북·안동 실무 기준 — 이 값에서 크게 벗어나지 않게 판단]
@@ -516,13 +516,16 @@ export const GEMINI_KNOWLEDGE = `
 const CASE_PROMPT = `너는 경북 안동의 철거·인테리어 현장 매니저를 돕는 분석가다.
 고객 문의 글과 현장 사진을 보고, 아래 JSON만 답한다. 설명 문장은 넣지 않는다.
 
-{"trade":"공종ID","tradeName":"공종이 목록에 없을 때만 한글 이름","title":"현장 제목(지역+규모+공종)","sizeValue":"숫자 문자열 또는 빈 문자열","sizeUnit":"평|㎡|m|칸|개|개소|톤|명|모름","floor":"숫자 문자열 또는 빈 문자열","elevator":"yes|no|unknown","siteCondition":"사진·글로 본 현장 상태(노후 싱크대, 누수 흔적 등)","materials":["필요 자재 3~6개, 규격 포함"],"crew":[{"role":"역할","count":숫자}],"priceRange":{"min":숫자,"max":숫자},"surveyChecks":[{"label":"답사에서 확인할 것","why":"놓치면 생기는 일","amount":예상 추가비 만원 숫자}],"wishText":"문의/희망사항 전문 그대로","firstCallQuestions":["이 현장을 위해 첫 통화에 고객에게 물어볼 것 3개 — 사장님이 그대로 읽을 수 있는 말투, 현장·공종에 맞춤"],"missingCosts":[{"label":"빠뜨리기 쉬운 비용","range":"참고 5~12만","amount":8,"why":"왜 필요한지"}],"costBreakdown":[{"label":"인건비","detail":"기공 2명 × 27만 × 2일 + 보조 1명 × 19만 × 2일","amount":108}],"signal":{"level":"green|yellow|red","title":"판정 한 줄","reason":"근거 한 줄"},"buildPlan":{"phases":[{"label":"전날 · 준비","items":["할 일","할 일"]},{"label":"당일 · 시공","items":[]},{"label":"완료 · 정산","items":[]}],"checks":[{"label":"현장에서 확인할 것","why":"왜"}],"tell":"인부에게 이렇게 말하세요","notes":["이 현장 특이사항"]}},"includedScopes":["bathroom|kitchen|wallpaper|entrance|demolition|plaster|carpentry|electric|plumbing|film|window"],"excludedScopes":["window 등 고객이 빼라고 한 공종"],"summary":"한 문장 요약","warnings":["놓치면 손해 보는 점 0~3개"]}
+{"trade":"공종ID","tradeName":"공종이 목록에 없을 때만 한글 이름","title":"현장 제목(지역+규모+공종)","sizeValue":"숫자 문자열 또는 빈 문자열","sizeUnit":"평|㎡|m|칸|개|개소|톤|명|모름","floor":"숫자 문자열 또는 빈 문자열","elevator":"yes|no|unknown","siteCondition":"사진·글로 본 현장 상태(노후 싱크대, 누수 흔적 등)","materials":["필요 자재 3~6개, 규격 포함"],"crew":[{"role":"역할","count":숫자}],"priceRange":{"min":숫자,"max":숫자},"surveyChecks":[{"label":"답사에서 확인할 것","why":"놓치면 생기는 일","how":"어떻게 확인하는지","amount":예상 추가비 만원 숫자}],"wishText":"문의/희망사항 전문 그대로","firstCallQuestions":["이 현장을 위해 첫 통화에 고객에게 물어볼 것 3개 — 사장님이 그대로 읽을 수 있는 말투, 현장·공종에 맞춤"],"missingCosts":[{"label":"빠뜨리기 쉬운 비용","range":"참고 5~12만","amount":8,"why":"왜 필요한지"}],"materialOrders":[{"vendor":"발주처(예: 벽지 도매상·골재상·철물점)","items":[{"name":"품명","spec":"규격","qty":"수량"}],"tip":"이 업체에서 사는 요령 한 줄","footer":"납기·받는 곳"}],"costBreakdown":[{"label":"인건비","detail":"기공 2명 × 27만 × 2일 + 보조 1명 × 19만 × 2일","amount":108}],"signal":{"level":"green|yellow|red","title":"판정 한 줄","reason":"근거 한 줄"},"buildPlan":{"phases":[{"label":"전날 · 준비","items":["할 일","할 일"]},{"label":"당일 · 시공","items":[]},{"label":"완료 · 정산","items":[]}],"checks":[{"label":"현장에서 확인할 것","why":"왜"}],"tell":"인부에게 이렇게 말하세요","notes":["이 현장 특이사항"]}},"includedScopes":["bathroom|kitchen|wallpaper|entrance|demolition|plaster|carpentry|electric|plumbing|film|window"],"excludedScopes":["window 등 고객이 빼라고 한 공종"],"summary":"한 문장 요약","warnings":["놓치면 손해 보는 점 0~3개"]}
 
 공종ID 목록(반드시 이 중 하나): ${GEMINI_TRADES.join(', ')}
 - 목공/문·몰딩·가구·데크=carpentry, 전기·조명·콘센트=electric, 배관·수도·보일러=plumbing, 필름·시트지=film, 맨땅·터파기·기초·토목=groundwork
 - 주방(부엌·싱크대·상부장·하부장·후드)=kitchen, 욕실=bathroom, 도배·장판=wallpaper, 철거=demolition, 폐기물=waste, 인력=labor
 - 두 공종 이상 섞인 전체 인테리어=combined, 정말 모르면 custom
-priceRange는 부가세 별도, 만원 단위의 보수적 범위다.`;
+priceRange는 부가세 별도, 만원 단위의 보수적 범위다.
+materialOrders는 이 현장 공종에 실제로 필요한 자재만 2~5개 업체로 나눈다. 예) 철거=마대·보양재·집게차/덤프, 기초·정지=쇄석·시멘트·메쉬·굴삭기·다짐기·잔토 반출, 도배=벽지·풀·초배지·장판, 욕실=타일·도기·방수재, 주방=싱크대·상판·수전.
+- 현장에 없는 공종 자재(예: 철거+정지 현장의 합지·포세린·도기)는 절대 넣지 않는다.
+- 수량은 규모(평·㎡·칸·m)로 계산해 '12롤', '3포(40kg)', '1대 2일'처럼 실제 발주 단위로 쓴다.`;
 
 export async function analyzeCaseWithGemini({ apiKey, text = '', photos = [], tradeHint = '' }) {
   const key = apiKey || getGeminiKey();
@@ -603,11 +606,41 @@ export function normalizeCaseAnalysis(data = {}) {
       ? data.surveyChecks
           .map((x) =>
             typeof x === 'string'
-              ? { label: x, why: '', amount: 0 }
-              : { label: String(x?.label || ''), why: String(x?.why || ''), amount: Math.max(0, Math.round(parseFloat(x?.amount) || 0)) }
+              ? { label: x, why: '', how: '', amount: 0 }
+              : {
+                  label: String(x?.label || ''),
+                  why: String(x?.why || ''),
+                  how: String(x?.how || ''),
+                  amount: Math.max(0, Math.round(parseFloat(x?.amount) || 0)),
+                }
           )
           .filter((x) => x.label)
           .slice(0, 8)
+      : [],
+    materialOrders: Array.isArray(data.materialOrders)
+      ? data.materialOrders
+          .map((g, i) => {
+            const items = (Array.isArray(g?.items) ? g.items : [])
+              .map((it) => ({ name: String(it?.name || '').slice(0, 40), spec: String(it?.spec || '').slice(0, 40), qty: String(it?.qty || '').slice(0, 30) }))
+              .filter((it) => it.name)
+              .slice(0, 8);
+            if (!items.length) return null;
+            const vendor = String(g?.vendor || '자재상').slice(0, 30);
+            const tips = [String(g?.tip || '').slice(0, 140)].filter(Boolean);
+            const footer = String(g?.footer || '').slice(0, 60);
+            return {
+              id: `ai-order-${i}`,
+              vendor,
+              tone: ['amber', 'cyan', 'slate', 'orange', 'indigo', 'rose'][i % 6],
+              items,
+              tips,
+              footer,
+              ai: true,
+              message: [`[자재 발주] ${vendor}`, ...items.map((it) => `· ${it.name}${it.spec ? ` / ${it.spec}` : ''} — ${it.qty}`), ...(footer ? ['', footer] : [])].join('\n'),
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 6)
       : [],
     includedScopes: Array.isArray(data.includedScopes) ? data.includedScopes.map(String).slice(0, 10) : [],
     excludedScopes: Array.isArray(data.excludedScopes) ? data.excludedScopes.map(String).slice(0, 6) : [],
@@ -659,6 +692,56 @@ export async function analyzeSurveyWithGemini({ apiKey, memo = '', photos = [], 
         signal: sig && ['green', 'yellow', 'red'].includes(sig.level) ? { level: sig.level, title: String(sig.title || ''), reason: String(sig.reason || '') } : null,
       },
       raw,
+    };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'gemini_failed' };
+  }
+}
+
+// 답사 가이드(AI) — 3자 검증의 '꼭 확인할 것'과 3단계 답사의 '왜·뭘 확인' 카드를 이 현장에 맞춰 만든다.
+const SURVEY_GUIDE_PROMPT = `너는 경북 안동의 철거·인테리어 현장 매니저를 돕는 '답사 코치'다.
+이 현장(공종·규모·건물 종류·관공서 공고 여부·층수/엘베)에 맞춰, 답사에서 무엇을 왜 어떻게 확인해야 하는지 아래 JSON만 답한다. 설명 문장은 넣지 않는다.
+
+{"rows":[{"check":"현장에서 확인할 것(짧은 명사형)","why":"놓치면 생기는 일과 돈 새는 금액(만원)","how":"어떻게 확인하는지(현장에서 할 행동)"}],"tips":["답사 때 꼭 볼 것 4개 — 20자 이내"],"comment":"이 현장에서 돈이 새는 곳을 짚는 한두 문장"}
+
+규칙:
+- rows는 정확히 4개. 이 공종·규모에서 실제로 갈리는 것만. '현장을 꼼꼼히 본다' 같은 일반론 금지.
+- why에는 가능한 한 금액(만원)을 넣는다. 아래 2026 기준 단가를 따른다.
+- 관공서 공고 현장이면 설계내역서·물량 산출·현장설명회를 먼저 본다.
+- how는 사장님이 현장에서 바로 할 수 있는 행동 한 줄.
+- tips는 4개, 각 20자 이내. rows와 같은 말을 반복하지 않는다.
+- 공종이 철거·폐기물·인력·토목이면 인테리어 마감 얘기를 넣지 않는다.`;
+
+export async function analyzeSurveyGuideWithGemini({ apiKey, context = '' }) {
+  const key = apiKey || getGeminiKey();
+  if (!key) return { ok: false, reason: 'no_key' };
+  const parts = [
+    { text: `${SURVEY_GUIDE_PROMPT}\n${GEMINI_KNOWLEDGE}\n\n[현장]\n${String(context || '').slice(0, 2000)}` },
+  ];
+  try {
+    const { json, model } = await callGemini({ apiKey: key, parts });
+    const rows = (Array.isArray(json?.rows) ? json.rows : [])
+      .map((x) =>
+        typeof x === 'string'
+          ? { check: x, why: '', how: '' }
+          : { check: String(x?.check || x?.label || '').slice(0, 60), why: String(x?.why || '').slice(0, 160), how: String(x?.how || '').slice(0, 160) }
+      )
+      .filter((x) => x.check)
+      .slice(0, 4);
+    if (!rows.length) return { ok: false, reason: 'empty' };
+    const tips = (Array.isArray(json?.tips) ? json.tips : [])
+      .map((t) => String(t || '').slice(0, 40))
+      .filter(Boolean)
+      .slice(0, 4);
+    return {
+      ok: true,
+      data: {
+        rows,
+        tips,
+        comment: String(json?.comment || '').slice(0, 300),
+        model: model || '',
+        at: new Date().toISOString(),
+      },
     };
   } catch (e) {
     return { ok: false, reason: e?.message || 'gemini_failed' };

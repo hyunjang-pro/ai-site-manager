@@ -7,6 +7,8 @@ import { cleanOcrText } from './ocr.js';
 import { korDateLabel, addDaysISO, kstToday } from './date.js';
 import { wasteVehicle } from './waste.js';
 import { combinedScopeSpecs } from './materials.js';
+import { combinedTitle } from './classify.js';
+import { hasScope, hasInteriorStyle, scopeList, workTypeLabel } from './constants.js';
 import { getSupplier } from './supplier.js';
 
 // 사진 OCR·메모에서 온 날것 글자를 발주·배차 문자에 넣지 않는다.
@@ -22,6 +24,8 @@ export function tradeLabelOf(c, calcOrTrade) {
   const trade = typeof calcOrTrade === 'string' ? calcOrTrade : calcOrTrade?.trade || c?.trade;
   const custom = String(c?.tradeName || '').trim();
   if (custom && (trade === 'custom' || trade === 'unclassified')) return custom;
+  // 복합은 실제 켜 둔 공종으로 부른다 — 철거+정지 견적서가 '복합 인테리어'가 되면 안 된다
+  if (trade === 'combined') return combinedTitle(scopeList(c));
   return (TRADES[trade] || TRADES.unclassified).label;
 }
 
@@ -29,6 +33,7 @@ export function tradeShortOf(c, calcOrTrade) {
   const trade = typeof calcOrTrade === 'string' ? calcOrTrade : calcOrTrade?.trade || c?.trade;
   const custom = String(c?.tradeName || '').trim();
   if (custom && (trade === 'custom' || trade === 'unclassified')) return custom;
+  if (trade === 'combined') return combinedTitle(scopeList(c));
   return (TRADES[trade] || TRADES.unclassified).short;
 }
 
@@ -178,6 +183,11 @@ function combinedScopeGroups(scopes = []) {
 
 export function allocateClientLines(trade, calc, c) {
   const items = (calc?.items || []).filter((i) => !i.excluded && Number(i.amount) !== 0);
+  // 공고는 설계내역서 확인 전 — 공종별로 금액을 나눠 쓰면 엉뚱한 비중이 생긴다
+  if (calc?.isBid) {
+    const work = workTypeLabel(c?.bid?.workTypes) || '공고 공사';
+    return [{ id: 'total', name: `${work} 일체`, desc: '설계내역서·물량 확정 후 세부 내역 제시', amount: Math.max(0, Math.round(calc?.clientPrice || 0)) }];
+  }
   const baseGroups =
     trade === 'combined' && Array.isArray(c?.subScopes) && c.subScopes.length
       ? combinedScopeGroups(c.subScopes)
@@ -237,10 +247,20 @@ export function buildQuote(c, calc, design, waste) {
     clauses.push('폐기물 처리비는 계상된 차량 대수 기준이며, 초과 발생 시 차량 규모별 실비로 정산합니다(작업 전 사전 고지).');
     clauses.push('철거 전 6부위(바닥·벽·천장·복도·승강기·인접세대)를 촬영해 보관하며, 공사 전 존재하던 파손은 배상 범위에서 제외됩니다.');
   }
-  if (trade === 'bathroom' || trade === 'combined') {
+  if (hasScope(c, 'bathroom')) {
     clauses.push('방수 시공 후 담수시험 48시간을 거쳐 아래층 누수 확인 후 타일 시공합니다. 담수 사진 3컷(수위선·24시간·배수 직전)을 보관합니다.');
     clauses.push('타일 시공 후 3일, 줄눈 시공 후 7일은 보행을 금지합니다. 보행 금지 기간 중 사용으로 발생한 파손은 하자 보수 대상이 아닙니다.');
     clauses.push('방수 하자보수 책임 기간은 3년입니다.');
+  }
+  // 복합·철거·토목 현장에 실제로 들어가는 공정만 특약을 넣는다
+  if (trade !== 'demolition' && hasScope(c, 'demolition')) {
+    clauses.push('철거 폐기물은 성상별로 분리해 반출하고, 계량증명서·처리확인서를 공사 완료 후 전달합니다.');
+    clauses.push('철거 전 6부위(바닥·벽·천장·복도·승강기·인접세대)를 촬영해 보관하며, 공사 전 존재하던 파손은 배상 범위에서 제외됩니다.');
+  }
+  if (hasScope(c, 'groundwork')) {
+    clauses.push('터파기 전 지하 매설물(배관·전선) 위치를 확인하며, 도면·지자체 확인으로 파악되지 않은 매설물 손상은 상호 협의해 처리합니다.');
+    clauses.push('잔토(남는 흙)와 골재는 허가업체를 통해 반출·반입하고, 처리 확인서를 보관합니다.');
+    clauses.push('되메우기 후 지반 침하는 6개월간 보수합니다(구조물 하중 부위 제외).');
   }
   if (trade === 'wallpaper') {
     clauses.push('기존 벽지 제거 후 벽 상태에 따라 초배를 추가할 수 있으며, 추가 시 사전 고지합니다.');
@@ -273,9 +293,15 @@ export function buildQuote(c, calc, design, waste) {
   const balanceRatio = pay.balance.ratio;
 
   return {
-    title: `${label} ${(calc?.changeLogs || []).length ? '최종 견적서' : '견적서'}`,
-    client: c?.clientName || '고객',
-    site: c?.location || c?.title || '현장',
+    title: c?.bid?.title
+      ? `${String(c.bid.title).slice(0, 40)} ${(calc?.changeLogs || []).length ? '최종 견적서' : '견적서'}`
+      : `${label} ${(calc?.changeLogs || []).length ? '최종 견적서' : '견적서'}`,
+    client: c?.bid?.org || c?.clientName || '고객',
+    site: c?.bid
+      ? c.bid.site && c.bid.site !== c.bid.org
+        ? c.bid.site
+        : '공고 현장(발주처 확인)'
+      : c?.location || c?.title || '현장',
     size: sizeText(c),
     date: c?.createdAt || new Date().toISOString().slice(0, 10),
     baseLines,
@@ -399,8 +425,8 @@ export function dispatchMessage(c, calc) {
     waste: '폐기물 수거·상차·운반',
     labor: '일용 인력 지원',
     repair: '부분 수선',
-    combined: '철거 후 도배·타일 마감',
-  }[calc?.trade] || '현장 작업';
+    combined: undefined,
+  }[calc?.trade] || combinedWorkLine(c) || '현장 작업';
 
   // 현장마다 다른 핵심 디테일 — 원문(숨고 요청서)을 그대로 넣지 않고 정리된 내용만 쓴다.
   let detail = trade.label;
@@ -439,24 +465,60 @@ export function dispatchMessage(c, calc) {
 }
 
 // 엘리베이터·현관에 붙이는 A4 공사 안내문 (인쇄·PDF용)
+// 이웃 게시용 공사 안내문 — 이웃이 읽는 문서다. 금액·원가·수주 메모는 절대 넣지 않는다.
+const NOTICE_SCOPE = {
+  demolition: '철거·해체',
+  groundwork: '기초·정지(터파기·다짐)',
+  wallpaper: '도배·장판',
+  bathroom: '욕실 리모델링',
+  kitchen: '주방 리모델링',
+  entrance: '현관 공사',
+  plaster: '바닥 미장',
+  carpentry: '문·몰딩 보수',
+  electric: '전기·조명',
+  plumbing: '설비·배관',
+  film: '필름·시트지',
+  window: '창호 교체',
+  tilewaterproof: '타일·방수',
+  repair: '부분 수선',
+  waste: '폐기물 수거·반출',
+  labor: '인력 지원',
+};
+
+function noticeScope(c, calc) {
+  const trade = calc?.trade || c?.trade;
+  // 관공서 공고는 공고의 공사 종류를 그대로 쓴다
+  const bidType = c?.bid ? workTypeLabel(c.bid.workTypes) : '';
+  if (bidType) return `${bidType} 작업`;
+  if (trade === 'combined') {
+    const names = scopeList(c)
+      .map((s) => NOTICE_SCOPE[s] || (s.startsWith('x:') ? s.slice(2) : ''))
+      .filter(Boolean);
+    if (names.length) return `${Array.from(new Set(names)).slice(0, 4).join(' · ')} 작업`;
+    return hasInteriorStyle(c) ? '실내 인테리어 공사' : '철거·정리 공사';
+  }
+  const word = NOTICE_SCOPE[trade] || '현장 작업';
+  return /리모델링|작업$/.test(word) ? word : `${word} 작업`;
+}
+
 export function constructionNotice(c, calc) {
   const start = c?.startDate || c?.dispatch?.date || kstToday();
   const days = Math.max(1, parseInt(c?.workDays, 10) || 1);
   const end = addDaysISO(start, days - 1);
-  const trade = TRADES[calc?.trade] || TRADES.unclassified;
   const place = c?.location || c?.title || '현장';
   const time = c?.dispatch?.time || '08:00';
-  const vehicle = calc?.trade === 'waste' ? wasteVehicle(c) : null;
-  const scope =
-    calc?.clientSummary ||
-    (vehicle ? `폐기물 ${vehicle.tons}톤 수거·상차·반출 (${vehicle.label} 1대)` : calc?.targetSummary) ||
-    trade.label;
+  const trade = calc?.trade || c?.trade;
+  const indoor = trade !== 'groundwork' && (trade !== 'combined' || hasInteriorStyle(c));
+  // 공사 내용은 공종·세부 공종에서만 만든다 (견적 요약에는 공고 원가 메모가 섞여 있다)
+  const scope = noticeScope(c, calc).replace(/\d[\d,.]*\s*만\s*원?/g, '').trim();
   const startLabel = korDateLabel(start);
   const endLabel = korDateLabel(end);
-  const noisyDay =
-    calc?.trade === 'demolition' || calc?.trade === 'waste'
-      ? `${startLabel} 오전은 소음·분진이 가장 큰 날입니다. 작업은 ${time}부터 시작합니다.`
-      : `${startLabel}부터 ${days}일간 작업합니다. 작업 시간은 ${time}~17:00입니다.`;
+  const loud = trade === 'demolition' || trade === 'waste';
+  const noisyDay = !indoor
+    ? `${startLabel} 오전은 장비 소음·먼지가 가장 큰 날입니다. 작업은 ${time}부터 시작합니다.`
+    : loud
+    ? `${startLabel} 오전은 소음·분진이 가장 큰 날입니다. 작업은 ${time}부터 시작합니다.`
+    : `${startLabel}부터 ${days}일간 작업합니다. 작업 시간은 ${time}~17:00입니다.`;
 
   return {
     title: '공 사 안 내',
@@ -468,12 +530,20 @@ export function constructionNotice(c, calc) {
       const sup = getSupplier();
       return sup.name ? `${sup.name}${sup.owner ? ` (대표 ${sup.owner})` : ''}` : c?.businessName || '인력사무소 직영';
     })(),
-    lines: [
-      noisyDay,
-      '엘리베이터·복도·현관은 보양한 뒤 사용하고, 작업이 끝나면 원상 복구합니다.',
-      '공용부에 짐을 쌓아두지 않습니다. 통행이 불편하면 바로 치우겠습니다.',
-      '주차·통행·소음 때문에 불편하시면 아래 번호로 연락 주세요. 바로 조정하겠습니다.',
-    ],
+    lines: indoor
+      ? [
+          noisyDay,
+          '엘리베이터·복도·현관은 보양한 뒤 사용하고, 작업이 끝나면 원상 복구합니다.',
+          '공용부에 짐을 쌓아두지 않습니다. 통행이 불편하면 바로 치우겠습니다.',
+          '주차·통행·소음 때문에 불편하시면 아래 번호로 연락 주세요. 바로 조정하겠습니다.',
+        ]
+      : [
+          noisyDay,
+          '작업 구역에는 안전 펜스를 세우고 통행로를 비워 두겠습니다.',
+          '먼지가 날 때는 물을 뿌리고 덮개를 씌워 이웃에 퍼지지 않게 하겠습니다.',
+          '장비·자재는 작업 구역 안에만 두고, 공사가 끝나면 바닥을 정리하겠습니다.',
+          '통행·소음·먼지 때문에 불편하시면 아래 번호로 연락 주세요. 바로 조정하겠습니다.',
+        ],
     contact: (() => {
       const sup = getSupplier();
       return sup.phone ? `${sup.phone} (현장 담당)` : '010-____-____ (현장 담당)';
@@ -533,6 +603,24 @@ export function estimateSms(c, calc, completedCases = [], useStrength = true) {
   return lines.join('\n');
 }
 
+// 복합 현장의 작업 줄 — 켜 둔 세부 공종만 적는다 (철거+정지에 '도배·타일' 금지)
+function combinedWorkLine(c) {
+  const names = {
+    demolition: '철거·해체 후 마대 상차',
+    groundwork: '터파기·정지·다짐',
+    wallpaper: '기존 벽지 제거 후 도배·장판',
+    bathroom: '욕실 철거·방수·타일',
+    kitchen: '기존 싱크대 철거 후 상판·수납 설치',
+    entrance: '현관 중문·신발장·타일',
+    plaster: '바닥 미장·양생',
+    carpentry: '문틀·몰딩·문 교체',
+    electric: '전기·조명 배선',
+  };
+  const list = scopeList(c).map((s) => names[s]).filter(Boolean);
+  const custom = scopeList(c).filter((s) => s.startsWith('x:')).map((s) => s.slice(2));
+  return [...list, ...custom].slice(0, 3).join(' → ');
+}
+
 export function defaultCrew(trade, c, calc) {
   const size = parseFloat(c?.sizeValue) || 0;
   const unit = c?.sizeUnit || '평';
@@ -553,7 +641,19 @@ export function defaultCrew(trade, c, calc) {
     const truck = tons >= 8 ? '2.5톤 차량' : '1톤 차량';
     return [{ role: '상차 인부', count: tons >= 5 ? 2 : 1 }, { role: truck, count: Math.max(1, Math.ceil(tons / 3.2)), unit: '대' }];
   }
-  // 철거·복합
+  if (trade === 'groundwork') {
+    return [{ role: '굴삭기 기사', count: 1, unit: '명' }, { role: '다짐·보조', count: pyung >= 20 ? 2 : 1, unit: '명' }];
+  }
+  if (trade === 'combined') {
+    const scopes = scopeList(c);
+    if (scopes.length && !scopes.some((x) => ['wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster', 'carpentry'].includes(x))) {
+      const crew = [];
+      if (scopes.includes('demolition')) crew.push({ role: '철거 기공', count: 1 }, { role: '잡부', count: pyung >= 12 ? 2 : 1 });
+      if (scopes.includes('groundwork')) crew.push({ role: '굴삭기 기사', count: 1 }, { role: '다짐·보조', count: 1 });
+      if (crew.length) return crew;
+    }
+  }
+  // 철거·복합(인테리어)
   const helper = pyung >= 12 ? 2 : 1;
   return [{ role: '철거 기공', count: 1 }, { role: '잡부', count: helper }];
 }
@@ -567,14 +667,16 @@ export function orderMessage(c, calc, design) {
   materialItems.forEach((it) => {
     lines.push(`· ${it.name} — ${it.detail || ''}`);
   });
-  if (sizeVal > 0 && (unit === '평' || unit === '㎡')) {
+  const wallpaperJob = hasScope(c, 'wallpaper');
+  if (wallpaperJob && sizeVal > 0 && (unit === '평' || unit === '㎡')) {
     const pyung = unit === '㎡' ? sizeVal / 3.3 : sizeVal;
     lines.push(`· 벽지 로스 10% 반영: 벽 ${(pyung * 2.3).toFixed(1)}평 × 1.1 = ${(pyung * 2.3 * 1.1).toFixed(1)}평분`);
     lines.push(`· 장판 로스 10% 반영: ${Math.round(pyung * 2.3)}㎡ × 1.1 = ${Math.round(pyung * 2.3 * 1.1)}㎡`);
-  } else if (parseFloat(c?.sizeValue) > 0) {
+  } else if (wallpaperJob && parseFloat(c?.sizeValue) > 0) {
     lines.push(`· 소요량 ${c.sizeValue}${unit} × 1.1(로스 10%) = ${(parseFloat(c.sizeValue) * 1.1).toFixed(2)}${unit}`);
   }
-  if (combo.length) {
+  // 선택 사양은 인테리어·마감 현장만 — 철거·정지에 '합지·타일'이 붙으면 안 된다
+  if (combo.length && hasInteriorStyle(c)) {
     lines.push('', '[선택 사양]');
     combo.forEach((s) => lines.push(`· ${s}`));
   }

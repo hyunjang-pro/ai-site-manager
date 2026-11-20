@@ -1,7 +1,7 @@
 // 견적 엔진 — 경북 철거·인테리어 실무 단가 (단위: 만원)
 // 검증된 4개 기준 견적(15평 철거 374 / 24평 도배·장판 324 / 욕실 1칸 454 / 주방 3.2m 325)의
 // 원가 구조와 "고객가 = 원가 ÷ (1 − 마진율)" 공식을 그대로 모듈화했다.
-import { TRADES, HARD_DETAILS } from './constants.js';
+import { TRADES, HARD_DETAILS, hasInteriorStyle, workTypeLabel } from './constants.js';
 import { ratesOf, getRate } from './rates.js';
 import { wasteVehicle } from './waste.js';
 import { materialSetFor } from './materials.js';
@@ -243,6 +243,8 @@ export function computeEstimate(c) {
   const sizeVal = toNum(c?.sizeValue);
   const sizeUnit = c?.sizeUnit || info.defaultUnit;
   const rates = ratesOf(c); // 이 현장을 만들 때의 단가표(스냅샷)
+  // 스타일·자재(등급)를 고르는 인테리어·마감 현장인지 — 철거·폐기물·기초·인력은 아니다
+  const interiorStyle = hasInteriorStyle(c);
   const items = [];
 
   let laborTotal = 0;
@@ -739,7 +741,9 @@ export function computeEstimate(c) {
       Array.isArray(c?.excludedScopes) && c.excludedScopes.length
         ? ` · ${c.excludedScopes.map((x) => (x === 'window' ? '창호' : x)).join('·')} 제외`
         : '';
-    targetSummary = `${pyung}평 복합 인테리어 — ${scopeNames.join(' + ') || '범위 확인 필요'}${excludedText}`;
+    // 철거+정지처럼 마감이 없는 복합은 '인테리어'라고 부르지 않는다
+    const comboLabel = interiorStyle ? '복합 인테리어' : '복합 공사';
+    targetSummary = `${pyung}평 ${comboLabel} — ${scopeNames.join(' + ') || '범위 확인 필요'}${excludedText}`;
   } else {
     // 기타/미분류 — 만능 인력·자재 직접 견적 모드
     const plan = c?.customPlan || {};
@@ -778,7 +782,7 @@ export function computeEstimate(c) {
       wasteTotal += 33;
       targetSummary =
         trade === 'combined'
-          ? `${pyung}평 복합 인테리어(철거+도배+부분 욕실)`
+          ? `${pyung}평 복합 공사 — 포함 공종을 1단계에서 켜면 정확해집니다`
           : `${label} (약 ${pyung}평 기준 가산출 — 만능 견적 모드에 인부·자재·장비를 넣으면 정확해집니다)`;
       items.push(
         { id: 'labor', category: '노무', name: '복합 공정 노무비', detail: `${pyung}평 기준`, amount: laborCost },
@@ -872,9 +876,9 @@ export function computeEstimate(c) {
     laborTotal += amount;
   });
 
-  // ---- 디자인·자재 번역기 고난도 디테일 할증 ----
+  // ---- 디자인·자재 번역기 고난도 디테일 할증 (인테리어·마감 현장만) ----
   const detail = detailSurcharge(c);
-  if (detail.rate > 0) {
+  if (interiorStyle && detail.rate > 0) {
     const base = laborTotal + materialTotal;
     const amount = Math.round((base * detail.rate) / 100);
     surchargeTotal += amount;
@@ -959,7 +963,9 @@ export function computeEstimate(c) {
   }
 
   // ---- 추천 자재 세트(실속/표준/고급) 반영: 세트를 바꾸면 견적이 즉시 바뀐다 ----
-  const mset = materialSetFor(c, trade);
+  // 단, 철거·폐기물·기초·정지·인력처럼 자재 등급 개념이 없는 현장은 항상 표준(1.0)으로 계산한다.
+  // (공종을 철거로 바꿨는데 예전에 고른 '고급' 세트가 남아 견적을 흔드는 일을 막는다)
+  const mset = interiorStyle ? materialSetFor(c, trade) : null; // 철거·폐기물·정지엔 자재 세트 자체가 없다
   const matMul = mset && Number.isFinite(mset.mul) && mset.mul > 0 ? mset.mul : 1;
   if (matMul !== 1) {
     items.forEach((it) => {
@@ -995,8 +1001,11 @@ export function computeEstimate(c) {
     });
     totalDirectCost += gap;
   }
+  // 공고 원가 메모는 내부 값(bidNote)으로만 둔다 — 손님 문서·이웃 안내문에 새면 안 된다
+  const bidNote = isBid ? `공고 수주금액 ${bidPriceMan.toLocaleString('ko-KR')}만의 80%를 실행원가 하한으로 반영` : '';
   if (isBid) {
-    targetSummary = `${targetSummary} · 공고 수주금액 ${bidPriceMan.toLocaleString('ko-KR')}만의 80%를 실행원가 하한으로 반영`;
+    const work = workTypeLabel(c?.bid?.workTypes) || info.label;
+    targetSummary = `${String(c?.bid?.title || c?.title || '공고').slice(0, 40)} · ${work} · 수주금액 ${bidPriceMan.toLocaleString('ko-KR')}만원`;
   }
 
   const markedItems = items.map((i) => ({ ...i, excluded: excludedIds.includes(i.id) }));
@@ -1080,6 +1089,7 @@ export function computeEstimate(c) {
     tradeLabel: info.short,
     targetSummary,
     clientSummary: clientSafeText(targetSummary),
+    interiorStyle,
     materialSet: mset,
     items: markedItems,
     excludedIds,
@@ -1128,6 +1138,7 @@ export function computeEstimate(c) {
     remainingRatio,
     missingInfos,
     isBid,
+    bidNote,
     bidPriceMan,
     bidCostFloor,
     isUncertain: missingInfos.length >= 2,

@@ -74,20 +74,22 @@
   .hero-card .num {
     letter-spacing: -0.03em;
   }
-  /* 모달 시트 — 사파리 하단 바와 겹치지 않는 여백 */
-  .modal-sheet {
-    padding-bottom: max(0px, env(safe-area-inset-bottom));
-  }
   .modal-top {
     position: sticky;
     top: 0;
     z-index: 2;
   }
+  /* 모달 시트 — iOS Safari·안드로이드 크롬/삼성 인터넷 주소창 높이까지 고려 */
+  .modal-sheet {
+    max-height: 92vh; /* dvh를 모르는 브라우저 */
+    max-height: 92dvh;
+    padding-bottom: 0;
+  }
   .modal-bottom {
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
   .bottom-bar {
-    padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
   }
   .num {
     font-variant-numeric: tabular-nums;

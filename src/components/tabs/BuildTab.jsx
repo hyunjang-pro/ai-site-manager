@@ -20,6 +20,7 @@ import { buildOrderGroups } from '../../lib/orders.js';
 import { defaultCrew } from '../../lib/docs.js';
 import { wasteVehicle } from '../../lib/waste.js';
 import { materialSetFor, BRAND_PRICES } from '../../lib/materials.js';
+import { hasInteriorStyle, hasScope } from '../../lib/constants.js';
 import { estimateWorkDays } from '../../lib/schedule.js';
 import { kstToday, addDaysISO, korDateLabel } from '../../lib/date.js';
 import { BigButton, Card, CheckRow, Details, Field, Pill, ProgressTrack, SectionCard, SmallButton, TextInput, WarningBox, cx } from '../ui.jsx';
@@ -120,7 +121,7 @@ function DayCount({ value, onChange }) {
 }
 
 function EvidenceBlock({ c, update, calc, showToast }) {
-  const group = evidenceFor(calc.trade);
+  const group = evidenceFor(calc.trade, c);
   const spots = group.spots;
   const done = spots.filter((s) => c.evidence?.[s.id]).length;
   return (
@@ -187,11 +188,15 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
     (trade === 'tilewaterproof' && (c.tileWork?.mode || 'both') !== 'tile');
   const pay = calc.payments;
   const mset = materialSetFor(c, trade);
-  // 자재를 쓰는 인테리어 공종만 업체별 발주를 연다 (폐기물·철거·인력·토목은 발주 개념이 없다)
+  // 자재를 쓰는 공종만 업체별 발주를 연다 (폐기물·인력은 준비물만)
+  const interiorStyle = hasInteriorStyle(c);
+  // AI가 이 현장에 맞춰 뽑은 발주 리스트가 있으면 그것을 먼저 쓴다. 없을 때만 공종·세부 공종 기준 로컬 목록.
+  const aiOrders = Array.isArray(c.aiAnalysis?.materialOrders) ? c.aiAnalysis.materialOrders : [];
   const orderGroups = useMemo(
-    () => (['waste', 'labor', 'demolition', 'groundwork'].includes(trade) ? [] : buildOrderGroups(c, calc, design, mset)),
-    [c, calc, design, mset, trade]
+    () => (aiOrders.length ? aiOrders : ['waste', 'labor'].includes(trade) ? [] : buildOrderGroups(c, calc, design, mset)),
+    [c, calc, design, mset, trade, aiOrders]
   );
+  const ordersFromAi = aiOrders.length > 0;
   const showOrders = orderGroups.length > 0;
   const orderChecks = c.orderChecks || {};
   const doneCount = orderGroups.filter((g) => orderChecks[g.id]).length;
@@ -218,7 +223,12 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
     showToast(`발주 ${orderGroups.length}곳을 모두 완료로 표시했습니다`);
   };
 
-  const guide3 = STEP_GUIDES[isWaterproof ? 'waterproof' : trade] || STEP_GUIDES.generic;
+  const guideKey = isWaterproof
+    ? 'waterproof'
+    : trade === 'combined' && !interiorStyle
+    ? (hasScope(c, 'demolition') ? 'demolition' : 'groundwork')
+    : trade;
+  const guide3 = STEP_GUIDES[guideKey] || STEP_GUIDES.generic;
 
   const aiCrew = c.aiAnalysis?.crew || [];
   const crew = c.crew && c.crew.length ? c.crew : defaultCrew(trade, c, calc);
@@ -433,26 +443,30 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
         </div>
       </SectionCard>
 
-      {/* 4. 업체별 발주 — 인테리어(자재 쓰는 공종)만 */}
+      {/* 4. 업체별 발주 — 켜 둔 공종의 자재·장비만 */}
       {showOrders ? (
         <Card className="p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 text-base font-extrabold text-ink">
-                <ClipboardList className="h-4 w-4 text-brand" /> 자재 발주 리스트 (업체별)
+                <ClipboardList className="h-4 w-4 text-brand" /> 자재·장비 발주 리스트 (업체별)
               </p>
-              <p className="mt-0.5 text-xs font-semibold leading-4 text-ink-3">업체마다 취급 품목이 다릅니다. 해당 업체에만 보낼 발주 내용을 복사해 쓰세요.</p>
+              <p className="mt-0.5 text-xs font-semibold leading-4 text-ink-3">
+                {ordersFromAi
+                  ? '🤖 AI가 이 현장(공종·규모)에 맞춰 뽑은 발주입니다. 업체별로 복사해 보내세요.'
+                  : '업체마다 취급 품목이 다릅니다. 해당 업체에만 보낼 발주 내용을 복사해 쓰세요.'}
+              </p>
             </div>
             <Pill tone={doneCount === orderGroups.length ? 'ok' : 'warn'}>
               {doneCount}/{orderGroups.length} 발주
             </Pill>
           </div>
-          {mset ? (
+          {mset && interiorStyle ? (
             <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-2xs font-bold leading-4 text-brand-strong">
               선택한 자재 세트 · {mset.label}({mset.tier}) — {mset.spec.slice(0, 2).join(' / ')}
             </p>
           ) : null}
-          {BRAND_PRICES[calc.trade] ? (
+          {BRAND_PRICES[calc.trade] && interiorStyle ? (
             <div className="mt-2 rounded-xl bg-slate-50 p-2.5">
               <p className="text-2xs font-extrabold text-ink-2">브랜드별 기준 가격 (참고)</p>
               <div className="mt-1 space-y-0.5">

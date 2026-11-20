@@ -66,6 +66,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
     let combined = typed;
     let cleaned = '';
     let scene = false;
+    let aiFailed = false;
     try {
       const aiKey = getGeminiKey();
       // 키가 있으면 느린 tesseract를 건너뛰고 사진을 곧장 멀티모달 AI로 보낸다.
@@ -107,10 +108,11 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           setProgress(null);
           return;
         }
+        aiFailed = true; // AI가 실패해도 사진은 있으니 OCR로 한 번 더 시도한다
         setProgress('사진에서 글자 읽는 중…');
       }
 
-      if (list.length && !aiKey) {
+      if (list.length && (!aiKey || aiFailed)) {
         const res = await ocrAnalyzeWithTimeout(
           list.map((p) => p.file),
           (pct, idx, total) => setProgress(`사진 ${idx || 1}/${total || list.length} 글자 읽는 중… ${pct ? `${pct}%` : ''}`)
@@ -134,7 +136,12 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           setStep('input');
           return;
         }
-        setError('붙여넣은 내용이나 사진이 없습니다. 요청 글을 넣거나 공종을 직접 골라주세요.');
+        // 사진을 올렸는데 글자만 못 읽은 경우 — '사진이 없다'고 하면 안 된다
+        setError(
+          list.length
+            ? '사진에서 글자를 읽지 못했습니다. 요청 내용을 한 줄만 적어주시면 공종·규모를 잡아 드립니다.'
+            : '붙여넣은 내용이나 사진이 없습니다. 요청 글을 넣거나 공종을 직접 골라주세요.'
+        );
         setProgress(null);
         return;
       }
