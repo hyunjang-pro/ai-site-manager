@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CalendarDays, CloudSun } from 'lucide-react';
 import { fetchWeather, seasonalNote } from '../lib/weather.js';
+import { addDaysISO, kstToday } from '../lib/date.js';
 import { Card, Pill } from './ui.jsx';
 
 const fmt = (iso) => {
@@ -42,12 +43,8 @@ export default function WeatherStrip({ region, startDate, days = 3 }) {
   }
 
   const span = Math.max(1, parseInt(days, 10) || 1);
-  const endDate = (() => {
-    const d = new Date(`${startDate}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return startDate;
-    d.setDate(d.getDate() + span - 1);
-    return d.toISOString().slice(0, 10);
-  })();
+  // UTC로 바꾸면 하루 밀리므로 한국 시간 기준으로 더한다.
+  const endDate = addDaysISO(startDate, span - 1);
 
   if (!data) {
     return (
@@ -109,7 +106,11 @@ export default function WeatherStrip({ region, startDate, days = 3 }) {
     ? { tone: 'bad', text: `최저 ${Math.min(...cold.map((d) => d.tMin))}℃ — 방수·미장 양생에 난방이 필요합니다.` }
     : null;
 
-  const shown = inRange.slice(0, 5);
+  // 공사기간 전체를 보여준다 (지난 날짜는 빼고, 16일 밖만 안내)
+  const today = kstToday();
+  const past = inRange.filter((d) => d.date < today);
+  const shown = inRange.filter((d) => d.date >= today);
+  const outside = Math.max(0, span - inRange.length);
 
   return (
     <Card className="p-4">
@@ -142,10 +143,11 @@ export default function WeatherStrip({ region, startDate, days = 3 }) {
           비·한파 특이사항이 없습니다. 그래도 방수·타일 양생은 기온을 한 번 더 확인하세요.
         </p>
       )}
-      {inRange.length < span ? (
-        <p className="mt-1.5 text-2xs font-semibold text-ink-3">
-          공사기간 중 {span - inRange.length}일은 예보 범위(16일) 밖이라 표시되지 않습니다.
-        </p>
+      {past.length ? (
+        <p className="mt-1.5 text-2xs font-semibold text-ink-3">지난 날짜 {past.length}일은 제외했습니다.</p>
+      ) : null}
+      {outside > 0 ? (
+        <p className="mt-1.5 text-2xs font-semibold text-ink-3">공사기간 중 {outside}일은 예보 범위(16일) 밖이라 표시되지 않습니다.</p>
       ) : null}
     </Card>
   );

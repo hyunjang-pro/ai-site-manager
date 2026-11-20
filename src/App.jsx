@@ -11,6 +11,7 @@ import { Toast, cx } from './components/ui.jsx';
 import { loadState, saveState, newCase } from './lib/storage.js';
 import { BIDS, bidStats, bidToCase } from './lib/bids.js';
 import { TRADES } from './lib/constants.js';
+import { setGeminiKey } from './lib/gemini.js';
 
 export default function App() {
   const [state, setState] = useState(() => loadState());
@@ -23,6 +24,12 @@ export default function App() {
   const [newCaseOpen, setNewCaseOpen] = useState(false);
   const [savedAt, setSavedAt] = useState('');
   const bidInfo = useMemo(() => bidStats(BIDS), []);
+
+  // 설정에 저장된 키를 이 기기의 AI 키 저장소로 한 번 옮긴다.
+  useEffect(() => {
+    if (state.settings?.apiKey) setGeminiKey(state.settings.apiKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => {

@@ -398,3 +398,116 @@ export const BRAND_PRICES = {
 export function brandPricesFor(trade) {
   return BRAND_PRICES[trade] || null;
 }
+
+
+// ---- 복합(집 전체) 현장: 포함 공종마다 등급별 자재 사양을 전부 나열한다 ----
+const SCOPE_SPECS = {
+  demolition: {
+    value: ['철거 범위 정리 후 평탄 마감', '철거 폐기물 성상 분리(5종)'],
+    clean: ['철거 후 바닥 평탄·먼지 제거', '폐기물 성상 분리 반출'],
+    modern: ['노출 철거 마감(천장 정리)', '무지 그레이 데코타일', '배관 은폐 정리'],
+    wood: ['철거 후 노출 천장 정리', '오크 패턴 데코타일'],
+    premium: ['철거 후 마감재 별도 산정', '대형 타일 바닥', '매립 배관 정리'],
+  },
+  wallpaper: {
+    value: ['소폭 합지 화이트(무지)', '1.8T 모노륨 아이보리', '기본 몰딩'],
+    clean: ['광폭 합지 화이트/아이보리', '2.0T 모노륨 라이트오크', '3색 LED'],
+    modern: ['합지 무지 화이트/라이트그레이', '1.8T 모노륨 라이트그레이', '무몰딩 + 4000K 간접등'],
+    wood: ['광폭 합지 화이트 + 오크 걸레받이 60mm', '2.2T 모노륨 오크 패턴', '3000K 다운라이트'],
+    premium: ['실크 벽지(샴페인) + 우드 몰딩', '2.5T 모노륨 샴페인', '2700K 간접등 + 스포트'],
+  },
+  bathroom: {
+    value: ['300×600 국산타일(무광 화이트)', '국산 도기·수전 세트', '3000K 방습등', '액체방수 2회 + 담수 48시간'],
+    clean: ['300×600 무광 화이트 타일', '국산 크롬 수전·도기', '4000K 방습등', '방수 2회 + 담수시험'],
+    modern: ['600×1200 포세린 그레이(벽) + 300각 바닥', '무광 블랙 수전', '4000K 매입등 + 거울 간접등', '방수 2회 + 담수시험'],
+    wood: ['600각 포세린 화이트 + 오크 패턴 바닥', '무광 니켈 수전·악세사리', '3000K 매입등 4인치 ×2'],
+    premium: ['600×1200 대형 포세린 + 600각 헤링본 바닥', '무광 니켈 매립수전 + 우드 도어', '3000K 간접등 + 거울등'],
+  },
+  kitchen: {
+    value: ['LPM 아이보리 상·하부장', '인조대리석 아이보리 상판', '기존 후드 재사용'],
+    clean: ['LPM 화이트 상·하부장', '인조대리석 화이트', '언더캐비닛등'],
+    modern: ['무광 그레이 도어 상·하부장', '인조대리석 화이트 무광 상판', '매립 손잡이 + 4000K 언더등'],
+    wood: ['LPM 화이트 상부장 + 오크 하부장', '인조대리석 화이트 상판(무광)', '무광 니켈 손잡이 + 3000K 언더등'],
+    premium: ['LPM 무광 샴페인 도어', '엔지니어드 스톤 상판', '3000K 펜던트 + 언더등'],
+  },
+  entrance: {
+    value: ['현관 타일 300각 국산', '기본 신발장(도장 문)', '기본 중문(3연동)'],
+    clean: ['현관 타일 300×600 무광', '신발장(무늬 필름)', '3연동 중문'],
+    modern: ['현관 타일 600각 그레이', '무광 화이트 신발장', '슬라이딩 중문(무광 블랙)'],
+    wood: ['현관 타일 오크 패턴', '오크 신발장', '중문(우드 프레임)'],
+    premium: ['현관 포세린 대형 타일', '맞춤 신발장(무광 샴페인)', '중문 + 간접등'],
+  },
+  plaster: {
+    value: ['바닥 몰탈 미장(평탄)', '기본 양생'],
+    clean: ['몰탈 미장 + 메쉬 보강', '양생 3일'],
+    modern: ['몰탈 미장 + 메쉬 보강', '자기평탄 모르타르', '양생 3일'],
+    wood: ['몰탈 미장 + 메쉬 보강', '양생 3일'],
+    premium: ['몰탈 미장 + 메쉬·철근 보강', '자기평탄 마감', '양생 5일'],
+  },
+  window: {
+    value: ['국산 2중창(복층유리)'],
+    clean: ['국산 2중창 + 방충망'],
+    modern: ['시스템 창호(무광 블랙 프레임)'],
+    wood: ['시스템 창호(우드 프레임)'],
+    premium: ['시스템 창호(로이유리) + 방범창'],
+  },
+  carpentry: {
+    value: ['기본 몰딩·문틀(MDF)', '도장 문'],
+    clean: ['몰딩·걸레받이 + 도장 문'],
+    modern: ['무몰딩 + 히든도어'],
+    wood: ['오크 몰딩·문틀', '원목 도어'],
+    premium: ['우드 몰딩 + 히든도어', '맞춤 목공'],
+  },
+  electric: {
+    value: ['기본 스위치·콘센트', '국산 LED'],
+    clean: ['국산 스위치·콘센트', '4000K LED'],
+    modern: ['무광 스위치', '매입등 4000K'],
+    wood: ['무광 니켈 스위치', '3000K 다운라이트'],
+    premium: ['무광 스위치 + 간접등', '2700K 스포트'],
+  },
+};
+
+const TIER_KEYS = { 실속: 'value', 표준: 'clean', 고급: 'premium' };
+
+export function combinedScopeSpecs(presetId, scopes = [], tier = 'clean') {
+  const key = ['value', 'clean', 'modern', 'wood', 'premium'].includes(presetId) ? presetId : TIER_KEYS[tier] || 'clean';
+  const order = ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster', 'carpentry', 'electric', 'window'];
+  const out = [];
+  order.forEach((sc) => {
+    if (!scopes.includes(sc)) return;
+    const name = { demolition: '철거', wallpaper: '도배·장판', bathroom: '욕실', kitchen: '주방', entrance: '현관', plaster: '바닥 미장', carpentry: '문·몰딩', electric: '전기·조명', window: '창호' }[sc];
+    (SCOPE_SPECS[sc]?.[key] || []).forEach((line) => out.push(`${name} · ${line}`));
+  });
+  return out;
+}
+
+export function combinedBrandPrices(scopes = []) {
+  const list = [];
+  const push = (sc, ...rows) => {
+    if (scopes.includes(sc)) rows.forEach((r) => list.push(r));
+  };
+  push('wallpaper',
+    { label: '개나리·신한 광폭합지', price: '약 2.8만/롤', note: '도배 · 실속' },
+    { label: 'LX 지아 실크', price: '약 5만/롤', note: '도배 · 고급' },
+    { label: 'KCC 1.8T 장판', price: '약 2.8만/평', note: '장판 · 실속' },
+    { label: 'LX 2.2T 장판', price: '약 4.2만/평', note: '장판 · 고급' });
+  push('bathroom',
+    { label: '국산 OEM 도기·수전', price: '약 35만/세트', note: '욕실 · 실속' },
+    { label: '대림바스·이누스', price: '약 50만/세트', note: '욕실 · A/S' },
+    { label: '600×1200 포세린', price: '약 4.5만/㎡', note: '욕실 · 고급' });
+  push('kitchen',
+    { label: 'LPM 싱크대(상·하부장)', price: '약 60만/m', note: '주방 · 실속' },
+    { label: '인조대리석 상판', price: '약 16만/m', note: '주방 · 표준' },
+    { label: '엔지니어드 스톤 상판', price: '약 28만/m', note: '주방 · 고급' });
+  push('entrance',
+    { label: '3연동 중문', price: '약 25~40만', note: '현관' },
+    { label: '신발장(맞춤)', price: '약 25~60만', note: '현관' },
+    { label: '현관 타일', price: '약 3만/㎡', note: '현관' });
+  push('plaster',
+    { label: '몰탈 미장', price: '약 2.8만/㎡', note: '바닥 미장' },
+    { label: '자기평탄 모르타르', price: '약 3.5만/㎡', note: '고급' });
+  push('window',
+    { label: '국산 2중창', price: '약 28만/㎡', note: '창호' },
+    { label: '시스템 창호(로이유리)', price: '약 40만/㎡', note: '창호 · 고급' });
+  return list;
+}

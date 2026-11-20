@@ -1,8 +1,8 @@
 // 디자인·자재 번역기 — 등급(가성비~고급) + 키워드 + 공종 → 구체 자재 조합 · 권장 추가 비율
 // 등급 라벨은 공간(욕실·주방·상가·발코니)에 상관없이 쓰는 '분위기/등급' 이름이다.
 // 자재 조합과 권장 추가 비율은 지금 현장의 공종(도배/욕실/주방/철거/복합)에 맞춰 달라진다.
-import { TRADES } from './constants';
-import { detailRowsFor, detailTotals } from './details';
+import { TRADES } from './constants.js';
+import { detailRowsFor, detailTotals } from './details.js';
 
 export const DESIGN_PRESETS = [
   {
@@ -83,9 +83,9 @@ const LEGACY_PRESET = { whitewood: 'wood', hotel: 'premium', vintage: 'wood' };
 const KEYWORD_MAP = [
   { re: /가성비|실속|저렴|임대|최소|기본|원복|싸게/, id: 'value' },
   { re: /깔끔|무난|단정|평범|일반|표준/, id: 'clean' },
-  { re: /미니멀|모던|무채색|그레이|블랙|화이트\s*모던|군더더기/, id: 'modern' },
+  { re: /미니멀|모던|무채색|그레이|블랙|화이트\s*모던|군더더기|최신식|최신|트렌디|요즘|세련/, id: 'modern' },
   { re: /우드|원목|오크|따뜻|베이지|내추럴|북유럽|패턴|빈티지/, id: 'wood' },
-  { re: /호텔|고급|스파|리조트|대형\s*타일|샴페인|럭셔리|고급스/, id: 'premium' },
+  { re: /호텔|고급|스파|리조트|대형\s*타일|샴페인|럭셔리|고급스|프리미엄/, id: 'premium' },
 ];
 
 export function guessPreset(text = '', trade = 'wallpaper') {

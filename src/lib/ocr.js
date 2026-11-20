@@ -1,6 +1,8 @@
 // 브라우저 무료 OCR — tesseract.js(kor+eng). 키·서버 없이 스크린샷 글자를 읽는다.
 // 첫 실행 때 언어 데이터(수 MB)를 CDN에서 받으므로 인터넷이 필요합니다.
 // 읽은 글자는 바로 cleanOcrText로 후처리해서 폰 상단바·앱 UI 잡글자를 걸러낸다.
+// 글자가 없는 현장 사진(부엌·벽 등)은 사물·그림자를 글자로 오인하므로, 신뢰도·한글 단어 비율을 보고
+// 빈 문자열 + isScenePhoto 로 돌려보내 외계어가 '받은 내용'에 들어가지 않게 한다.
 let workerPromise = null;
 let progressCb = null;
 
@@ -115,25 +117,82 @@ export function ocrNoiseSummary(raw, cleaned) {
   return { before, after, removed: Math.max(0, before - after) };
 }
 
-export async function ocrFiles(files, onProgress, { clean = true } = {}) {
+// 현장 글자로 볼 만한 단어(2음절 이상 한글)
+const DOMAIN_HINTS =
+  /철거|폐기물|도배|장판|벽지|욕실|화장실|타일|방수|미장|창호|샤시|인테리어|아파트|상가|빌라|주택|사무실|주방|싱크대|엘리베이터|엘베|승강기|한차|톤|분리수거|계량|반출|수거|평|㎡|m2/;
+
+export function evaluateOcr(cleaned, confidence = 0, rawText = '') {
+  const text = String(cleaned || '').trim();
+  const hangul = (text.match(/[가-힣]/g) || []).length;
+  const compact = text.replace(/\s/g, '');
+  const hangulRatio = compact.length ? hangul / compact.length : 0;
+  const words = Array.from(new Set(text.match(/[가-힣]{2,}/g) || []));
+  const conf = Number(confidence) || 0;
+  const domainHits = new Set((`${text} ${rawText}`.match(DOMAIN_HINTS) || []).map((s) => s));
+  // 현장 낱말이 2가지 이상 잡히면 사물 오인과 구분해 살린다.
+  const looksReal = domainHits.size >= 2 && words.length >= 2;
+
+  const isScene =
+    !text || (conf < 45 && !looksReal) || (words.length < 3 && !looksReal) || (hangulRatio < 0.35 && !looksReal);
+
+  return {
+    isScenePhoto: isScene,
+    confidence: Math.round(conf),
+    meaningfulWords: words.length,
+    hangulRatio: +hangulRatio.toFixed(2),
+    rawLength: String(rawText || '').length,
+    hasDomainHint: domainHits.size >= 2,
+  };
+}
+
+export async function ocrAnalyze(files, onProgress, { clean = true } = {}) {
   const list = Array.from(files || []).filter(Boolean);
-  if (!list.length) return '';
+  if (!list.length) {
+    return { text: '', cleaned: '', raw: '', isScenePhoto: true, confidence: 0, meaningfulWords: 0, hangulRatio: 0 };
+  }
   progressCb = onProgress || null;
   const worker = await getWorker();
-  const texts = [];
+  const raws = [];
+  let confWeighted = 0;
+  let confWeight = 0;
   for (let i = 0; i < list.length; i += 1) {
     if (onProgress) onProgress(0, i + 1, list.length);
     // eslint-disable-next-line no-await-in-loop
     const { data } = await worker.recognize(list[i]);
-    texts.push(String(data?.text || ''));
+    const text = String(data?.text || '');
+    raws.push(text);
+    const w = Math.max(1, text.replace(/\s/g, '').length);
+    confWeighted += (Number(data?.confidence) || 0) * w;
+    confWeight += w;
   }
-  const joined = texts.join('\n').trim();
-  return clean ? cleanOcrText(joined) : joined;
+  const raw = raws.join('\n').trim();
+  const confidence = confWeight ? confWeighted / confWeight : 0;
+  const cleaned = clean ? cleanOcrText(raw) : raw;
+  const quality = evaluateOcr(cleaned, confidence, raw);
+  return {
+    text: quality.isScenePhoto ? '' : cleaned,
+    cleaned,
+    raw,
+    ...quality,
+  };
+}
+
+export async function ocrFiles(files, onProgress, opts) {
+  const res = await ocrAnalyze(files, onProgress, opts);
+  return res.text;
 }
 
 export async function ocrWithTimeout(files, onProgress, ms = 120000) {
   return Promise.race([
     ocrFiles(files, onProgress),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('사진 글자 읽기가 오래 걸립니다. 직접 입력해 주세요.')), ms)),
+  ]);
+}
+
+// 글자 없는 현장 사진인지까지 함께 알려준다 (결과: text · isScenePhoto · confidence)
+export async function ocrAnalyzeWithTimeout(files, onProgress, ms = 120000) {
+  return Promise.race([
+    ocrAnalyze(files, onProgress),
     new Promise((_, reject) => setTimeout(() => reject(new Error('사진 글자 읽기가 오래 걸립니다. 직접 입력해 주세요.')), ms)),
   ]);
 }
@@ -147,4 +206,9 @@ export async function disposeOcr() {
     // ignore
   }
   workerPromise = null;
+}
+
+// 글자 없는 현장 사진에 붙이는 문구 — 외계어 대신 이 한 줄만 보여준다.
+export function scenePhotoNote(count = 1) {
+  return `📷 글자 없는 현장 사진 ${count}장 첨부됨 (입력하신 설명 기준으로 분류합니다)`;
 }

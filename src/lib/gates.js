@@ -60,6 +60,25 @@ export const STEP_GUIDES = {
     ],
     tell: '철거 기공에게 “성상별로 마대 분리해서 담고, 천장 위 숨은 물량 나오면 바로 사진 찍어 주세요.”',
   },
+  waste: {
+    what: '폐기물을 성상별로 나눠 상차하고 처리장으로 보내는 단계입니다. 계량증명서·처리확인서가 남아야 나중에 “어디에 버렸냐”는 말을 막을 수 있습니다.',
+    checks: [
+      '수거 전 전체 사진을 남깁니다(짐이 있던 상태).',
+      '마대를 성상별(콘크리트·목재·석고·금속·비닐)로 나눠 상차합니다.',
+      '상차 적재량과 계근 결과를 사진으로 남깁니다.',
+      '복도·엘리베이터에 파손·오염이 없는지 확인합니다.',
+    ],
+    tell: '인부에게 “성상별로 나눠 싣고, 계량증명서 받아 사진 찍어 보내주세요. 끝나면 빈 공간도 같은 자리에서 찍어주세요.”',
+  },
+  labor: {
+    what: '필요 인원과 숙련도를 정해 현장에 보내고, 작업 범위를 서면으로 남기는 단계입니다.',
+    checks: [
+      '인원·일수·집결 시간을 전날 확정합니다.',
+      '기초안전보건교육 이수증을 확인합니다.',
+      '작업 범위(무엇까지 하는지)를 문자로 남깁니다.',
+    ],
+    tell: '인부에게 “○일 ○시 현장 집결, 작업 범위는 ○○까지입니다. 진행 사진 보내주세요.”',
+  },
   generic: {
     what: '이 공정이 끝나야 다음 공정이 안전합니다. 체크 항목을 하나씩 확인하며 진행하세요.',
     checks: ['사진으로 남겨 두면 나중에 분쟁 때 근거가 됩니다.', '자재·인력 준비 상태를 전날 확인합니다.'],
@@ -127,7 +146,7 @@ export function managementChecklist(c, trade) {
       label: '엘리베이터·복도 보양',
       hint: '엘베·공용부가 있을 때',
       applicable: hasElevator && !wasteOnly,
-      skipWhy: '엘리베이터 없음',
+      skipWhy: wasteOnly ? '폐기물·인력 단독 현장' : '엘리베이터 없음',
     },
     { id: 'neighbor', label: '이웃 인사·안내문', hint: '소음·분진이 나는 공사', applicable: true, skipWhy: '' },
     {
@@ -135,7 +154,13 @@ export function managementChecklist(c, trade) {
       label: '사다리차 설치 승인',
       hint: '자재·폐기물을 창밖으로 내릴 때',
       applicable: ladderPossible && lift.elevator !== 'yes' && !wasteOnly,
-      skipWhy: lift.elevator === 'yes' ? '엘리베이터 사용' : lift.ladderAllowed === 'no' ? '사다리차 설치 불가' : '폐기물·인력 단독 현장',
+      skipWhy: wasteOnly
+        ? '폐기물·인력 단독 현장'
+        : lift.elevator === 'yes'
+        ? '엘리베이터 사용'
+        : lift.ladderAllowed === 'no'
+        ? '사다리차 설치 불가'
+        : '',
     },
   ];
 }
@@ -179,7 +204,8 @@ export function buildGates(c, trade) {
   const estTons = unit === '톤' ? sizeVal : +(pyung * 0.09).toFixed(1);
   const tileMode = c?.tileWork?.mode || 'both';
 
-  if (trade === 'bathroom' || trade === 'combined' || (trade === 'tilewaterproof' && tileMode !== 'tile')) {
+  const hasBathScope = Array.isArray(c?.subScopes) && c.subScopes.length ? c.subScopes.includes('bathroom') : true;
+  if (trade === 'bathroom' || (trade === 'combined' && hasBathScope) || (trade === 'tilewaterproof' && tileMode !== 'tile')) {
     gate3 = {
       id: 'g3',
       step: '3단계',
@@ -271,11 +297,10 @@ export function buildGates(c, trade) {
       warning: '단종 자재는 같은 규격으로 대체됩니다. 손님 승인을 먼저 받으세요.',
       done: !!(g.demo && g.evidence),
     };
-  } else {
+  } else if (trade === 'demolition' || trade === 'combined') {
     const prereqs = [{ id: 'separate', label: '마대 성상 분리(5종)', done: !!g.separate }];
     if (estTons >= 5) prereqs.push({ id: 'plan', label: `5톤 이상 처리계획서 신고 (${estTons}톤)`, done: !!g.plan });
-    // 철거 전 6부위 촬영은 철거·복합 현장에서만
-    if (trade === 'demolition' || trade === 'combined') prereqs.push({ id: 'evidence', label: '철거 전 6부위 촬영', done: !!g.evidence });
+    prereqs.push({ id: 'evidence', label: '철거 전 6부위 촬영', done: !!g.evidence });
     gate3 = {
       id: 'g3',
       step: '3단계',
@@ -284,6 +309,22 @@ export function buildGates(c, trade) {
       locks: ['집게차·덤프 배차', '폐기물 반출'],
       unlocks: '집게차·덤프 배차 · 폐기물 반출 가능',
       warning: '섞인 마대 하나가 단가를 3~6배로 만듭니다. 성상별로 나눠 두세요.',
+      done: prereqs.every((p) => p.done),
+    };
+  } else {
+    // 목공·전기·설비·필름·토목·수선 등 — 폐기물 절차를 붙이지 않고 범위·준비만 확인한다.
+    const prereqs = [
+      { id: 'separate', label: '작업 범위 확정(문자로 남기기)', done: !!g.separate },
+      { id: 'evidence', label: '작업 전 현장 사진', done: !!g.evidence },
+    ];
+    gate3 = {
+      id: 'g3',
+      step: '3단계',
+      title: '범위·자재 확정 → 작업 투입',
+      prereqs,
+      locks: ['자재 발주', '인력 투입'],
+      unlocks: '자재 발주 · 인력 투입 가능',
+      warning: '범위를 말로만 정하면 “그건 안 했다” 분쟁이 됩니다. 문자·사진으로 남기세요.',
       done: prereqs.every((p) => p.done),
     };
   }
@@ -311,4 +352,106 @@ export function gateOpen(gates, id) {
   const idx = gates.findIndex((g) => g.id === id);
   if (idx < 0) return false;
   return gates.slice(0, idx).every((g) => g.done);
+}
+
+
+// 공종별 시공 타임라인 — 자기 공종에 맞는 순서만 보여준다.
+// (폐기물에 '자재 발주·주공정 시공·하자 정리'를 붙이지 않는다)
+export function buildTimeline(c, calc, gates = []) {
+  const trade = calc?.trade || c?.trade || 'custom';
+  const g = c?.gates || {};
+  const gate3Done = !!gates[2]?.done;
+  const gate4Done = !!gates[3]?.done;
+  const depositDone = !!g?.deposit;
+  const planDone = !!(g?.separate && (c?.startDate || c?.dispatch?.date));
+
+  if (trade === 'waste') {
+    return [
+      {
+        label: '전날 · 배차·인력 확정',
+        done: depositDone && planDone,
+        items: ['차량(반차·1톤·2.5톤) 확정', '상차 인부 확정', '반입 시간·처리장 확인', '현장 출입·주차'],
+      },
+      { label: '당일 · 수거·상차·계근', done: gate3Done, items: ['성상별 수거', '상차·적재량 사진', '계량증명서 받기'] },
+      { label: '완료 · 사진·정산', done: gate4Done, items: ['수거 후 빈 공간 사진', '처리확인서 보관', '잔금 정산'] },
+    ];
+  }
+  if (trade === 'labor') {
+    return [
+      {
+        label: '전날 · 인원·숙련 확정',
+        done: depositDone && planDone,
+        items: ['인원·일수 확정', '숙련도·작업 범위 문자', '집결 장소·주차'],
+      },
+      { label: '당일 · 집결·작업', done: gate3Done, items: ['집결 확인', '작업 범위 지시', '진행 사진'] },
+      { label: '완료 · 작업 확인·정산', done: gate4Done, items: ['작업 완료 확인', '추가 요구 정리', '잔금 정산'] },
+    ];
+  }
+  const waterproof = trade === 'bathroom' || trade === 'combined';
+  return [
+    {
+      label: 'D-2 · D-1 사전 준비',
+      done: depositDone,
+      items: ['자재 발주', '관리실 신고·보양', '사다리차 승인'],
+    },
+    {
+      label: '시공 당일',
+      done: gate3Done,
+      items: waterproof ? ['철거·양중', '방수 2회', '담수 48시간', '타일·마감'] : ['철거·반출', '주공정 시공', '마감 정리'],
+    },
+    { label: '완료 · 잔금', done: gate4Done, items: ['준공 사진', '하자 정리', '잔금 입금'] },
+  ];
+}
+
+// 작업 전·후 사진 기록 — 공종에 맞는 칸만 남긴다.
+export const EVIDENCE_BY_TRADE = {
+  waste: {
+    title: '수거 전·후 기록',
+    hint: '수거 전·후를 같은 자리에서 남겨두면 “네가 버린 게 아니다”는 말을 막을 수 있습니다.',
+    spots: [
+      { id: 'before', label: '수거 전 전체', hint: '짐이 있던 상태 그대로' },
+      { id: 'load', label: '상차 적재량', hint: '차량 적재 상태·계근 전' },
+      { id: 'after', label: '수거 후 빈 공간', hint: '수거 전과 같은 각도' },
+      { id: 'hallway', label: '복도·엘베 이상 없음', hint: '공용부 파손·오염 확인' },
+    ],
+  },
+  labor: {
+    title: '작업 전·후 기록',
+    hint: '일용 인력 현장은 작업 범위와 결과를 사진으로 남겨야 추가 요구를 막을 수 있습니다.',
+    spots: [
+      { id: 'before', label: '작업 전 현장', hint: '작업 범위가 보이게' },
+      { id: 'during', label: '작업 중 진행', hint: '지시한 범위대로 하는지' },
+      { id: 'after', label: '작업 후 현장', hint: '작업 전과 같은 각도' },
+      { id: 'material', label: '자재·공구 정리', hint: '남긴 것·가져간 것' },
+    ],
+  },
+  demolition: {
+    title: '철거 전 사진 6곳',
+    hint: '착공 전에 찍어두지 않으면 “네 공사 때문에 긁혔다”를 반박할 방법이 없습니다.',
+    spots: [
+      { id: 'floor', label: '바닥', hint: '전체샷 + 근접샷' },
+      { id: 'wall', label: '벽', hint: '긁힘·곰팡이 위치' },
+      { id: 'ceiling', label: '천장', hint: '누수·얼룩' },
+      { id: 'hallway', label: '복도', hint: '공용부 파손' },
+      { id: 'elevator', label: '승강기 내부', hint: '문·패널' },
+      { id: 'neighbor', label: '아래집·옆집', hint: '기존 균열·누수 흔적' },
+    ],
+  },
+  finish: {
+    title: '작업 전·후 기록',
+    hint: '작업 전·후를 같은 각도로 남겨두면 “네 공사 때문에 생긴 것”이라는 말을 막을 수 있습니다.',
+    spots: [
+      { id: 'before', label: '작업 전 전체 사진', hint: '같은 자리에서 찍기' },
+      { id: 'material', label: '자재 입고 사진', hint: '품명·수량 확인용' },
+      { id: 'defect', label: '하자 의심 부위', hint: '발견 즉시 촬영' },
+      { id: 'after', label: '작업 후 전체 사진', hint: '작업 전과 같은 각도' },
+    ],
+  },
+};
+
+export function evidenceFor(trade) {
+  if (trade === 'waste') return EVIDENCE_BY_TRADE.waste;
+  if (trade === 'labor') return EVIDENCE_BY_TRADE.labor;
+  if (trade === 'demolition' || trade === 'combined') return EVIDENCE_BY_TRADE.demolition;
+  return EVIDENCE_BY_TRADE.finish;
 }

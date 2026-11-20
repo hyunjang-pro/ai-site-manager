@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { ArrowUpFromLine, HardHat, MapPin, Truck } from 'lucide-react';
+import { ArrowUpFromLine, ExternalLink, HardHat, Loader2, MapPin, Truck } from 'lucide-react';
 import { BUFFER_OPTIONS, REGIONS } from '../lib/constants.js';
 import { DEFAULT_RATES, RATE_FIELDS, cloneRates, getRate, mergeRates, setRate } from '../lib/rates.js';
 import { resetState } from '../lib/storage.js';
+import { GEMINI_KEY_URL, getGeminiKey, setGeminiKey, testGeminiKey } from '../lib/gemini.js';
+import { getSupplier, saveSupplier } from '../lib/supplier.js';
 import { BigButton, Details, Field, IconTile, Modal, Segmented, Select, SmallButton, TextInput, cx } from './ui.jsx';
 
 const GROUP_ICON = {
@@ -15,8 +17,15 @@ const GROUP_ICON = {
 export default function SettingsModal({ open, onClose, state, setState, showToast }) {
   const [region, setRegion] = useState(state.settings.region || '안동');
   const [businessName, setBusinessName] = useState(state.settings.businessName || '');
-  const [apiKey, setApiKey] = useState(state.settings.apiKey || '');
+  const [apiKey, setApiKey] = useState(state.settings.apiKey || getGeminiKey() || '');
+  const [aiTest, setAiTest] = useState(null); // null | 'busy' | {ok, msg}
+  const runAiTest = async () => {
+    setAiTest('busy');
+    const res = await testGeminiKey(apiKey);
+    setAiTest(res.ok ? { ok: true, msg: `연결됨 · ${res.model}` } : { ok: false, msg: `실패 (${res.reason})` });
+  };
   const [agencyFeeRate, setAgencyFeeRate] = useState(state.settings.agencyFeeRate ?? 10);
+  const [supplier, setSupplier] = useState(() => getSupplier());
   const [rates, setRates] = useState(() => mergeRates(DEFAULT_RATES, state.settings.rates || {}));
 
   const save = () => {
@@ -32,7 +41,9 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
         rates,
       },
     }));
-    showToast('설정을 저장했습니다');
+    setGeminiKey(apiKey.trim());
+    saveSupplier(supplier);
+    showToast(apiKey.trim() ? '설정을 저장했습니다 — AI 정밀 분석이 켜졌습니다' : '설정을 저장했습니다 (로컬 규칙 모드)');
     onClose();
   };
 
@@ -47,6 +58,59 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
         </BigButton>
       }
     >
+      {/* 🤖 AI 정밀 분석 (Gemini) */}
+      <div className="rounded-2xl border-2 border-brand/30 bg-brand-soft/60 p-3.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-base font-extrabold text-ink">🤖 AI 정밀 분석 (무료 Gemini API 키)</p>
+            <p className="mt-0.5 text-xs font-semibold leading-4 text-ink-3">
+              사진+글을 함께 읽어 공종·자재·인력·답사 체크를 뽑고, 비포→애프터 예상 사진도 만듭니다. 키가 없으면 내장 규칙으로 100% 동작합니다.
+            </p>
+          </div>
+          <span className={cx('shrink-0 rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold', apiKey.trim() ? 'bg-brand text-white' : 'bg-white text-ink-3')}>
+            {apiKey.trim() ? 'ON' : 'OFF'}
+          </span>
+        </div>
+        <div className="mt-2">
+          <Field label="Gemini API 키">
+            <TextInput
+              type="password"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                setAiTest(null);
+              }}
+              placeholder="AIza... (비워두면 로컬 규칙 모드)"
+              autoComplete="off"
+              aria-label="Gemini API 키"
+            />
+          </Field>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <SmallButton variant="white" onClick={runAiTest} disabled={!apiKey.trim() || aiTest === 'busy'} className="shrink-0">
+            {aiTest === 'busy' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {aiTest === 'busy' ? '확인 중…' : '연결 테스트'}
+          </SmallButton>
+          <a
+            href={GEMINI_KEY_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-white px-3 text-xs font-bold text-brand ring-1 ring-brand/30"
+          >
+            키 발급 <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
+        {aiTest && aiTest !== 'busy' ? (
+          <p className={cx('mt-1.5 text-2xs font-extrabold', aiTest.ok ? 'text-emerald-700' : 'text-rose-700')}>
+            {aiTest.ok ? '✅ ' : '⚠ '}
+            {aiTest.msg}
+          </p>
+        ) : null}
+        <p className="mt-1.5 text-2xs font-semibold leading-4 text-ink-3">
+          키는 이 기기 브라우저(localStorage)에만 저장됩니다. 코드·서버로 보내지 않습니다.
+        </p>
+      </div>
+
       <Field label="기본 지역" hint="새 현장을 만들 때 이 지역으로 시작합니다.">
         <Select value={region} onChange={(e) => setRegion(e.target.value)}>
           {REGIONS.map((r) => (
@@ -56,6 +120,19 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
           ))}
         </Select>
       </Field>
+
+      <div className="rounded-2xl bg-slate-50 p-3.5">
+        <p className="text-base font-extrabold text-ink">우리 업체 정보 (공급자)</p>
+        <p className="mt-1 text-xs leading-5 text-ink-3">한 번 저장하면 모든 현장의 견적서·점포철거비 공사내역서·공사 안내문에 자동으로 들어갑니다.</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <Field label="상호"><TextInput value={supplier.name} onChange={(e) => setSupplier({ ...supplier, name: e.target.value })} aria-label="업체 상호" /></Field>
+          <Field label="대표자"><TextInput value={supplier.owner} onChange={(e) => setSupplier({ ...supplier, owner: e.target.value })} aria-label="업체 대표자" /></Field>
+          <Field label="사업자등록번호"><TextInput value={supplier.bizNo} onChange={(e) => setSupplier({ ...supplier, bizNo: e.target.value })} inputMode="numeric" aria-label="업체 사업자번호" /></Field>
+          <Field label="연락처"><TextInput value={supplier.phone} onChange={(e) => setSupplier({ ...supplier, phone: e.target.value })} inputMode="tel" aria-label="업체 연락처" /></Field>
+          <Field label="주소" className="col-span-2"><TextInput value={supplier.address} onChange={(e) => setSupplier({ ...supplier, address: e.target.value })} aria-label="업체 주소" /></Field>
+          <Field label="입금 계좌" className="col-span-2"><TextInput value={supplier.account || ''} onChange={(e) => setSupplier({ ...supplier, account: e.target.value })} placeholder="예) 농협 123-4567-8901 (예금주)" aria-label="업체 계좌" /></Field>
+        </div>
+      </div>
 
       <Field label="상호(사업장 이름)">
         <TextInput value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="예) ○○철거·인테리어" />
@@ -137,26 +214,6 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
       {Number(agencyFeeRate) > 10 ? (
         <p className="text-xs font-bold text-rose-600">10%를 넘기면 직업안정법 위반 소지가 있습니다.</p>
       ) : null}
-
-      <Details label="AI 도움 받기 (선택)">
-        <p className="text-sm leading-6 text-slate-600">
-          구글 AI 키를 넣으면 문의 내용을 더 똑똑하게 읽습니다. 넣지 않아도 앱은 100% 동작합니다.
-        </p>
-        <div className="mt-2">
-          <Field label="구글 AI 키">
-            <TextInput
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="비워두면 내장 계산기만 사용"
-              autoComplete="off"
-            />
-          </Field>
-        </div>
-        <p className="mt-2 text-sm leading-6 text-slate-500">
-          키는 이 기기 브라우저에만 저장되고, 코드나 다른 곳으로 보내지 않습니다.
-        </p>
-      </Details>
 
       <div className={cx('rounded-2xl border border-slate-200 p-4')}>
         <p className="text-base font-extrabold text-slate-800">예시 데이터로 되돌리기</p>

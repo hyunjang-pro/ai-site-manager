@@ -2,23 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, ImagePlus, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { SIZE_UNITS, TRADES, TRADE_LIST } from '../lib/constants.js';
 import { classifyRequest, summarizeRequest } from '../lib/classify.js';
-import { ocrWithTimeout } from '../lib/ocr.js';
+import { analyzeCaseWithGemini, getGeminiKey } from '../lib/gemini.js';
+import { ocrAnalyzeWithTimeout, scenePhotoNote } from '../lib/ocr.js';
 import { fileToThumb } from '../lib/image.js';
 import { AlertCard, BigButton, Details, Modal, Pill, Select, TextArea, TradeIcon, cx } from './ui.jsx';
-
-const EXAMPLES = [
-  '폐기물 2톤만 치워주세요',
-  '발코니 누수 방수',
-  '일용직 인부 3명',
-  '욕실+도배 15평',
-  '24평 아파트 도배·장판, 엘베 없는 3층',
-];
 
 export default function NewCaseModal({ open, onClose, onCreate }) {
   const [step, setStep] = useState('input'); // input | result
   const [text, setText] = useState('');
   const [photos, setPhotos] = useState([]); // {file, url, thumb}
   const [ocrText, setOcrText] = useState('');
+  const [sceneNote, setSceneNote] = useState('');
   const [progress, setProgress] = useState(null); // null | 문자열
   const [result, setResult] = useState(null);
   const [trade, setTrade] = useState('demolition');
@@ -28,6 +22,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
   const [elevator, setElevator] = useState('unknown');
   const [error, setError] = useState('');
   const fileRef = useRef(null);
+  const aiOn = !!getGeminiKey();
 
   useEffect(() => {
     if (!open) {
@@ -37,6 +32,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
       setText('');
       setPhotos([]);
       setOcrText('');
+      setSceneNote('');
       setResult(null);
       setProgress(null);
       setError('');
@@ -69,20 +65,119 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
     setProgress(list.length ? '사진에서 글자 읽는 중…' : '분류 중…');
     let combined = typed;
     let cleaned = '';
+    let scene = false;
     try {
-      if (list.length) {
-        cleaned = await ocrWithTimeout(
+      const aiKey = getGeminiKey();
+      // 키가 있으면 느린 tesseract를 건너뛰고 사진을 곧장 멀티모달 AI로 보낸다.
+      if (list.length && aiKey) {
+        setProgress('🤖 AI가 사진을 읽는 중…');
+        const ai = await analyzeCaseWithGemini({ apiKey: aiKey, text: typed, photos: list.map((p) => p.thumb) });
+        if (ai.ok) {
+          const a = ai.data;
+          const rows = [
+            { label: '공종', value: TRADES[a.trade]?.label || '직접 입력' },
+            a.sizeValue ? { label: '규모', value: `${a.sizeValue}${a.sizeUnit || ''}` } : null,
+            a.priceRange?.max > 0 ? { label: 'AI 범위', value: `${a.priceRange.min}~${a.priceRange.max}만` } : null,
+          ].filter(Boolean);
+          setSceneNote('');
+          setResult({
+            trade: a.trade,
+            title: a.title,
+            rows,
+            hints: [...(a.surveyChecks || []).map((x) => (typeof x === 'string' ? x : x.label)), ...(a.warnings || [])].slice(0, 6),
+            patch: {
+              trade: a.trade,
+              tradeName: a.tradeName,
+              rawInput: typed || a.summary,
+              notes: typed || a.summary,
+              ...(a.sizeValue ? { sizeValue: a.sizeValue, sizeUnit: a.sizeUnit } : {}),
+              lifting: { floor: a.floor || '', elevator: a.elevator || 'unknown' },
+              aiAnalysis: a,
+              subScopes: a.includedScopes || [],
+              excludedScopes: a.excludedScopes || [],
+              parseHints: a.warnings || [],
+            },
+          });
+          setTrade(a.trade || 'custom');
+          setSizeValue(a.sizeValue || '');
+          setSizeUnit(a.sizeUnit || '평');
+          setFloor(a.floor || '');
+          setElevator(a.elevator || 'unknown');
+          setStep('result');
+          setProgress(null);
+          return;
+        }
+        setProgress('사진에서 글자 읽는 중…');
+      }
+
+      if (list.length && !aiKey) {
+        const res = await ocrAnalyzeWithTimeout(
           list.map((p) => p.file),
           (pct, idx, total) => setProgress(`사진 ${idx || 1}/${total || list.length} 글자 읽는 중… ${pct ? `${pct}%` : ''}`)
         );
-        setOcrText(cleaned);
+        if (res.isScenePhoto) {
+          // 사물·그림자를 글자로 오인한 경우 — 외계어를 넣지 않고 안내만 남긴다.
+          scene = true;
+          setSceneNote(scenePhotoNote(list.length));
+          setOcrText('');
+        } else {
+          cleaned = res.text || '';
+          setOcrText(cleaned);
+          setSceneNote('');
+        }
         combined = `${typed}\n${cleaned}`.trim();
       }
       if (!combined.trim()) {
+        if (scene) {
+          setError('');
+          setProgress(null);
+          setStep('input');
+          return;
+        }
         setError('붙여넣은 내용이나 사진이 없습니다. 요청 글을 넣거나 공종을 직접 골라주세요.');
         setProgress(null);
         return;
       }
+      // 키가 있으면 멀티모달 AI가 사진까지 함께 본다. 실패하면 로컬 규칙으로 넘어간다.
+      const key = getGeminiKey();
+      if (key && combined.trim() && !list.length) {
+        setProgress('🤖 AI가 사진·글을 함께 읽는 중…');
+        const ai = await analyzeCaseWithGemini({ apiKey: key, text: combined, photos: list.map((p) => p.thumb) });
+        if (ai.ok) {
+          const a = ai.data;
+          const rows = [
+            { label: '공종', value: TRADES[a.trade]?.label || '직접 입력' },
+            a.sizeValue ? { label: '규모', value: `${a.sizeValue}${a.sizeUnit || ''}` } : null,
+            a.priceRange?.max > 0 ? { label: 'AI 범위', value: `${a.priceRange.min}~${a.priceRange.max}만` } : null,
+          ].filter(Boolean);
+          setResult({
+            trade: a.trade,
+            title: a.title,
+            rows,
+            hints: [...(a.surveyChecks || []).map((x) => (typeof x === 'string' ? x : x.label)), ...(a.warnings || [])].slice(0, 6),
+            patch: {
+              trade: a.trade,
+              tradeName: a.tradeName,
+              rawInput: combined,
+              notes: combined,
+              ...(a.sizeValue ? { sizeValue: a.sizeValue, sizeUnit: a.sizeUnit } : {}),
+              lifting: { floor: a.floor || '', elevator: a.elevator || 'unknown' },
+              aiAnalysis: a,
+              parseHints: a.warnings || [],
+            },
+          });
+          setTrade(a.trade || 'custom');
+          setSizeValue(a.sizeValue || '');
+          setSizeUnit(a.sizeUnit || '평');
+          setFloor(a.floor || '');
+          setElevator(a.elevator || 'unknown');
+          setStep('result');
+          setProgress(null);
+          return;
+        }
+        setError('AI 연결에 실패해 로컬 규칙으로 분류했습니다.');
+      }
+
       const r = classifyRequest(combined);
       const summary = summarizeRequest(combined, r);
       r.patch.rawInput = summary;
@@ -152,7 +247,17 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
                 <span className="mr-1 rounded-md bg-ink px-1.5 py-0.5 text-2xs font-black text-white">1</span>
                 숨고·카톡·메모를 그대로 넣으세요
               </span>
-              <Pill tone="info" icon={false}>자동 분류</Pill>
+              <span className="flex items-center gap-1.5">
+                <span
+                  className={cx(
+                    'rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold',
+                    aiOn ? 'bg-brand text-white' : 'bg-slate-100 text-ink-3'
+                  )}
+                >
+                  {aiOn ? '🤖 AI 정밀 분석 ON' : '로컬 규칙 모드'}
+                </span>
+                <Pill tone="info" icon={false}>자동 분류</Pill>
+              </span>
             </div>
             <TextArea
               rows={4}
@@ -161,18 +266,6 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
               placeholder={'예) 아파트 인테리어, 경북 안동시, 15평, 공실, 창호 제외, 바닥 미장 필요\n또는 숨고 요청서 스크린샷을 올리세요'}
               aria-label="현장 요청 내용"
             />
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex}
-                  type="button"
-                  onClick={() => setText((v) => (v ? `${v}\n${ex}` : ex))}
-                  className="rounded-lg bg-slate-100 px-2 py-1 text-2xs font-bold text-ink-2 active:bg-slate-200"
-                >
-                  {ex}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* 2) 사진 — 전체 너비 */}
@@ -200,9 +293,15 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           </p>
 
           {/* 3) 자동 분류 — 전체 너비 주 버튼 */}
-          <BigButton variant="amber" className="w-full whitespace-nowrap text-sm" onClick={() => analyze()} disabled={busy}>
+          <BigButton
+            variant="amber"
+            className="w-full whitespace-nowrap text-sm"
+            onClick={() => analyze()}
+            disabled={busy}
+            aria-label={aiOn ? 'AI 정밀 분석' : '자동으로 분류하기'}
+          >
             {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
-            {busy ? '읽는 중…' : '자동으로 분류하기'}
+            {busy ? '읽는 중…' : aiOn ? '🤖 AI 정밀 분석' : '자동으로 분류하기'}
           </BigButton>
 
           {photos.length ? (
@@ -224,6 +323,13 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
                 </div>
               ))}
             </div>
+          ) : null}
+
+          {sceneNote ? (
+            <p className="flex items-start gap-1.5 rounded-xl bg-slate-100 px-3 py-2.5 text-[13px] font-semibold leading-5 text-ink-2">
+              <ScanText className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+              <span>{sceneNote}</span>
+            </p>
           ) : null}
 
           {ocrText ? (
@@ -269,15 +375,39 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
             </div>
           </Details>
 
-          <AlertCard tone="info" title="사진은 이렇게 읽습니다">
-            숨고 요청서·카톡 캡처의 글자를 기기 안에서 읽습니다(무료 OCR). 첫 1회는 인식 데이터를 받느라 20~40초 걸릴 수 있습니다. 사진은 외부로 저장되지 않고 현장 사진첩에만 남습니다.
-          </AlertCard>
+          <p className="text-2xs font-semibold leading-4 text-ink-3">
+            사진 글자는 기기 안에서만 읽습니다(무료 OCR · 첫 1회 20~40초). 글자 없는 현장 사진은 설명을 적어주세요.
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
+          {sceneNote ? (
+            <p className="flex items-start gap-1.5 rounded-xl bg-slate-100 px-3 py-2.5 text-[13px] font-semibold leading-5 text-ink-2">
+              <ScanText className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+              <span>{sceneNote}</span>
+            </p>
+          ) : null}
           {ocrText ? (
             <AlertCard tone="good" title="사진에서 읽은 글자 (정리 후)">
               <p className="line-clamp-4 whitespace-pre-line">{ocrText}</p>
+            </AlertCard>
+          ) : null}
+
+          {result?.patch?.aiAnalysis ? (
+            <AlertCard tone="info" title="🤖 AI 정밀 분석">
+              {result.patch.aiAnalysis.wishText ? <p className="font-bold">희망사항: {result.patch.aiAnalysis.wishText}</p> : null}
+              {result.patch.aiAnalysis.siteCondition ? <p className="font-bold">{result.patch.aiAnalysis.siteCondition}</p> : null}
+              {result.patch.aiAnalysis.materials?.length ? (
+                <p className="mt-1">자재: {result.patch.aiAnalysis.materials.slice(0, 4).join(' · ')}</p>
+              ) : null}
+              {result.patch.aiAnalysis.crew?.length ? (
+                <p className="mt-0.5">인력: {result.patch.aiAnalysis.crew.map((x) => `${x.role} ${x.count}명`).join(' · ')}</p>
+              ) : null}
+              {result.patch.aiAnalysis.priceRange?.max > 0 ? (
+                <p className="mt-0.5">
+                  보수적 범위: {result.patch.aiAnalysis.priceRange.min}~{result.patch.aiAnalysis.priceRange.max}만 (부가세 별도)
+                </p>
+              ) : null}
             </AlertCard>
           ) : null}
 

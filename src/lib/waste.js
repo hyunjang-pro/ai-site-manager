@@ -9,6 +9,23 @@ export const WASTE_UNIT_PRICE = {
   asbestos: { label: '폐석면', price: 645000, note: '지정폐기물 — 별도 등록업체' },
 };
 
+// 폐기물 차량 1탭 선택 — 숨고 '생활폐기물 한차'는 1톤 1차가 기본이다(2.5톤 아님).
+export const WASTE_VEHICLES = [
+  { id: 'half', label: '반차(0.5톤)', short: '반차', tons: 0.5, rateKey: 'truckHalf', rate: 26, note: '짐이 적을 때 · 1톤차의 60% 수준' },
+  { id: 'ton1', label: '1톤 1차', short: '1톤', tons: 1, rateKey: 'truck1', rate: 42.5, note: '생활폐기물 한 차 기본 (차량 실비 40~55만)' },
+  { id: 'ton25', label: '2.5톤', short: '2.5톤', tons: 2.5, rateKey: 'truck25', rate: 75, note: '상가·공장 철거 한 차, "2.5톤" 명시' },
+];
+
+// 현장에 저장된 차량 선택 → 없으면 규모(톤)에서 추론. 기본값은 1톤 1차.
+export function wasteVehicle(c) {
+  const explicit = c?.waste?.vehicle || c?.wasteVehicle;
+  const found = WASTE_VEHICLES.find((v) => v.id === explicit);
+  if (found) return found;
+  const tons = c?.sizeUnit === '톤' ? Math.max(0, parseFloat(c?.sizeValue) || 0) : 0;
+  if (tons > 0) return tons <= 0.7 ? WASTE_VEHICLES[0] : tons <= 1.5 ? WASTE_VEHICLES[1] : WASTE_VEHICLES[2];
+  return WASTE_VEHICLES[1];
+}
+
 export const WASTE_SCOPES = [
   { id: 'floor', label: '바닥 마루·장판', material: 'mixed', kgPerSqm: 10, defaultArea: 60 },
   { id: 'tile', label: '욕실 타일', material: 'nonflammable', kgPerSqm: 22, defaultArea: 12 },
@@ -43,8 +60,13 @@ export function computeWaste(waste = {}, c = null) {
     byMaterial[s.material] = (byMaterial[s.material] || 0) + kg;
   });
 
-  // 폐기물 단독 현장(2.5톤 등)은 현장 톤수를 그대로 기본값으로 쓴다 — 0톤으로 보이지 않게.
-  const directTons = c && c.sizeUnit === '톤' ? Math.max(0, parseFloat(c.sizeValue) || 0) : 0;
+  // 폐기물 단독 현장은 고른 차량(반차·1톤·2.5톤)을 그대로 기본값으로 쓴다 — 0톤으로 보이지 않게.
+  const directTons =
+    c && c.sizeUnit === '톤'
+      ? c.trade === 'waste'
+        ? wasteVehicle(c).tons
+        : Math.max(0, parseFloat(c.sizeValue) || 0)
+      : 0;
   if (directTons > 0 && totalKg <= 0) {
     totalKg = directTons * 1000;
     byMaterial.mixed = (byMaterial.mixed || 0) + totalKg;

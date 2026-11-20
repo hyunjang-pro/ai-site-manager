@@ -1,4 +1,6 @@
 // 통합 입력(숨고·카톡·메모) 자동 분류 — 평수 강제 없이 읽을 수 있는 것만 읽는다.
+import { ratesOf } from './rates.js';
+
 export function parseInput(text = '') {
   const t = String(text || '').toLowerCase();
   const scores = { demolition: 0, wallpaper: 0, bathroom: 0, kitchen: 0 };
@@ -139,4 +141,97 @@ export function classifyChange(text = '') {
   }
   // 규칙에 없으면 문장을 그대로 항목으로 쓰고 기본 금액을 제안한다.
   return { item: s.split(/[.,\n]/)[0].slice(0, 30), reason: s.slice(0, 60), amount: 20, days: 0, type: 'increase' };
+}
+
+// ---- 답사 메모 일상어 인식 ----
+// "폐기물 두 차는 나올듯", "한 차 더", "반 차 추가", "양 많아 보임" 을 그대로 읽는다.
+const KOR_LOAD = { 한: 1, 두: 2, 세: 3, 네: 4 };
+
+export function surveyWasteDrafts(text = '', c = null) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const wasteContext =
+    c?.trade === 'waste' || /폐기물|쓰레기|마대|반출|수거|차량|트럭|한\s*차|두\s*차|세\s*차/.test(t);
+  if (!wasteContext) return [];
+  const rates = ratesOf(c);
+  const oneTon = Math.round(Number(rates?.waste?.truck1) || 42.5);
+  const halfTon = Math.round(Number(rates?.waste?.truckHalf) || 26);
+
+  const kor = t.match(/(한|두|세|네)\s*차/);
+  const numM = t.match(/(\d+)\s*(?:차|대)/);
+  const halfOnly = /반\s*차/.test(t) && !kor && !numM;
+  if (halfOnly) {
+    return [
+      {
+        id: `waste-half-${Date.now()}`,
+        item: '폐기물 반 차(0.5톤) 추가',
+        reason: t,
+        amount: halfTon,
+        type: 'increase',
+        days: 0,
+      },
+    ];
+  }
+
+  let declared = 0;
+  if (numM) declared = Number(numM[1]) || 0;
+  else if (kor) declared = KOR_LOAD[kor[1]] || 0;
+
+  let extra = 0;
+  if (declared > 1) extra = Math.max(extra, declared - 1); // "두 차" = 기본 1차 + 1대 추가
+  if (/(한|1)\s*차\s*더|한\s*대\s*더|한대\s*더|차\s*추가|더\s*나올|더\s*나오/.test(t)) extra = Math.max(extra, 1);
+  if (/양(?:이)?\s*(?:많|넉넉)|많아\s*보|많을\s*듯|생각보다\s*많|물량\s*(?:많|늘)/.test(t)) extra = Math.max(extra, 1);
+  if (extra <= 0) return [];
+
+  return [
+    {
+      id: `waste-truck-${Date.now()}`,
+      item: `폐기물 ${extra}대 추가 반출 (1톤차 기준)`,
+      reason: t,
+      amount: oneTon * extra,
+      type: 'increase',
+      days: 0,
+    },
+  ];
+}
+
+export function detectFindings(text = '') {
+  const t = String(text || '');
+  const out = [];
+  if (/누수|물기|습기|곰팡이|방수\s*필요|물이\s*샘/.test(t)) out.push('leak');
+  if (/타일.{0,8}(남김|유지|안\s*깼|안깼)|기존\s*타일|철거\s*안\s*함|덧방/.test(t)) out.push('tileRemain');
+  return out;
+}
+
+// 답사 메모 한 줄 → 견적에 더할 항목 목록 (금액 포함)
+export function surveyDrafts(text = '', c = null, calc = null) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const out = [];
+  out.push(...surveyWasteDrafts(t, c));
+  const findings = detectFindings(t);
+  if (findings.includes('leak')) {
+    out.push({
+      id: `leak-${Date.now()}`,
+      item: '현장 답사: 누수 의심 → 방수 보수',
+      reason: t,
+      amount: 30,
+      type: 'increase',
+      days: 1,
+    });
+  }
+  if (findings.includes('tileRemain')) {
+    const demo = (calc?.items || []).find((i) => i.id === 'demolition')?.amount || 0;
+    const waste = (calc?.items || []).find((i) => i.id === 'waste')?.amount || 0;
+    const saving = Math.max(10, Math.round(demo + Math.max(0, waste - 8)));
+    out.push({
+      id: `tile-${Date.now()}`,
+      item: '현장 답사: 기존 타일 유지(철거·폐기물 제외)',
+      reason: t,
+      amount: saving,
+      type: 'decrease',
+      days: 0,
+    });
+  }
+  return out;
 }

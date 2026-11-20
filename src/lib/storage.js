@@ -1,9 +1,10 @@
 // 저장·예시 데이터 — LocalStorage 자동 저장
-import { STORAGE_KEY, TRADES } from './constants';
-import { emptyWasteScopes } from './waste';
-import { DEFAULT_RATES, cloneRates, mergeRates } from './rates';
+import { STORAGE_KEY, TRADES } from './constants.js';
+import { emptyWasteScopes } from './waste.js';
+import { DEFAULT_RATES, cloneRates, mergeRates } from './rates.js';
+import { kstToday } from './date.js';
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => kstToday();
 
 function baseCase(overrides = {}) {
   const trade = overrides.trade || 'demolition';
@@ -40,9 +41,19 @@ function baseCase(overrides = {}) {
       actualCost: 0,
       assignMode: 'separated',
     },
+    wasteVehicle: '',
     asbestos: { builtYear: '', usage: 'unknown', ceiling: 'unknown', roof: 'unknown', insulation: 'no', areaSqm: '' },
     lifting: { floor: '', elevator: 'unknown', ladderAllowed: 'unknown', carryDistance: '', mode: '' },
     survey: {},
+    surveyAmounts: {},
+    tradeName: '',
+    subScopes: [],
+    customChecklist: [],
+    subsidyApplicant: { shopName: '', owner: '', bizNo: '', closeDate: '', address: '', areaSqm: '' },
+    excludedScopes: [],
+    customPlan: { people: '', days: '', wage: '', material: '', equip: '', waste: '' },
+    aiAnalysis: null,
+    preview: null,
     evidence: {},
     marginRate: info.defaultMargin,
     bufferRate: undefined, // 만들 때 단가표의 예비비를 복사
