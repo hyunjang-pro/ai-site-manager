@@ -1,7 +1,8 @@
 // 디자인·자재 번역기 — 등급(가성비~고급) + 키워드 + 공종 → 구체 자재 조합 · 권장 추가 비율
 // 등급 라벨은 공간(욕실·주방·상가·발코니)에 상관없이 쓰는 '분위기/등급' 이름이다.
 // 자재 조합과 권장 추가 비율은 지금 현장의 공종(도배/욕실/주방/철거/복합)에 맞춰 달라진다.
-import { HARD_DETAILS, TRADES } from './constants';
+import { TRADES } from './constants';
+import { detailRowsFor, detailTotals } from './details';
 
 export const DESIGN_PRESETS = [
   {
@@ -135,12 +136,11 @@ export function translateDesign(c, tradeHint) {
     ? rawId
     : guessPreset(`${design.keywords || ''} ${c?.notes || ''}`, trade);
   const preset = DESIGN_PRESETS.find((p) => p.id === presetId) || DESIGN_PRESETS[1];
-  const specs = preset.specs[trade] || preset.specs.combined || preset.specs.wallpaper;
+  // 이 공종에 자재 조합이 없으면 빈 목록 — 다른 공종(도배) 자재를 끌어오지 않는다.
+  const specs = preset.specs[trade] || [];
 
-  const selected = Array.isArray(design.details) ? design.details : [];
-  const detailRows = HARD_DETAILS.filter((d) => selected.includes(d.id));
-  const rate = Math.min(50, detailRows.reduce((s, d) => s + d.rate, 0));
-  const days = detailRows.reduce((s, d) => s + d.days, 0);
+  const detailRows = detailRowsFor(design);
+  const { rate, days } = detailTotals(detailRows);
   const gradeRate = preset.bump?.[trade] ?? 0;
 
   const questions = [];

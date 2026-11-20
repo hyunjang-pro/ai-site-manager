@@ -23,7 +23,14 @@ function baseCase(overrides = {}) {
     notes: '',
     supplement: '',
     rawInput: '',
+    ocrRaw: '',
     photos: [],
+    // v3 — 시공 시작일·자재 세트·업체별 발주 체크
+    startDate: '',
+    workDays: '',
+    materialSet: '',
+    orderChecks: {},
+    subsidyCheck: {},
     design: { preset: '', keywords: '', details: [] },
     waste: {
       scopes: emptyWasteScopes(),
@@ -54,6 +61,7 @@ function baseCase(overrides = {}) {
     paymentPlan: { deposit: 30, mid: 40, balance: 30 },
     gates: {
       deposit: false,
+      midPaid: false,
       lift: { notice: false, protect: false, neighbor: false, ladder: false },
       waterproof: { startedAt: '', checks: { level: false, h24: false, beforeDrain: false }, belowOk: false },
       strip: false,

@@ -27,7 +27,7 @@ export function emptyWasteScopes() {
   return out;
 }
 
-export function computeWaste(waste = {}) {
+export function computeWaste(waste = {}, c = null) {
   const scopes = { ...emptyWasteScopes(), ...(waste.scopes || {}) };
   const byMaterial = {};
   let totalKg = 0;
@@ -42,6 +42,13 @@ export function computeWaste(waste = {}) {
     totalKg += kg;
     byMaterial[s.material] = (byMaterial[s.material] || 0) + kg;
   });
+
+  // 폐기물 단독 현장(2.5톤 등)은 현장 톤수를 그대로 기본값으로 쓴다 — 0톤으로 보이지 않게.
+  const directTons = c && c.sizeUnit === '톤' ? Math.max(0, parseFloat(c.sizeValue) || 0) : 0;
+  if (directTons > 0 && totalKg <= 0) {
+    totalKg = directTons * 1000;
+    byMaterial.mixed = (byMaterial.mixed || 0) + totalKg;
+  }
 
   const totalTons = +(totalKg / 1000).toFixed(2);
   let separatedWon = 0;

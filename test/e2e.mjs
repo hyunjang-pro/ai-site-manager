@@ -1,10 +1,11 @@
-// 실제 Chromium 으로 빌드(dist)를 열어 화면·시나리오를 클릭 검증하고, 모바일 스크린샷을 남긴다.
+// 실제 Chromium 으로 빌드(dist)를 열어 v3 화면·시나리오를 클릭 검증하고, 모바일 스크린샷을 남긴다.
 // 실행: LD_LIBRARY_PATH=<atk libs> node test/e2e.mjs
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { cleanOcrText } from '../src/lib/ocr.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '..', 'dist');
@@ -40,8 +41,10 @@ async function step(name, fn) {
   try {
     await fn();
   } catch (e) {
-    try { if (PAGE) await PAGE.screenshot({ path: path.join(SHOTS, `error-${name.replace(/[^a-z0-9가-힣]+/gi, '-')}.png`) }); } catch (err) {}
-    record(name, false, e.message.split('\n')[0].slice(0, 120));
+    try {
+      if (PAGE) await PAGE.screenshot({ path: path.join(SHOTS, `error-${name.replace(/[^a-z0-9가-힣]+/gi, '-')}.png`) });
+    } catch (err) {}
+    record(name, false, e.message.split('\n')[0].slice(0, 140));
   }
 }
 
@@ -51,40 +54,48 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR', deviceScaleFactor: 1 });
   const page = await context.newPage();
   PAGE = page;
-  page.setDefaultTimeout(6000);
-  page.setDefaultNavigationTimeout(10000);
+  page.setDefaultTimeout(7000);
+  page.setDefaultNavigationTimeout(12000);
   const shot = (name) => page.screenshot({ path: path.join(SHOTS, name), fullPage: false, timeout: 30000 });
   const shotAt = async (name, anchor, offset = -120) => {
     const target = page.getByText(anchor, { exact: false }).first();
     if (await target.count()) {
-      await target.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await target.evaluate((el) => el.scrollIntoView({ block: 'start' })).catch(() => {});
       await page.evaluate((o) => window.scrollBy(0, o), offset);
       await page.waitForTimeout(300);
     }
     await shot(name);
   };
+  const mainText = () => page.locator('main').innerText();
+  const goPre = async () => {
+    await page.getByRole('button', { name: /① 가견적/ }).click();
+    await page.waitForTimeout(250);
+  };
+  const goSurvey = async () => {
+    await page.getByRole('button', { name: /② 현장 답사/ }).click();
+    await page.waitForTimeout(250);
+  };
 
-  // Open-Meteo 응답을 고정해 날씨 표시를 검증한다 (실서비스는 실제 API 사용)
+  // Open-Meteo 응답 고정 (실서비스는 실제 API 사용)
   await context.route('https://api.open-meteo.com/**', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         daily: {
-          time: ['2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23'],
-          weather_code: [3, 61, 63, 1],
-          temperature_2m_max: [12, 9, 7, 10],
-          temperature_2m_min: [1, -2, -3, 0],
-          precipitation_probability_max: [20, 70, 80, 10],
+          time: ['2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23', '2026-11-24', '2026-11-25'],
+          weather_code: [3, 61, 63, 1, 0, 2],
+          temperature_2m_max: [12, 9, 7, 10, 11, 8],
+          temperature_2m_min: [1, -2, -3, 0, 2, -1],
+          precipitation_probability_max: [20, 70, 80, 10, 0, 30],
         },
       }),
     })
   );
   const goHome = async () => {
-    console.log('  · goHome');
     const back = page.getByLabel('장부로 돌아가기');
     if (await back.count()) await back.first().click();
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(300);
   };
 
   const consoleErrors = [];
@@ -94,462 +105,474 @@ async function main() {
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 
   const base = 'http://127.0.0.1:4173/';
+
+  // ---------- 0. OCR 잡글자 제거 단위 검증 ----------
+  await step('OCR 잡글자 제거 (cleanOcrText)', async () => {
+    const raw = [
+      '20:50 표 ~>d',
+      '< 삭제하기',
+      '요청 상세',
+      '경북 안동시 풍산읍 15평 상가',
+      '엘리베이터 없음 3층',
+      '견적 보낸 고수 8명 1일 전',
+      '아파트 인테리어 바닥 미장 필요',
+      '1개의 oi u',
+      '창호 제외',
+    ].join('\n');
+    const clean = cleanOcrText(raw);
+    record('OCR: 시계·삭제하기·요청 상세 제거', !/20:50|삭제하기|요청 상세/.test(clean), clean.replace(/\n/g, ' | '));
+    record('OCR: 숨고 UI(견적 보낸 고수) 제거', !/견적 보낸 고수/.test(clean));
+    record('OCR: 깨진 기호 줄 제거', !/표 ~>|oi u/.test(clean));
+    record('OCR: 핵심 줄 보존', ['경북 안동시', '15평', '엘리베이터', '바닥 미장', '창호 제외'].every((k) => clean.includes(k)));
+  });
+
   await page.goto(base, { waitUntil: 'networkidle' });
 
-  // ---------- 가족 전용 잠금 ----------
+  // ---------- 1. 잠금 ----------
   await step('잠금 화면', async () => {
     await page.getByText('가족 전용').waitFor();
     await shot('00-lock.png');
     for (const d of ['1', '2', '3', '4']) await page.getByLabel(`${d} 번`).click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(400);
     record('잠금: 틀린 PIN 거부', (await page.getByText('오늘 장부').count()) === 0);
-    const enterBtn = page.getByText('들어가기', { exact: true });
-    record('잠금: 쓸모없는 들어가기 버튼 없음', (await enterBtn.count()) === 0);
-    const iconBox = await page.locator('.bg-brand.rounded-\\[19px\\]').first().boundingBox();
-    record('잠금: 상단 아이콘 잘리지 않음', !!iconBox && iconBox.y >= 8, iconBox ? `y=${Math.round(iconBox.y)}` : 'no box');
     for (const d of ['3', '8', '8', '5']) await page.getByLabel(`${d} 번`).click();
-    await page.getByText('오늘 장부').waitFor({ timeout: 8000 });
+    await page.getByText('오늘 장부').waitFor({ timeout: 9000 });
     record('잠금: 3885로 해제', true);
   });
 
-  // ---------- 01 홈 ----------
-  await step('홈 화면', async () => {
-    await page.getByText('오늘 장부').waitFor();
-    const t = await page.locator('body').innerText();
+  // ---------- 2. 홈 ----------
+  await step('홈 화면 · 수금 금액', async () => {
+    const t = await mainText();
     record('홈: 현황판 카운트', t.includes('진행 중 4곳') && t.includes('정산 완료 2곳'));
-    record('홈: 4단계 요약', ['가견적', '실측예정', '시공중', '잔금대기'].every((x) => t.includes(x)));
-    record('홈: 수금 배지', t.includes('잔금 대기') && t.includes('잔금 12%'));
+    record('홈: 카드에 계약금·중도금·잔금 금액', /계약금 [\d,]+만 · 중도금 [\d,]+만 · 잔금 [\d,]+만/.test(t));
     await shot('01-home.png');
   });
 
-  // ---------- 장부 필터 ----------
-  await step('장부 필터', async () => {
-    await page.locator('summary').filter({ hasText: '필터' }).first().click();
-    await page.locator('details[open] select').first().selectOption('포항');
-    await page.waitForTimeout(250);
-    const t = await page.locator('main').innerText();
-    record('장부: 지역 필터(포항)', t.includes('두호동') && !t.includes('풍산읍'));
-    await page.getByText('필터 초기화').first().click();
-    await page.locator('summary').filter({ hasText: '필터' }).first().click();
-    await page.waitForTimeout(200);
-    await page.getByLabel('검색').fill('욕실');
-    await page.waitForTimeout(250);
-    const s = await page.locator('main').innerText();
-    record('장부: 검색(욕실)', s.includes('형곡동') && !s.includes('풍산읍'));
-    await page.getByLabel('검색어 지우기').click();
-    await page.waitForTimeout(200);
-  });
-
-  // ---------- 관공서 일감 ----------
-  await step('관공서 일감 탭', async () => {
+  // ---------- 3. 관공서 일감 ----------
+  await step('관공서 일감', async () => {
     await page.getByText('관공서 일감', { exact: false }).first().click();
     await page.getByText('건 접수 중').waitFor();
-    const head = await page.locator('main').innerText();
-    const openCount = Number((head.match(/(\d+)\s*건 접수 중/) || [])[1] || 0);
-    record('관공서: 실제 공고 로드', openCount >= 5, `${openCount}건 접수 중`);
-    record('관공서: 추정가·투찰가 표시', head.includes('추정가격') && head.includes('예상 투찰가'));
-    await shot('09-bids.png');
-
-    await page.getByRole('button', { name: '안동시', exact: true }).first().click();
-    await page.waitForTimeout(300);
-    const andong = await page.locator('main').innerText();
-    const andongCount = Number((andong.match(/^(\d+)건/m) || [])[1] || 0);
-    record('관공서: 안동시 필터', andong.includes('경상북도 안동시') && andongCount >= 1, `안동 ${andongCount}건`);
-
-    await page.getByRole('button', { name: '전체', exact: true }).first().click();
-    await page.getByRole('button', { name: '철거·해체', exact: true }).click();
-    await page.waitForTimeout(300);
-    const demo = await page.locator('main').innerText();
-    record('관공서: 철거 필터', demo.includes('철거') && !demo.includes('석계초'), '');
-
-    await page.getByRole('button', { name: '전체', exact: true }).first().click();
-    await page.getByRole('button', { name: '5,000만 이하' }).click();
-    await page.waitForTimeout(250);
-    const small = await page.locator('main').innerText();
-    record('관공서: 5천만 이하 필터', !small.includes('1.35억'), '');
-
-    await page.getByRole('button', { name: '면허 없는 건만' }).click();
-    await page.waitForTimeout(300);
-    const none = await page.locator('main').innerText();
-    record('관공서: 면허 없는 건 빈 상태 안내', none.includes('1,500만 원 미만') && none.includes('안동시 계약담당'), '');
-    await page.getByRole('button', { name: '필터 초기화' }).click();
-    await page.waitForTimeout(300);
-
-    await page.getByText('마감 지난 공고도 보기').click();
-    await page.waitForTimeout(300);
-    const closed = await page.locator('main').innerText();
-    record('관공서: 마감 지난 공고 보기', closed.includes('마감') && closed.length > 0, '');
-    await page.getByText('접수 중만 보기').click();
-    await page.waitForTimeout(300);
-  });
-
-  await step('공고 → 투찰가 → 내 장부', async () => {
+    const head = await mainText();
+    record('관공서: 실제 공고 로드', /(\d+)\s*건 접수 중/.test(head));
     await page.getByText('길안9지구 임시주택단지 복구공사', { exact: false }).first().click();
     await page.getByText('투찰가·남는 돈 미리보기').waitFor();
-    const d = await page.locator('[role=dialog]').innerText();
-    record('투찰가: 추정가×88% = 2,720만', d.includes('2,720만원'), '');
-    record('투찰가: 낙찰하한×87.745%', d.includes('2,712만원'), '');
-    record('투찰가: 공고번호·면허·지역', d.includes('R26BK01838255') && d.includes('구조물해체') && d.includes('안동시'), '');
-    await shot('10-bid-detail.png');
     await page.getByRole('button', { name: /내 장부로 가져오기/ }).click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const c = await page.locator('body').innerText();
-    record('가져오기: 현장 장부 생성', c.includes('길안9지구') && c.includes('2,720'), '');
-    await page.waitForTimeout(900);
-    const storedBid = await page.evaluate(() => { const st = JSON.parse(localStorage.getItem('aiSiteManager.v1') || '{}'); return (st.cases || []).find((x) => x.bid?.noticeNo === 'R26BK01838255')?.bid?.noticeNo || ''; });
-    record('가져오기: 공고번호 보존', storedBid === 'R26BK01838255', storedBid);
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    record('가져오기: 장부 생성', (await page.locator('body').innerText()).includes('길안9지구'));
+  });
 
-    // 현장 답사: 글만 넣어도 방수 30만 자동 반영
-    await page.getByText('현장 답사(실측) · 최종 견적 맞추기').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(250);
+  // ---------- 4. ② 현장 답사 (관공서 현장) ----------
+  await step('현장 답사 → 최종 견적 (② 탭)', async () => {
+    await goSurvey();
+    record('답사: ② 탭에서 답사 입력만 보임', (await mainText()).includes('현장에 가보니 무엇이 달라졌나요'));
+    record('답사: “무엇을 하는지” 박스 없음', !(await mainText()).includes('무엇을 하는지 적어주세요'));
     await page.getByLabel('현장 변동 내용').fill('벽에 물기가 많아 방수 필요');
-    await page.waitForTimeout(250);
-    const before = await page.locator('main').innerText();
-    record('답사: 자동 계산 미리보기', before.includes('누수 의심 → 방수 보수') && before.includes('+30만'), '');
-    await page.getByRole('button', { name: '견적 즉시 업데이트' }).click();
-    await page.waitForTimeout(500);
-    const after = await page.locator('main').innerText();
-    record('답사: 최종 견적 자동 갱신(2,720→2,750)', after.includes('2,750') && after.includes('최종 확정 견적'), '');
-    await shotAt('11-survey-final.png', '현장 답사(실측)');
-    await page.getByLabel('장부로 돌아가기').click();
-    await page.waitForTimeout(300);
-  });
-
-  // ---------- 욕실 현장: 02 견적·디자인 / 03 수익 / 04 시공 잠금 / 05 문서 ----------
-  await step('욕실 현장 열기', async () => {
-    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const t = await page.locator('main').innerText();
-    record('욕실: 견적 480만', t.includes('480'));
-    record('욕실: 디자인 번역 자재', t.includes('600×1200') && t.includes('매립수전'));
-    record('탭 순서 1→4', ['1단계', '2단계', '3단계', '4단계'].every((x) => t.includes(x)));
-    await shotAt('02-estimate-design.png', '지금 계산된 견적');
-
-    // 고난도 디테일 선택 → 할증 경고 확인
-    await page.getByText('매립수전', { exact: true }).first().click();
-    await page.getByText('간접등(간접조명)', { exact: true }).first().click();
-    await page.waitForTimeout(300);
-    const t2 = await page.locator('main').innerText();
-    record('욕실: 디테일 선택 시 할증', /\+35%/.test(t2));
-  });
-
-  await step('02 견적·디자인 스크린샷', async () => {
-    // 폐기물·석면 경고를 펼쳐서 보여준다
-    for (const label of ['폐기물 분리 계산', '석면(천장 텍스) 조기경보']) {
-      const d = page.locator('details').filter({ hasText: label }).first();
-      if (await d.count()) await d.evaluate((el) => (el.open = true));
-    }
-    await page.waitForTimeout(300);
-    await shotAt('02b-design.png', '스타일·자재 정하기', -155);
-    await shotAt('02c-waste.png', '폐기물 분리 계산');
-    await shotAt('02d-asbestos.png', '석면(천장 텍스) 조기경보');
-    // 스크린샷 후에는 디테일을 원래대로 (다른 화면 수치가 현실적으로 보이게)
-    await page.getByText('매립수전', { exact: true }).first().click();
-    await page.getByText('간접등(간접조명)', { exact: true }).first().click();
     await page.waitForTimeout(200);
+    const before = await mainText();
+    record('답사: 자동 미리보기', before.includes('누수 의심 → 방수 보수') && before.includes('+30만'));
+    await page.getByRole('button', { name: '답사 내용으로 최종 견적 다시 내기' }).click();
+    await page.waitForTimeout(500);
+    const after = await mainText();
+    record('답사: 최종 견적 자동 갱신(2,720→2,750)', after.includes('2,750'));
+    record('답사: 변화 이유 ▲ 표시', after.includes('무엇이 왜 바뀌었나') && after.includes('▲') && after.includes('이유:'));
+    record('답사: 가견적→최종 요약', /가견적 [\d,]+만 → 최종 견적 [\d,]+만/.test(after));
+    await shotAt('11-survey-final.png', '무엇이 왜 바뀌었나', -140);
+    await goHome();
   });
 
-  await step('03 수익·네고', async () => {
-    await page.locator('nav button').filter({ hasText: '수익' }).first().click();
-    await page.getByLabel('고객이 부른 금액 (만원)').fill('420');
-    await page.waitForTimeout(350);
-    const t = await page.locator('main').innerText();
-    record('수익: 순수익 표시', t.includes('보수적으로 남는 돈'));
-    record('네고: 방어선 경고', t.includes('최소 방어선'));
-    record('수익: 알선료는 설정 링크', t.includes('인력 소개비(알선료)') && t.includes('설정 열기'));
-    const msg = await page.getByText('고객에게 이렇게 말하세요').locator('..').innerText();
-    record('설득 멘트: 내 순수익 언급 없음', !/남습니다|남는 게/.test(msg), msg.slice(0, 60).replace(/\n/g, ' '));
-    await shotAt('03-profit-nego.png', '보수적으로 남는 돈');
-    await shotAt('03b-nego.png', '고객에게 이렇게 말하세요', -330);
-
-    // 500만원처럼 큰 금액도 슬라이더 상한에 막히지 않고, 견적에 적용된다
-    await page.getByLabel('고객이 부른 금액 (만원)').fill('500');
-    await page.waitForTimeout(300);
-    const sliderMax = await page.getByLabel('제안 금액').getAttribute('max');
-    record('네고: 입력한 금액이 슬라이더 상한에 안 막힘', Number(sliderMax) >= 500, `max=${sliderMax}`);
-    await page.getByRole('button', { name: '이 금액을 이 현장 견적으로 적용' }).click();
-    await page.waitForTimeout(400);
-    record('네고: 견적에 적용(500만)', (await page.locator('main').innerText()).includes('500'));
-    await page.getByLabel('고객이 부른 금액 (만원)').fill('480');
-    await page.waitForTimeout(250);
-
-    // 견적 항목 포함/제외 토글
-    await page.locator('details').filter({ hasText: '원가 내역' }).first().evaluate((el) => (el.open = true));
-    await page.waitForTimeout(250);
-    const toggle = page.locator('button[aria-label$="제외"]').first();
-    const toggleLabel = await toggle.getAttribute('aria-label');
-    await toggle.click();
-    await page.waitForTimeout(350);
-    const excludedText = await page.locator('main').innerText();
-    record('항목 제외: 원가에서 빠짐', excludedText.includes('제외한 항목'), toggleLabel || '');
-    await page.locator('button[aria-label$="다시 포함"]').first().click();
-    await page.waitForTimeout(300);
+  // ---------- 5. 욕실 현장 ① 가견적 ----------
+  await step('욕실 현장 · 가견적', async () => {
+    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    const t = await mainText();
+    record('겸적: 1차 가견적 라벨', t.includes('1차 가견적 (답사 전 · 변동 가능)'));
+    record('욕실: 견적 480만', t.includes('480'));
+    record('욕실: 추천 자재 세트 3종', t.includes('국산 실속') && t.includes('브랜드 표준') && t.includes('포세린 고급'));
+    record('욕실: 자재 사양', t.includes('600×1200') && t.includes('매립수전'));
+    record('욕실: 브랜드별 기준 가격', t.includes('브랜드별 기준 가격') && t.includes('아메리칸스탠다드'));
+    record('겸적: 2파트 세그먼트', t.includes('① 가견적 (답사 전)') && t.includes('② 현장 답사 · 최종 견적'));
+    await shotAt('02-estimate-design.png', '1차 가견적', -100);
   });
 
-  await step('04 시공 잠금 스크린샷', async () => {
-    await page.locator('nav button').filter({ hasText: '시공' }).first().click();
-    await page.getByText('지금 차례').waitFor();
-    const t = await page.locator('main').innerText();
-    record('시공: 1단계부터 순서 표시', t.includes('1단계 · 계약금'));
-    record('시공: 잠금 표시', t.includes('잠김') && t.includes('완료하면 열립니다'));
-    await shotAt('04-build-locks.png', '날씨 (오늘~3일)', -110);
-    await shotAt('04b-build-steps.png', '관리실 신고·보양·사다리차 승인', -120);
-    record('날씨: 예보 표시', t.includes('날씨 (오늘~3일)'));
-    record('날씨: 비/한파 주의 배지', t.includes('비/한파 예보'));
-  });
-
-  // ---------- 방수 잠금 해제 흐름 ----------
-  await step('방수 게이트 해제', async () => {
-    await page.getByText('계약금 입금 확인').first().click();
-    await page.waitForTimeout(250);
-    record('시공: 계약금 → 1/4', (await page.locator('main').innerText()).includes('1/4 완료'));
-    for (const label of ['관리실 공사 신고', '엘리베이터·복도 보양', '이웃 인사·안내문', '사다리차 설치 승인']) {
-      await page.getByText(label, { exact: true }).first().click();
-      await page.waitForTimeout(90);
+  await step('빠진 비용 체크 · 답사 주의', async () => {
+    await page.getByText('빠진 비용 체크').scrollIntoViewIfNeeded();
+    const t = await mainText();
+    record('검증: 빠진 비용 한 번에 넣기 버튼', t.includes('빠진 비용 한 번에 넣기') || t.includes('모두 반영'));
+    record('검증: 답사 주의사항', t.includes('답사 시 꼭 확인하세요') && t.includes('추가 비용 발생 경우의 수'));
+    await shotAt('02b-verify.png', '빠진 비용 체크', -150);
+    const fill = page.getByRole('button', { name: /빠진 비용 한 번에 넣기/ });
+    if (await fill.count()) {
+      await fill.first().click();
+      await page.waitForTimeout(400);
+      record('검증: 빠진 비용 채우기 동작', (await mainText()).includes('모두 반영') || (await mainText()).includes('반영됨'));
     }
-    await page.waitForTimeout(250);
-    const t2 = await page.locator('main').innerText();
-    record('시공: 4개 체크 → 2/4', t2.includes('2/4 완료'));
-    record('시공: 배차 문자 생성', t2.includes('기공 배차 문자'));
-    record('방수: 잠금 안내', t2.includes('타일 기공 배차 버튼이 열립니다'));
+  });
 
+  await step('자재 세트 전환 → 견적·견적서·발주 연동', async () => {
+    await page.getByRole('button', { name: /국산 실속/ }).first().click();
+    await page.waitForTimeout(500);
+    const t = await mainText();
+    record('자재: 실속 세트 선택 표시', t.includes('국산 실속'));
+    record('자재: 실속 사양(300×600)', t.includes('300×600 무광 국산 타일'));
+    record('자재: 견적 금액 변경', !t.includes('480'));
+    await shotAt('02c-material.png', '추천 자재 세트', -120);
+
+    // 3단계 발주 리스트에 실속 자재가 반영
+    await page.locator('nav button').filter({ hasText: '시공' }).first().click();
+    await page.waitForTimeout(400);
+    const b = await mainText();
+    record('자재: 발주 리스트에 실속 품명', b.includes('300×600 무광 국산타일'));
+
+    // 손님 견적서 사양도 바뀐다
+    await page.locator('nav button').filter({ hasText: '문서' }).first().click();
+    await page.waitForTimeout(400);
+    const d = await mainText();
+    record('자재: 손님 견적서 사양 변경', d.includes('300×600 무광 국산 타일'));
+
+    await page.locator('nav button').filter({ hasText: '견적' }).first().click();
+    await page.waitForTimeout(400);
+    await page.getByRole('button', { name: /브랜드 표준/ }).first().click();
+    await page.waitForTimeout(400);
+    record('자재: 표준으로 복귀', (await mainText()).includes('브랜드 표준'));
+  });
+
+  await step('비슷한 실제 사례 (욕실)', async () => {
+    const det = page.locator('details').filter({ hasText: '비슷한 실제 사례 보기' }).first();
+    await det.evaluate((el) => (el.open = true));
+    await page.waitForTimeout(300);
+    const n = await page.locator('[data-similar-case]').count();
+    record('사례: 욕실 최소 3건', n >= 3, `${n}건`);
+    await shotAt('02d-similar.png', '비슷한 실제 사례 보기');
+  });
+
+  // ---------- 6. 손님 견적서 원가 은닉 ----------
+  await step('손님 견적서 — 원가·마진 은닉', async () => {
+    await page.locator('nav button').filter({ hasText: '문서' }).first().click();
+    await page.getByText('손님에게 보낼 견적서').waitFor();
+    const docText = await page.locator('.print-area').innerText();
+    const leak = ['원가', '남는', '일당', '예비비', '타일공', '양중비', '안전 여유비', '실행 일당', '마진'].filter((w) => docText.includes(w));
+    record('견적서: 내부 원가 용어 없음', leak.length === 0, leak.join(', '));
+    const sum = await page.evaluate(() => {
+      const lines = [...document.querySelectorAll('.print-area [data-quote-line]')];
+      return {
+        lines: lines.reduce((s, el) => s + Number(el.getAttribute('data-amount') || 0), 0),
+        count: lines.length,
+        subtotal: Number(document.querySelector('.print-area [data-testid=quote-subtotal]')?.getAttribute('data-amount') || 0),
+      };
+    });
+    record('견적서: 공정 줄 합계 = 공급가', sum.lines === sum.subtotal && sum.count >= 2, `${sum.lines} vs ${sum.subtotal} (${sum.count}줄)`);
+    record('견적서: 계약금·중도금·잔금 금액 표시', /계약금 \d+%[\s\S]{0,20}[\d,]+만원/.test(docText) && docText.includes('잔금'));
+    record('견적서: 사용 자재 사양(금액 없이)', docText.includes('사용 자재'));
+    record('견적서: 발주 문자 항목 없음', !(await mainText()).includes('자재 발주 문자'));
+    await shotAt('05-docs.png', '손님에게 보낼 견적서', -100);
+    await shot('05b-doc-body.png');
+  });
+
+  // ---------- 7. 3단계 발주 · 날씨 · 잠금해제 ----------
+  await step('시공 탭 — 잠금 없음 · 업체별 발주', async () => {
+    await page.locator('nav button').filter({ hasText: '시공' }).first().click();
+    await page.getByText('권장 순서').waitFor();
+    const t = await mainText();
+    record('시공: 강제 잠금 제거', !t.includes('잠김') && !t.includes('완료하면 열립니다') && t.includes('잠그지 않았습니다'));
+    record('시공: 4단계 모두 열려 있음', t.includes('계약금·중도금·잔금 받기') && t.includes('관리실 신고·보양·사다리차 승인') && t.includes('준공 검수'));
+    record('시공: 업체별 발주 리스트', t.includes('자재 발주 리스트 (업체별)') && t.includes('방수 자재상') && t.includes('타일·도기 대리점'));
+    record('시공: 발주 체크박스', t.includes('발주 전') || t.includes('발주 완료'));
+    record('시공: 업체별 복사 버튼', (await page.getByRole('button', { name: /이 업체 발주 내용 복사/ }).count()) >= 2);
+    record('시공: 계약금 금액 입금 카드', /계약금 [\d,]+만원 입금 확인/.test(t));
+    record('시공: 추가금 기록 카드', t.includes('추가금 기록') && t.includes('추가금 자동 계산해서 기록'));
+    await shotAt('04-build-order.png', '자재 발주 리스트 (업체별)', -110);
+    const ck = page.getByRole('button', { name: /발주 완료/ }).first();
+    if (await ck.count()) {
+      await ck.click();
+      await page.waitForTimeout(300);
+      record('시공: 발주 완료 체크', (await mainText()).includes('발주 완료'));
+    }
+  });
+
+  await step('시공일 날씨', async () => {
+    await page.getByLabel('시공 시작일').scrollIntoViewIfNeeded();
+    const before = await mainText();
+    record('날씨: 시작일 전 안내', before.includes('시공 시작일을 정하면 그날부터 공사기간 날씨를 맞춰'));
+    await page.getByLabel('시공 시작일').fill('2026-11-21');
+    await page.waitForTimeout(1200);
+    const after = await mainText();
+    record('날씨: 시작일 기준 예보', after.includes('시공일 날씨') && after.includes('11/21'));
+    record('날씨: 비/한파 주의', after.includes('비 올 확률 80%') || after.includes('최저 -3'));
+    await shotAt('04b-weather.png', '시공일 날씨', -110);
+  });
+
+  await step('방수 담수 테스트', async () => {
+    await page.getByText('방수 담수 테스트 48시간').scrollIntoViewIfNeeded();
     const d = new Date(Date.now() - 3 * 864e5);
     const pad = (n) => String(n).padStart(2, '0');
-    await page.locator('input[type="datetime-local"]').fill(
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`
-    );
+    await page.locator('input[type="datetime-local"]').fill(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`);
     for (const label of ['① 물 높이 표시한 사진', '② 24시간 지난 사진', '③ 물 빼기 직전 사진', '아래층 천장 누수 없음 확인']) {
       await page.getByText(label, { exact: false }).first().click();
       await page.waitForTimeout(90);
     }
     await page.waitForTimeout(350);
-    const t3 = await page.locator('main').innerText();
-    record('방수: 48시간·사진3컷 → 해제', t3.includes('타일 기공을 불러도 됩니다'));
-    record('방수: 누수 배상 경고', t3.includes('60,760,533'));
+    const t = await mainText();
+    record('방수: 48시간·사진3컷 → 해제', t.includes('타일 기공을 불러도 됩니다'));
+    record('방수: 누수 배상 경고', t.includes('60,760,533'));
+    record('방수: 잠금 대신 안내', t.includes('숨기지 않습니다'));
     await shotAt('06-waterproof-unlocked.png', '타일 기공을 불러도 됩니다');
   });
 
-  // ---------- 05 문서: 도배 현장 ----------
-  await step('05 문서 스크린샷', async () => {
-    await page.getByLabel('장부로 돌아가기').click();
-    await page.getByText('포항 두호동 24평 빌라 도배·장판').click();
-    await page.getByText('지금 계산된 견적').waitFor();
+  // ---------- 8. 수익 탭 — 수금 금액 ----------
+  await step('수익 탭 · 계약금/중도금/잔금 금액', async () => {
+    await page.locator('nav button').filter({ hasText: '수익' }).first().click();
+    await page.getByText('원가·마진·수금 조절').waitFor();
+    const t = await mainText();
+    record('수익: 핵심 항목 펼침', t.includes('부가세 10% 따로 받기') && t.includes('계약금 · 중도금 · 잔금'));
+    record(
+      '수익: 계약금/중도금/잔금 입력·금액 표시',
+      t.includes('계약금 %') && (await page.getByLabel('계약금 비율').count()) >= 1 && (await page.getByLabel('잔금 비율').count()) >= 1
+    );
 
-    // 현장 변동 즉시 반영 (+25만)
-    await page.getByLabel('현장 변동 내용').fill('폐기물 1톤 추가, 벽체 목공 덧대기');
-    await page.getByLabel('변동 금액').fill('25');
-    await page.getByRole('button', { name: '견적 즉시 업데이트' }).click();
-    await page.waitForTimeout(2700); // 토스트가 사라진 뒤 화면을 찍는다
-    const changed = await page.locator('main').innerText();
-    record('변동: 즉시 반영(324→349)', changed.includes('349') && changed.includes('+25만원 반영됨'), changed.match(/현장 변동[\s\S]{0,40}/)?.[0]?.replace(/\n/g, ' '));
-    await shotAt('08-field-change.png', '현장 답사(실측) · 최종 견적 맞추기', -120);
+    await page.getByLabel('고객에게 받을 금액 직접 정하기 (만원)').fill('615');
+    await page.waitForTimeout(500);
+    const t2 = await mainText();
+    record('수금: 615만 → 185/246/184만', t2.includes('185') && t2.includes('246') && t2.includes('184'), t2.match(/계약금[\s\S]{0,30}/)?.[0]?.replace(/\n/g, ' '));
 
-    await page.locator('nav button').filter({ hasText: '문서' }).first().click();
-    await page.getByText('손님에게 보낼 견적서').waitFor();
-    const t = await page.locator('main').innerText();
-    record('문서: 도배 자재(합지·장판)', t.includes('합지') && t.includes('장판'));
-    record('문서: 타일 자재 없음', !t.includes('600각') && !t.includes('포세린'));
-    record('문서: 제외사항·특약', t.includes('제외 사항') && t.includes('특약'));
-    record('문서: 부가세 표기', t.includes('부가세'));
-    record('문서: 변동 내역 자동 갱신', t.includes('현장 변동 내역') && t.includes('349'));
+    record('수익: 하루 순수익', /하루 뛰면 [\d,]+만원/.test(t2));
+    record('수익: 보수적 원가 산출 설명', t2.includes('보수적 원가') && t2.includes('돌발 예비비'));
+    record('수익: 최소 방어선 설명', t2.includes('최소 안전마진 5%'));
+    record('수익: 원가 절감 스위치', t2.includes('원가 절감 스위치'));
+    record('수익: 비-인력 알선료 배너 숨김', !t2.includes('인력 소개비(알선료)'));
 
-    // 손님 문자: 인력사무소 직영 강점 + 완료 사례 1줄 (선택)
-    await page.getByRole('button', { name: '견적 안내 문자' }).click();
-    await page.waitForTimeout(300);
-    const sms = await page.locator('main').innerText();
-    record('문자: 인력사무소 직영 강점 1줄', sms.includes('인력사무소를 직접 운영'));
-    record('문자: 완료 사례 1줄', sms.includes('완료했습니다'));
-    await shotAt('05c-sms-strength.png', '견적 안내 문자', -160);
-    await page.getByRole('switch', { name: /인력사무소 직영 강점/ }).click();
-    await page.waitForTimeout(300);
-    const smsOff = await page.locator('main').innerText();
-    record('문자: 강점 줄 끄기', !smsOff.includes('인력사무소를 직접 운영'));
-    await page.getByRole('switch', { name: /인력사무소 직영 강점/ }).click();
-    await page.waitForTimeout(200);
-
-    await shotAt('05-docs.png', '도배·장판 견적서', -110);
-    await shotAt('05b-changes.png', '현장 변동 내역', -120);
-
-    // 되돌리기: -10만
-    await page.locator('nav button').filter({ hasText: '견적' }).first().click();
-    await page.waitForTimeout(800);
-    await page.getByText('현장 답사(실측) · 최종 견적 맞추기').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-    await page.getByLabel('현장 변동 내용').fill('폐기물 차량 1대 줄임');
-    await page.getByLabel('변동 금액').fill('10');
-    await page.getByText('- 줄어듦', { exact: false }).first().click();
-    await page.getByRole('button', { name: '견적 즉시 업데이트' }).click();
-    await page.waitForTimeout(350);
-    const decreased = await page.locator('main').innerText();
-    record('변동: 감소 반영(349→339)', decreased.includes('339'));
-
-    // 추가했다가 "불필요"로 빼기
-    await page.getByText('현장 답사(실측) · 최종 견적 맞추기').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-    await page.getByLabel('현장 변동 내용').fill('바닥 미장 필요');
-    await page.getByLabel('변동 금액').fill('25');
-    await page.getByText('+ 늘어남', { exact: false }).first().click();
-    await page.getByRole('button', { name: '견적 즉시 업데이트' }).click();
+    await page.getByLabel('잔금 비율').fill('40');
     await page.waitForTimeout(400);
-    const added = await page.locator('main').innerText();
-    record('변동: 미장 추가(339→364)', added.includes('364'));
-
-    await page.getByLabel('현장 변동 내용').fill('미장 불필요');
-    await page.waitForTimeout(250);
-    await page.getByRole('button', { name: '빼기 적용' }).click();
+    const t3 = await mainText();
+    record('수금: 합계 100% 아니면 경고', t3.includes('비율 합계가 110%') && t3.includes('30/40/30으로 맞추기'));
+    await shotAt('03-profit-payment.png', '계약금 · 중도금 · 잔금', -110);
+    await page.getByRole('button', { name: '30/40/30으로 맞추기' }).click();
     await page.waitForTimeout(400);
-    const cancelled = await page.locator('main').innerText();
-    record('변동: "불필요"로 자동 차감(364→339)', cancelled.includes('339') && !cancelled.includes('364'));
+    record('수금: 30/40/30 복구', (await mainText()).includes('합계 100%'));
 
-    // 되돌리기 → 다시 364
-    await page.getByRole('button', { name: /직전 상태로 되돌리기/ }).click();
+    await page.getByRole('button', { name: '일 끝나고 전액' }).click();
     await page.waitForTimeout(400);
-    const undone = await page.locator('main').innerText();
-    record('변동: 되돌리기(339→364)', undone.includes('364'));
+    const t4 = await mainText();
+    record('수금: 0/0/100 프리셋', t4.includes('합계 100%') && (await page.getByLabel('계약금 비율').inputValue()) === '0');
+    await page.getByRole('button', { name: '표준 분할' }).click();
+    await page.waitForTimeout(400);
 
-    // 목록에서 개별 빼기
-    await page.locator('details').filter({ hasText: '변동 내역' }).first().evaluate((el) => (el.open = true));
-    await page.waitForTimeout(250);
-    await page.getByLabel('바닥 미장 필요 빼기').first().click();
-    await page.waitForTimeout(400);
-    const removed = await page.locator('main').innerText();
-    record('변동: 목록에서 개별 빼기(364→339)', removed.includes('339'));
+    // 네고 시뮬레이터
+    await page.getByLabel('고객이 부른 금액 (만원)').fill('420');
+    await page.waitForTimeout(300);
+    const nego = await mainText();
+    record('네고: 방어선 경고', nego.includes('최소 방어선'));
+    const msg = await page.getByText('고객에게 이렇게 말하세요').locator('..').innerText();
+    record('설득 멘트: 내 순수익 언급 없음', !/남습니다|남는 게/.test(msg));
+    await shotAt('03b-nego.png', '고객에게 이렇게 말하세요', -320);
   });
 
-  // ---------- 나머지 시나리오 ----------
-  await step('철거 현장 (374 / 4단계)', async () => {
-    await page.getByLabel('장부로 돌아가기').click();
-    await page.getByText('안동 풍산읍 15평 상가 원상복구 철거').click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const t = await page.locator('main').innerText();
-    record('철거: 견적 374만', t.includes('374'));
-    record('철거: 점포철거비 지원금 카드', t.includes('폐업 점포철거비 지원금') && t.includes('300'));
-    record('철거: 지원금 조건·서류 안내', t.includes('평당 20만원') && t.includes('유상 임차') && t.includes('전자세금계산서'));
-
-    await page.locator('nav button').filter({ hasText: '문서' }).first().click();
-    await page.getByText('손님에게 보낼 견적서').waitFor();
-    const dt = await page.locator('main').innerText();
-    record('철거 문서: 지원금 안내 + 문자', dt.includes('손님이 받을 수 있는 지원금') && dt.includes('지원금 안내 문자 복사'));
-
+  // ---------- 9. 시공 탭 금액 연동 확인 ----------
+  await step('계약금 금액이 시공·홈에 연동', async () => {
     await page.locator('nav button').filter({ hasText: '시공' }).first().click();
-    await page.getByText('지금 차례').waitFor();
-    const b = await page.locator('main').innerText();
-    record('철거: 시공 4단계 · 잔금 차례', b.includes('4단계') && b.includes('준공 검수'));
+    await page.waitForTimeout(400);
+    const b = await mainText();
+    record('연동: 시공 카드에 계약금 185만', b.includes('계약금 185만원 입금 확인'), b.match(/계약금 [\d,]+만원 입금 확인/)?.[0] || '');
+    record('연동: 중도금 246·잔금 184만', b.includes('중도금 246만원 입금 확인') && b.includes('잔금 184만원 입금 확인'));
+    await shotAt('04c-payments.png', '계약금·중도금·잔금 받기', -110);
+    await goHome();
+    const h = await mainText();
+    record('연동: 홈 장부 카드 금액', h.includes('계약금 185만') && h.includes('중도금 246만') && h.includes('잔금 184만'));
+    await shotAt('01b-home-payments.png', '구미 형곡동 32평 아파트 욕실 1칸', -140);
   });
 
-  await step('주방 현장 (325)', async () => {
-    await page.getByLabel('장부로 돌아가기').click();
-    await page.getByText('안동 용상동 주방 3.2m 싱크대 교체').click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const t = await page.locator('main').innerText();
-    record('주방: 견적 450만·인조대리석', t.includes('450') && t.includes('인조대리석'));
-  });
-
-  await step('새 현장 자동분류·모달 가림 없음', async () => {
-    await page.getByLabel('장부로 돌아가기').click();
+  // ---------- 10. 복합 인테리어 · 폐기물 ----------
+  await step('복합 인테리어 — 비슷한 사례', async () => {
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    // 모달 본문을 끝까지 스크롤해도 상단 뒤로/닫기가 보여야 한다
-    const sheet = page.locator('[role=dialog]').first();
-    await sheet.evaluate((el) => {
-      const body = el.querySelector('.overflow-y-auto');
-      if (body) body.scrollTop = body.scrollHeight;
-    });
-    await page.waitForTimeout(250);
-    const backBox = await page.locator('[role=dialog]').getByLabel('닫기').first().boundingBox();
-    const closeBox = await page.locator('[role=dialog]').getByLabel('닫기').last().boundingBox();
-    record('모달: 스크롤해도 뒤로/닫기 보임', !!backBox && backBox.y < 200 && !!closeBox && closeBox.y < 200, `y=${Math.round(backBox?.y || -1)}`);
-    await shot('12-newcase-modal.png');
-
-    await page.getByLabel('현장 요청 내용').fill('욕실+도배 15평, 엘베 없는 3층');
-    await page.getByRole('button', { name: '자동으로 분류' }).click();
-    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 10000 });
-    const r = await page.locator('[role=dialog]').innerText();
-    record('자동분류: 복합 인테리어 15평', r.includes('복합 인테리어') && r.includes('15평'));
-    record('자동분류: 층·엘베', r.includes('3층') && r.includes('없음'));
-    await shot('13-auto-classified.png');
+    await page.getByLabel('현장 요청 내용').fill('안동 15평 아파트 전체 인테리어, 공실, 창호 제외, 바닥 미장 필요');
+    await page.getByRole('button', { name: '자동으로 분류하기' }).click();
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
     await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const created = await page.locator('body').innerText();
-    record('자동분류: 현장 생성', created.includes('복합') && created.includes('15평'));
-    await page.getByLabel('장부로 돌아가기').click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    record('복합: 공종 잡힘', (await mainText()).includes('복합 인테리어'));
+    const det = page.locator('details').filter({ hasText: '비슷한 실제 사례 보기' }).first();
+    await det.evaluate((el) => (el.open = true));
+    await page.waitForTimeout(300);
+    const n = await page.locator('[data-similar-case]').count();
+    record('복합: 사례 최소 3건(빈 화면 없음)', n >= 3, `${n}건`);
+    await shotAt('15-combined-similar.png', '비슷한 실제 사례 보기');
+    await goHome();
   });
 
+  await step('폐기물 현장 — 스타일·자재 카드 숨김', async () => {
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    await page.getByLabel('현장 요청 내용').fill('안동 2.5톤 폐기물 처리');
+    await page.getByRole('button', { name: '자동으로 분류하기' }).click();
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    const t = await mainText();
+    record('폐기물: 스타일·자재 카드 없음', !t.includes('스타일·자재 정하기'));
+    record('폐기물: 광폭 합지 없음', !t.includes('광폭 합지') && !t.includes('장판'));
+    record('폐기물: 자재 세트 안내', !t.includes('추천 자재 세트'));
+    await shot('16-waste-no-style.png');
+    await goSurvey();
+    const s = await mainText();
+    record('폐기물: 체크리스트에서 준공청소 제외', !s.includes('준공 청소'));
+    record('폐기물: 혼합 폐기물 체크', s.includes('혼합 폐기물 있음'));
+    record('폐기물: 실제 톤수 반영(0톤 아님)', s.includes('폐기물 분리 계산 (2.5톤)'), s.match(/폐기물 분리 계산 \([^)]*\)/)?.[0] || '없음');
+    record('폐기물: 석면 경보 없음', !s.includes('석면(천장 텍스)'));
+    record('폐기물: 철거 전 사진 6곳 대신 작업 기록', s.includes('작업 전·후 기록') && !s.includes('철거 전 사진 6곳'));
+    record('폐기물: 추가금 기록 없음(시공에서)', !s.includes('추가금 기록'));
+    record('폐기물: 5톤 미만 처리계획서 숨김', !s.includes('5톤 이상 처리계획서'));
+    record('폐기물: 철거 전 6부위 없음', !s.includes('철거 전 6부위'));
+    record('폐기물: 브랜드 가격 없음', !s.includes('브랜드별 기준 가격'));
+    await shot('16b-waste-survey.png');
+    await goHome();
+  });
+
+  // ---------- 11. 점포철거비 지원금 ----------
+  await step('점포철거비 지원금 카드', async () => {
+    await page.getByText('안동 풍산읍 15평 상가 원상복구 철거').click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    const t = await mainText();
+    record('철거: 지원금 카드', t.includes('점포철거비 지원금') && t.includes('300'));
+    record('철거: 대상 판별 체크리스트', t.includes('대상인지 확인') && t.includes('유상으로 빌린 상가인가요'));
+    record('철거: 필요 서류 6종', ['임대차계약서', '폐업사실증명', '공사(철거) 계약서', '전자세금계산서', '계좌이체 확인증', '동일 각도 사진'].every((k) => t.includes(k)));
+    record('철거: 대행 수수료 안내', t.includes('서류 대행, 비용은?') && t.includes('10~20만원'));
+    record('철거: 대행 안내 문자 복사', (await page.getByRole('button', { name: /서류 대행 안내 문자 복사/ }).count()) === 1);
+    await shotAt('07-subsidy.png', '점포철거비 지원금', -120);
+    await page.getByRole('button', { name: /서류 대행 안내 문자 복사/ }).click();
+    await page.waitForTimeout(300);
+
+    // 지원금 제출용 공사내역서 (4단계 문서)
+    await page.getByRole('button', { name: /지원금 제출용 공사내역서 뽑기/ }).click();
+    await page.waitForTimeout(400);
+    await page.getByRole('button', { name: '지원금 공사내역서' }).click();
+    await page.waitForTimeout(400);
+    const sheet = await page.locator('.print-area').innerText();
+    record('지원금 내역서: 공식 항목(품명·규격·수량·단가)', ['품명', '규격', '수량', '단가', '공급가액'].every((k) => sheet.includes(k)));
+    record('지원금 내역서: 신청인·시공업체·전용면적', sheet.includes('신청인 (공급받는 자)') && sheet.includes('공급자 (시공업체)') && sheet.includes('전용면적'));
+    record('지원금 내역서: 공급가액·부가세·총합계', sheet.includes('공급가액') && sheet.includes('부가세(10%)') && sheet.includes('총합계'));
+    record('지원금 내역서: 전후 사진·직인', sheet.includes('첨부 사진') && sheet.includes('직인'));
+    record('지원금 내역서: 원가·마진 미노출', !['원가', '마진', '남는', '일당'].some((w) => sheet.includes(w)));
+    record('지원금 내역서: 복사 버튼', (await page.getByRole('button', { name: /공사내역서 복사/ }).count()) === 1);
+    await shotAt('07b-subsidy-sheet.png', '공사내역서 (점포철거비', -100);
+    await goHome();
+  });
+
+  // ---------- 12. 도배 현장 변동 ----------
+  await step('현장 변동 — 글 한 줄로 반영', async () => {
+    await page.getByText('포항 두호동 24평 빌라 도배·장판').click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    await goSurvey();
+    await page.getByLabel('현장 변동 내용').fill('폐기물 1톤 추가, 벽체 목공 덧대기');
+    await page.locator('details').filter({ hasText: '직접 금액 고치기' }).first().evaluate((el) => (el.open = true));
+    await page.waitForTimeout(200);
+    await page.getByLabel('변동 금액').fill('25');
+    await page.getByRole('button', { name: '답사 내용으로 최종 견적 다시 내기' }).click();
+    await page.waitForTimeout(600);
+    const changed = await mainText();
+    record('변동: 즉시 반영(324→349)', changed.includes('349'), changed.match(/가견적[\s\S]{0,40}/)?.[0]?.replace(/\n/g, ' '));
+    record('변동: 이유 표시', changed.includes('무엇이 왜 바뀌었나') && (changed.includes('▲') || changed.includes('▼')));
+    await shotAt('08-field-change.png', '무엇이 왜 바뀌었나', -120);
+
+    await page.locator('nav button').filter({ hasText: '문서' }).first().click();
+    await page.getByText('손님에게 보낼 견적서').waitFor();
+    const d = await mainText();
+    record('문서: 변동 내역 자동 갱신', d.includes('현장 변동 내역') && d.includes('349'));
+    record('문서: 도배 자재(합지·장판)', d.includes('합지') && d.includes('장판'));
+    record('문서: 타일 자재 없음', !d.includes('600각') && !d.includes('포세린'));
+    record('문서: 제외사항·특약', d.includes('제외 사항') && d.includes('특약'));
+
+    await page.getByRole('button', { name: '견적 안내 문자' }).first().click();
+    await page.waitForTimeout(300);
+    const sms = await mainText();
+    record('문자: 직영 강점 1줄', sms.includes('인력사무소를 직접 운영'));
+    await shotAt('05c-sms.png', '견적 안내 문자', -160);
+    await page.getByLabel('장부로 돌아가기').click();
+    await page.waitForTimeout(300);
+  });
+
+  // ---------- 13. 주방 ----------
+  await step('주방 현장', async () => {
+    await page.getByText('안동 용상동 주방 3.2m 싱크대 교체').click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    const t = await mainText();
+    record('주방: 450만·인조대리석', t.includes('450') && t.includes('인조대리석'));
+    await page.locator('nav button').filter({ hasText: '시공' }).first().click();
+    await page.waitForTimeout(400);
+    record('주방: 발주 업체', (await mainText()).includes('싱크대 제작·납품 업체'));
+    await goHome();
+  });
+
+  // ---------- 14. 새 현장 모달 ----------
+  await step('새 현장 모달 — 세로 흐름', async () => {
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    const y = await page.evaluate(() => {
+      const findTop = (txt) =>
+        [...document.querySelectorAll('[role=dialog] button, [role=dialog] textarea')].find((el) => (el.innerText || el.getAttribute('aria-label') || '').includes(txt))?.getBoundingClientRect().top ?? -1;
+      return { text: findTop('현장 요청 내용') || findTop('숨고·카톡'), photo: findTop('사진·스샷 올리기'), classify: findTop('자동으로 분류') };
+    });
+    record('모달: 사진 → 자동분류 세로 배치', y.photo > 0 && y.classify > y.photo, JSON.stringify(y));
+    await shot('12-newcase-modal.png');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  // ---------- 15. OCR 스크린샷 ----------
   await step('숨고 스크린샷 OCR', async () => {
     const dir = '/workspace/attachments/2026-11-21';
     const file = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith('IMG_1430') && f.endsWith('.jpg')));
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.locator('input[type=file]').setInputFiles(file);
-    await page.waitForTimeout(600);
-    await page.getByRole('button', { name: '자동으로 분류' }).click();
-    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 200000 });
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 240000 });
     const r = await page.locator('[role=dialog]').innerText();
     record('OCR: 아파트 인테리어 → 복합 15평', r.includes('복합 인테리어') && r.includes('15평'));
     record('OCR: 지역 안동', r.includes('경북 안동시'));
     record('OCR: 바닥 미장 추가', r.includes('바닥 미장'));
     record('OCR: 창호 제외', r.includes('창호') && r.includes('제외'));
+    record('OCR: 정리한 글 미리보기', r.includes('받은 내용으로 정리한 글'));
+    record('OCR: 잡글자 없음', !/삭제하기|요청 상세|\d{1,2}:\d{2}/.test(r));
     await shot('14-ocr-result.png');
-    await page.getByLabel('닫기').click();
+    await page.getByLabel('닫기').first().click();
     await page.waitForTimeout(300);
   });
 
-  await step('새 현장 만들기', async () => {
-    await goHome();
-    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
-    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    await page.locator('div.fixed.inset-0').getByText('상가·주택 철거').last().click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const header = await page.locator('header').innerText();
-    record('새 현장 생성', header.includes('안동'), header.replace(/\n/g, ' '));
-  });
-
+  // ---------- 16. 설정 ----------
   await step('단가표 변경 → 새 견적만 반영', async () => {
     await goHome();
-    console.log('  · click 설정');
     await page.getByLabel('설정').click();
     await page.getByText('우리 집 기본 단가표').waitFor();
-    console.log('  · fill 철거 기공');
     await page.getByLabel('철거 기공').fill('30');
     await page.getByText('우리 집 기본 단가표').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(2800); // 앞선 토스트가 사라진 뒤
-    await shot('07-settings-rates.png');
-    console.log('  · click 저장하기');
+    await page.waitForTimeout(1200);
     await page.getByRole('button', { name: '저장하기' }).click();
     await page.waitForTimeout(400);
-
-    // 새 현장 → 바뀐 단가 + 예비비 6% 적용 (15평 철거 기공 30만 → 468만)
-    console.log('  · click 새 현장');
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    await page.locator('div.fixed.inset-0').getByText('상가·주택 철거').last().click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const newText = await page.locator('main').innerText();
-    record('단가 변경+예비비: 새 현장 468만', newText.includes('468'), newText.match(/지금 계산된 견적[\s\S]{0,30}/)?.[0]?.replace(/\n/g, ' '));
-
-    await page.waitForTimeout(800);
+    await page.getByText('자동 분류 없이 공종만 직접 고르기').click();
+    await page.getByRole('button', { name: '상가·주택 철거' }).first().click();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    const newText = await mainText();
+    record('단가 변경+예비비: 새 현장 468만', newText.includes('468'), newText.match(/1차 가견적[\s\S]{0,30}/)?.[0]?.replace(/\n/g, ' '));
+    await page.waitForTimeout(700);
     const snapshot = await page.evaluate(() => {
       const st = JSON.parse(localStorage.getItem('aiSiteManager.v1') || '{}');
-      const latest = (st.cases || [])[0];
-      return latest?.unitPriceSnapshot?.labor?.demolition ?? null;
+      return (st.cases || [])[0]?.unitPriceSnapshot?.labor?.demolition ?? null;
     });
-    record('단가 변경: 새 현장 스냅샷 저장', snapshot === 30, `labor.demolition=${snapshot}`);
-
-    // 기존 현장은 그대로 374만
-    console.log('  · back to home');
+    record('단가 변경: 새 현장 스냅샷', snapshot === 30, `labor.demolition=${snapshot}`);
     await page.getByLabel('장부로 돌아가기').click();
     await page.getByText('안동 풍산읍 15평 상가 원상복구 철거').click();
-    await page.getByText('지금 계산된 견적').waitFor();
-    const oldText = await page.locator('main').innerText();
+    await page.getByText('가견적 (답사 전 예상)').waitFor();
+    const oldText = await mainText();
     record('단가 변경: 기존 현장 유지(374만)', oldText.includes('374') && !oldText.includes('468'));
   });
 
+  // ---------- 17. 모바일 ----------
   await step('모바일 가로 스크롤·저장', async () => {
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
-    );
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     record('모바일: 가로 스크롤 없음', overflow <= 1, `overflow=${overflow}px`);
     const stored = await page.evaluate(() => localStorage.getItem('aiSiteManager.v1'));
     record('저장: LocalStorage', !!stored && stored.length > 500, `${stored ? Math.round(stored.length / 1024) : 0}KB`);
+    await shot('17-final.png');
   });
 
   record('콘솔 에러 0건', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

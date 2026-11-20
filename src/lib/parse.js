@@ -113,3 +113,30 @@ export const PROCESS_TO_SURVEY = {
   cleanup: 'afterCare',
   admin: 'adminDeposit',
 };
+
+// 시공 중 추가 공사 — 글·사진 한 줄에서 항목·사유·금액·일정을 잡는다.
+const CHANGE_RULES = [
+  { re: /문틀|문짝|도어|문\s*교체|방화문/, item: '문틀·문짝 교체', reason: '철거 중 문틀 부식·파손 확인', amount: 25, days: 1 },
+  { re: /누수|물이\s*샘|방수/, item: '누수 보수·방수 추가', reason: '기존 누수 흔적 확인', amount: 30, days: 1 },
+  { re: /곰팡이|결로|습기/, item: '곰팡이 제거·방균 처리', reason: '벽체 곰팡이 확인', amount: 15, days: 1 },
+  { re: /타일/, item: '타일 추가 시공', reason: '당초 범위 외 타일 추가', amount: 20, days: 1 },
+  { re: /전기|콘센트|조명|배선|스위치/, item: '전기 배선·콘센트 추가', reason: '현장 요청', amount: 18, days: 0 },
+  { re: /배관|수도|급수|배수|수전/, item: '급배수 배관 보수', reason: '노후 배관 확인', amount: 25, days: 1 },
+  { re: /폐기물|마대|반출|톤\s*추가|차량/, item: '폐기물 추가 반출', reason: '숨은 물량·추가 철거재 발생', amount: 30, days: 0 },
+  { re: /보양|가구|먼지|가림/, item: '보양·가구 이동 추가', reason: '거주 중 공사', amount: 12, days: 0 },
+  { re: /몰딩|걸레받이|커튼박스/, item: '몰딩·걸레받이 교체', reason: '철거 중 파손', amount: 10, days: 0 },
+  { re: /창호|샷시|유리|단열/, item: '창호·단열 보강', reason: '기존 창호 노후', amount: 35, days: 1 },
+  { re: /석면|텍스/, item: '석면 조사·처리', reason: '텍스 천장 확인', amount: 30, days: 1 },
+  { re: /철거|해체/, item: '추가 철거', reason: '당초 범위 외 철거', amount: 20, days: 1 },
+];
+
+export function classifyChange(text = '') {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  const hit = CHANGE_RULES.find((r) => r.re.test(s));
+  if (hit) {
+    return { item: hit.item, reason: s.slice(0, 60), amount: hit.amount, days: hit.days, type: 'increase' };
+  }
+  // 규칙에 없으면 문장을 그대로 항목으로 쓰고 기본 금액을 제안한다.
+  return { item: s.split(/[.,\n]/)[0].slice(0, 30), reason: s.slice(0, 60), amount: 20, days: 0, type: 'increase' };
+}

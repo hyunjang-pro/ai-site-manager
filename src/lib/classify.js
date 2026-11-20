@@ -161,7 +161,17 @@ export function classifyRequest(rawText = '') {
   if (/공실|빈집|비어\s*있/.test(t)) hints.push('공실 — 보양·먼지막이를 최소화할 수 있습니다.');
   if (/보양|먼지막이|가림/.test(t)) survey.protectLevel = true;
   if (/폐기물|마대|반출/.test(t)) survey.wasteIncluded = true;
+  if (/혼합\s*폐기물|섞어|섞어서/.test(t)) survey.wasteMixed = true;
   if (/주말|공휴일/.test(t)) survey.noWeekend = true;
+  // 요청서에 이미 적힌 조건은 처음부터 체크해 둔다 (사용자가 다시 누를 필요 없게)
+  if (/아파트|오피스텔/.test(t)) {
+    survey.protectLevel = true;
+    survey.adminDeposit = true;
+  } else if (/빌라|상가|사무실/.test(t)) {
+    survey.protectLevel = true;
+  }
+  if (/공실|빈집|비어\s*있/.test(t)) survey.residential = false;
+  if (/엘베|엘리베이터|승강기/.test(t) && /있|사용/.test(t) && !/없/.test(t)) survey.materialLift = false;
   if (excludedWorks.length) hints.push(`${excludedWorks.join(', ')} 제외 — 견적에서 빼고 손님에게 확인하세요.`);
   if (extraWorks.includes('바닥 미장')) hints.push('바닥 미장 추가 — 미장·양생 일수를 공정에 넣으세요.');
   if (budgetMatch) hints.push(`손님 예산 ${budgetMatch[1]}만원${budgetMatch[2] || ''} — 이 안에서 범위를 잡으세요.`);
@@ -212,4 +222,54 @@ export function classifyRequest(rawText = '') {
     confidence: trade === 'unclassified' ? 'low' : hits.length >= 2 ? 'medium' : 'high',
     detected: trade !== 'unclassified',
   };
+}
+
+// 사진·메모에서 읽은 글자를 '받은 내용' 칸에 넣기 좋은 짧은 요약으로 정리한다.
+// 폰 UI 잡글자는 ocr.cleanOcrText가 이미 지운 상태로 들어온다.
+export function summarizeRequest(text, res) {
+  const clean = String(text || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join(' ');
+  if (!clean) return '';
+  const r = res || classifyRequest(clean);
+  const t = clean.toLowerCase();
+  const row = (label) => r.rows.find((x) => x.label === label)?.value || '';
+  const lines = [];
+  const push = (label, value) => {
+    if (value) lines.push(`${label}: ${value}`);
+  };
+
+  push('지역', row('지역'));
+  push('면적', row('규모'));
+
+  const spaces = [
+    ...new Set(
+      (clean.match(/거실|방\s*\d|욕실|화장실|주방|부엌|베란다|발코니|현관|상가|사무실|원룸|사무실/g) || []).map((s) =>
+        s.replace(/\s+/g, '').replace(/\d/g, '').replace('화장실', '욕실').replace('부엌', '주방')
+      )
+    ),
+  ];
+  if (spaces.length) push('공간', spaces.slice(0, 6).join('·'));
+  push('공종', r.trade && r.trade !== 'unclassified' ? TRADES[r.trade]?.label || '' : '');
+
+  const budget = clean.match(/예산\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/);
+  if (budget) push('예산', `${budget[1]}만원${budget[2] || ''}`);
+  if (/공실|빈집|비어\s*있/.test(t)) push('현장 상태', '공실');
+  else if (/거주|살고|사람이\s*삼/.test(t)) push('현장 상태', '거주 중');
+  if (row('층 / 엘베')) push('층·엘베', row('층 / 엘베'));
+  if (r.patch?.excludedWorks?.length) push('제외', r.patch.excludedWorks.join('·'));
+  if (r.patch?.extraWorks?.length) push('추가', r.patch.extraWorks.join('·'));
+
+  // 요청사항 — 원문에서 핵심이 되는 첫 줄들만 짧게
+  const wants = clean
+    .split(/[\n.]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 4)
+    .slice(0, 2)
+    .join(' / ');
+  if (wants) push('요청', wants.length > 80 ? `${wants.slice(0, 80)}…` : wants);
+
+  return lines.join('\n') || clean.slice(0, 120);
 }

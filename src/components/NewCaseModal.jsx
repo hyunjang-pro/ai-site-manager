@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, ImagePlus, Loader2, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { ChevronRight, ImagePlus, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { SIZE_UNITS, TRADES, TRADE_LIST } from '../lib/constants.js';
-import { classifyRequest } from '../lib/classify.js';
+import { classifyRequest, summarizeRequest } from '../lib/classify.js';
 import { ocrWithTimeout } from '../lib/ocr.js';
 import { fileToThumb } from '../lib/image.js';
-import { AlertCard, BigButton, Modal, Pill, Select, TextArea, TradeIcon, cx } from './ui.jsx';
+import { AlertCard, BigButton, Details, Modal, Pill, Select, TextArea, TradeIcon, cx } from './ui.jsx';
 
 const EXAMPLES = [
   '폐기물 2톤만 치워주세요',
@@ -46,6 +46,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
 
   const busy = progress !== null;
 
+  // 사진을 올리면 바로 글자를 읽고 분류까지 한 번에 돌린다.
   const addFiles = async (fileList) => {
     const files = Array.from(fileList || []).slice(0, 6 - photos.length);
     const next = [];
@@ -54,21 +55,28 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
       const thumb = await fileToThumb(f);
       next.push({ file: f, url: URL.createObjectURL(f), thumb });
     }
-    setPhotos((p) => [...p, ...next]);
+    if (!next.length) return;
+    const merged = [...photos, ...next];
+    setPhotos(merged);
+    await analyze(merged, text);
   };
 
-  const analyze = async () => {
+  // photosArg/textArg를 넘기면 방금 올린 사진까지 포함해 바로 분류한다.
+  const analyze = async (photosArg, textArg) => {
+    const list = photosArg || photos;
+    const typed = (textArg !== undefined ? textArg : text) || '';
     setError('');
-    setProgress('사진에서 글자 읽는 중…');
-    let combined = text;
+    setProgress(list.length ? '사진에서 글자 읽는 중…' : '분류 중…');
+    let combined = typed;
+    let cleaned = '';
     try {
-      if (photos.length) {
-        const read = await ocrWithTimeout(
-          photos.map((p) => p.file),
-          (pct, idx, total) => setProgress(`사진 ${idx || 1}/${total || photos.length} 글자 읽는 중… ${pct ? `${pct}%` : ''}`)
+      if (list.length) {
+        cleaned = await ocrWithTimeout(
+          list.map((p) => p.file),
+          (pct, idx, total) => setProgress(`사진 ${idx || 1}/${total || list.length} 글자 읽는 중… ${pct ? `${pct}%` : ''}`)
         );
-        setOcrText(read);
-        combined = `${text}\n${read}`.trim();
+        setOcrText(cleaned);
+        combined = `${typed}\n${cleaned}`.trim();
       }
       if (!combined.trim()) {
         setError('붙여넣은 내용이나 사진이 없습니다. 요청 글을 넣거나 공종을 직접 골라주세요.');
@@ -76,6 +84,10 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
         return;
       }
       const r = classifyRequest(combined);
+      const summary = summarizeRequest(combined, r);
+      r.patch.rawInput = summary;
+      r.patch.notes = combined;
+      if (cleaned) r.patch.ocrRaw = cleaned;
       setResult(r);
       setTrade(r.trade === 'unclassified' ? 'custom' : r.trade);
       setSizeValue(r.patch.sizeValue || '');
@@ -107,8 +119,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
 
   const rows = useMemo(() => {
     if (!result) return [];
-    const out = result.rows.filter((r) => r.label !== '공종');
-    return out;
+    return result.rows.filter((r) => r.label !== '공종');
   }, [result]);
 
   const headerBack = step === 'result' ? () => setStep('input') : onClose;
@@ -133,7 +144,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
       }
     >
       {step === 'input' ? (
-        <div className="space-y-4">
+        <div className="space-y-3.5">
           {/* 1) 붙여넣기 · 사진 */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">
@@ -164,19 +175,14 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex min-h-14 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-ink-2 active:bg-slate-50"
-            >
-              <ImagePlus className="h-5 w-5" /> 사진·스샷 {photos.length ? `${photos.length}/6` : '올리기'}
-            </button>
-            <BigButton variant="amber" className="min-h-14 whitespace-nowrap text-sm" onClick={analyze} disabled={busy}>
-              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
-              {busy ? '읽는 중…' : '자동으로 분류'}
-            </BigButton>
-          </div>
+          {/* 2) 사진 — 전체 너비 */}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-ink-2 active:bg-slate-50"
+          >
+            <ImagePlus className="h-5 w-5" /> 사진·스샷 올리기 {photos.length ? `${photos.length}/6` : ''}
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -189,6 +195,15 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
               e.target.value = '';
             }}
           />
+          <p className="-mt-2 text-2xs font-semibold leading-4 text-ink-3">
+            사진을 올리면 글자를 읽고 분류까지 자동으로 한 번에 됩니다. 상단 시계·앱 버튼 같은 잡글자는 걸러냅니다.
+          </p>
+
+          {/* 3) 자동 분류 — 전체 너비 주 버튼 */}
+          <BigButton variant="amber" className="w-full whitespace-nowrap text-sm" onClick={() => analyze()} disabled={busy}>
+            {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+            {busy ? '읽는 중…' : '자동으로 분류하기'}
+          </BigButton>
 
           {photos.length ? (
             <div className="grid grid-cols-3 gap-2">
@@ -211,6 +226,15 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
             </div>
           ) : null}
 
+          {ocrText ? (
+            <div className="rounded-xl bg-emerald-50 px-3 py-2.5">
+              <p className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-800">
+                <ScanText className="h-3.5 w-3.5" /> 사진에서 읽은 글자 (잡글자 제거)
+              </p>
+              <p className="mt-1 max-h-32 overflow-auto whitespace-pre-line text-[13px] font-semibold leading-5 text-emerald-900">{ocrText}</p>
+            </div>
+          ) : null}
+
           {progress ? (
             <div className="flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2.5 text-sm font-bold text-blue-800">
               <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> {progress}
@@ -218,12 +242,8 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           ) : null}
           {error ? <AlertCard tone="warn" title="확인이 필요합니다">{error}</AlertCard> : null}
 
-          {/* 2) 직접 고르기 */}
-          <div>
-            <p className="mb-2 text-sm font-extrabold text-ink">
-              <span className="mr-1 rounded-md bg-slate-200 px-1.5 py-0.5 text-2xs font-black text-ink-2">2</span>
-              아니면 공종만 직접 고르기
-            </p>
+          {/* 4) 직접 고르기 */}
+          <Details label="자동 분류 없이 공종만 직접 고르기">
             <div className="grid grid-cols-2 gap-2">
               {TRADE_LIST.map((t) => (
                 <button
@@ -239,7 +259,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
                     });
                     onClose();
                   }}
-                  className="flex min-h-[62px] items-center gap-2.5 rounded-2xl bg-slate-50 px-3 text-left active:bg-slate-100"
+                  className="flex min-h-[58px] items-center gap-2.5 rounded-2xl bg-white px-3 text-left ring-1 ring-slate-200 active:bg-slate-50"
                 >
                   <TradeIcon trade={t.id} size="sm" />
                   <span className="min-w-0 flex-1 text-[13px] font-extrabold leading-4 text-ink">{t.label}</span>
@@ -247,7 +267,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
                 </button>
               ))}
             </div>
-          </div>
+          </Details>
 
           <AlertCard tone="info" title="사진은 이렇게 읽습니다">
             숨고 요청서·카톡 캡처의 글자를 기기 안에서 읽습니다(무료 OCR). 첫 1회는 인식 데이터를 받느라 20~40초 걸릴 수 있습니다. 사진은 외부로 저장되지 않고 현장 사진첩에만 남습니다.
@@ -256,7 +276,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
       ) : (
         <div className="space-y-4">
           {ocrText ? (
-            <AlertCard tone="good" title="사진에서 읽은 글자">
+            <AlertCard tone="good" title="사진에서 읽은 글자 (정리 후)">
               <p className="line-clamp-4 whitespace-pre-line">{ocrText}</p>
             </AlertCard>
           ) : null}
@@ -271,6 +291,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
                 </div>
               ))}
             </div>
+            {rows.length ? null : <p className="text-xs text-ink-3">공종을 직접 골라주세요.</p>}
             {result?.hints?.length ? (
               <ul className="mt-2 space-y-1 border-t border-slate-200 pt-2">
                 {result.hints.slice(0, 4).map((h, i) => (
@@ -282,6 +303,15 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
               </ul>
             ) : null}
           </div>
+
+          {result?.patch?.rawInput ? (
+            <div>
+              <p className="mb-1 text-xs font-extrabold text-ink-2">받은 내용으로 정리한 글</p>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-white px-3 py-2 text-xs leading-5 text-ink-2 ring-1 ring-slate-200">
+                {result.patch.rawInput}
+              </pre>
+            </div>
+          ) : null}
 
           {/* 수정 */}
           <div>

@@ -387,6 +387,12 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
           <p className="num pb-0.5 text-2xs font-medium text-ink-4">{c.createdAt}</p>
         </div>
 
+        <p className="mt-1 text-2xs font-bold text-ink-3">
+          계약금 {Math.round(calc.payments.deposit.amount).toLocaleString('ko-KR')}만 · 중도금{' '}
+          {Math.round(calc.payments.mid.amount).toLocaleString('ko-KR')}만 · 잔금{' '}
+          {Math.round(calc.payments.balance.amount).toLocaleString('ko-KR')}만
+        </p>
+
         <RangeMeter min={min} base={base} max={max} className="mt-2.5" />
       </button>
 
@@ -418,24 +424,35 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
         <div className="border-t border-slate-100 bg-slate-50/70 px-3.5 py-3">
           <p className="mb-2 text-xs font-bold text-ink-2">수금 상태 바꾸기</p>
           <div className="grid grid-cols-2 gap-1.5">
-            {COLLECTION_STAGES.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => {
-                  onUpdate({ collection: s.id });
-                  onTogglePick();
-                }}
-                className={cx(
-                  'min-h-11 rounded-xl px-2 text-sm font-bold transition',
-                  c.collection === s.id
-                    ? 'bg-brand text-white shadow-brand'
-                    : 'bg-white text-ink-2 ring-1 ring-slate-200'
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
+            {COLLECTION_STAGES.map((s) => {
+              const amountOf = (id) =>
+                id === 'deposit_wait' || id === 'deposit_paid'
+                  ? calc.payments.deposit.amount
+                  : id === 'mid_paid'
+                  ? calc.payments.mid.amount
+                  : calc.payments.balance.amount;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    onUpdate({ collection: s.id });
+                    onTogglePick();
+                  }}
+                  className={cx(
+                    'min-h-11 rounded-xl px-2 py-1 text-sm font-bold transition',
+                    c.collection === s.id
+                      ? 'bg-brand text-white shadow-brand'
+                      : 'bg-white text-ink-2 ring-1 ring-slate-200'
+                  )}
+                >
+                  {s.label}
+                  <span className={cx('block text-[10px] font-bold', c.collection === s.id ? 'text-white/80' : 'text-ink-3')}>
+                    {Math.round(amountOf(s.id)).toLocaleString('ko-KR')}만원
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <button
             type="button"

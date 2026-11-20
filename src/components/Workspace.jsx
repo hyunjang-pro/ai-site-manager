@@ -22,7 +22,7 @@ export const TABS = [
 export default function Workspace({ activeCase, updateCase, tab, setTab, showToast, apiKey, goHome, onMoveToArchive, completedCases = [], onOpenSettings }) {
   const calc = useMemo(() => computeEstimate(activeCase), [activeCase]);
   const design = useMemo(() => translateDesign(activeCase), [activeCase]);
-  const waste = useMemo(() => computeWaste(activeCase.waste), [activeCase.waste]);
+  const waste = useMemo(() => computeWaste(activeCase.waste, activeCase), [activeCase]);
   const asbestos = useMemo(() => assessAsbestos(activeCase.asbestos), [activeCase.asbestos]);
   const gates = useMemo(() => buildGates(activeCase, calc.trade), [activeCase, calc.trade]);
 
@@ -144,6 +144,15 @@ export default function Workspace({ activeCase, updateCase, tab, setTab, showToa
             asbestos={asbestos}
             showToast={showToast}
             apiKey={apiKey}
+            completedCases={completedCases}
+            onGoNext={() => {
+              setTab(2);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onGoDoc={() => {
+              setTab(4);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         ) : null}
         {tab === 2 ? <ProfitTab c={activeCase} update={updateCase} calc={calc} showToast={showToast} onOpenSettings={onOpenSettings} /> : null}

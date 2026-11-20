@@ -3,6 +3,8 @@
 // 원가 구조와 "고객가 = 원가 ÷ (1 − 마진율)" 공식을 그대로 모듈화했다.
 import { TRADES, HARD_DETAILS } from './constants';
 import { ratesOf, getRate } from './rates.js';
+import { materialSetFor } from './materials.js';
+import { detailRowsFor, detailTotals } from './details.js';
 
 export const MAN = 10000; // 원 → 만원
 
@@ -59,6 +61,24 @@ export function toPyung(sizeValue, sizeUnit, fallback = 15) {
   }
 }
 
+// 손님 문서에 쓸 수 있게 내부 단가·원가·일당 표현을 걷어낸 문장.
+// 예) "일용 인력 3명 × 2일 지원 (청구 26만/일 · 원가 19만/일 + 보험 2만)" → "일용 인력 3명 × 2일 지원"
+export function clientSafeText(text) {
+  let s = String(text || '');
+  // 괄호 안에 금액·단가·원가가 들어간 부분은 통째로 제거
+  s = s.replace(/\([^)]*(?:만|원가|청구|일당|단가|보험)[^)]*\)/g, ' ');
+  // " · 타일 7.7만/㎡" 같은 단가 조각 제거
+  s = s
+    .split('·')
+    .filter((part) => !/\d[\d.,]*\s*만\s*(\/|원|$)/.test(part.trim()))
+    .join(' · ');
+  return s
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s*·\s*·\s*/g, ' · ')
+    .replace(/^[\s·]+|[\s·]+$/g, '')
+    .trim();
+}
+
 export function sizeText(c) {
   if (!c) return '규모 미정';
   if (c.sizeUnit === '모름' || !toNum(c.sizeValue)) return '규모 미정(실측 필요)';
@@ -75,10 +95,9 @@ function surveyOn(c, id) {
 
 // 디자인·자재 번역기에서 선택한 고난도 디테일의 할증률/공기
 export function detailSurcharge(c) {
-  const selected = Array.isArray(c?.design?.details) ? c.design.details : [];
-  const rows = HARD_DETAILS.filter((d) => selected.includes(d.id));
-  const rate = Math.min(50, rows.reduce((s, d) => s + d.rate, 0));
-  const days = rows.reduce((s, d) => s + d.days, 0);
+  // 체크한 마감 + 자유 입력(예: "아치 게이트, 라인조명") 모두 반영
+  const rows = detailRowsFor(c?.design || {});
+  const { rate, days } = detailTotals(rows);
   return { rows, rate, days };
 }
 
@@ -434,6 +453,12 @@ export function computeEstimate(c) {
   if (surveyOn(c, 'loadBearingWall')) addSurcharge('loadBearing', '추가(구조)', '내력벽 철거 구조검토', '구조기술사 검토·보강(없으면 착공 금지)', 30);
   if (surveyOn(c, 'asbestosRisk')) addSurcharge('asbestos', '추가(규제)', '석면 사전조사 착수비', '시료 분석·조사기관 수수료', 30);
   if (surveyOn(c, 'workTimeLimit')) { addSurcharge('worktime', '추가(규제)', '작업시간 제한', '공사 기간이 늘어난 인건비', 20); laborTotal += 20; }
+  // 혼합 폐기물 — 성상 분리를 안 하면 처리비가 3~6배가 된다. 현장 확인 후 체크하는 항목.
+  if (surveyOn(c, 'wasteMixed')) {
+    const mixed = Math.max(15, Math.round(wasteTotal * 0.35));
+    addSurcharge('mixedWaste', '추가(폐기물)', '혼합 폐기물 분리·추가 처리', '성상 분리 인력 + 혼합 처리 단가', mixed);
+    wasteTotal += mixed;
+  }
   if (surveyOn(c, 'adminDeposit'))
     addSurcharge('deposit', '추가(규제)', '관리사무소 신고·동의서', getRate(rates, ['site', 'adminReport'], 8) + '만 (대행)', getRate(rates, ['site', 'adminReport'], 8));
   if (surveyOn(c, 'powerWaterCut')) addSurcharge('cut', '추가(규제)', '단전·단수 조치', '차단·마감', 5);
@@ -455,8 +480,9 @@ export function computeEstimate(c) {
     equipTotal += small;
   }
   if (surveyOn(c, 'afterCare')) {
-    const cleanup = getRate(rates, ['site', 'cleanup'], 45);
-    addSurcharge('clean', '추가(현장)', '준공 청소', '오염 제거·바닥 청소 (34평 기준)', cleanup);
+    const pyungForClean = toPyung(c?.sizeValue, c?.sizeUnit, 15);
+    const cleanup = Math.max(20, Math.round(pyungForClean * 1.3)); // 34평 ≈ 44만 (예전 고정 45만)
+    addSurcharge('clean', '추가(현장)', '준공 청소', `오염 제거·바닥 청소 (${pyungForClean}평 기준)`, cleanup);
     laborTotal += cleanup;
   }
 
@@ -490,6 +516,30 @@ export function computeEstimate(c) {
       amount: delta,
       isAdjust: true,
     });
+  }
+
+  // ---- 실전 원가 절감 스위치 (보조 인력 1명 감축) ----
+  if (c?.cuts?.helper) {
+    const cut = Math.round(getRate(rates, ['labor', 'helper'], 17));
+    items.push({
+      id: 'helper_cut',
+      category: '노무',
+      name: '보조 인력 1명 감축',
+      detail: '현장 정리·운반을 직접 하는 조건',
+      amount: -cut,
+      isAdjust: true,
+    });
+    laborTotal -= cut;
+  }
+
+  // ---- 추천 자재 세트(실속/표준/고급) 반영: 세트를 바꾸면 견적이 즉시 바뀐다 ----
+  const mset = materialSetFor(c, trade);
+  const matMul = mset && Number.isFinite(mset.mul) && mset.mul > 0 ? mset.mul : 1;
+  if (matMul !== 1) {
+    items.forEach((it) => {
+      if (it.category === '자재') it.amount = Math.round((Number(it.amount) || 0) * matMul);
+    });
+    materialTotal = Math.round(materialTotal * matMul);
   }
 
   // 항목별 포함/제외 (견적서에서 한 줄씩 끌 수 있다)
@@ -551,7 +601,21 @@ export function computeEstimate(c) {
   const marginBuffered = clientPrice > 0 ? Math.round((netProfitBuffered / clientPrice) * 100) : 0; // 보수적(예비비 포함) 마진
 
   // 수금 계획 (기본 계약금 30 / 중도 40 / 잔금 30)
-  const plan = c?.paymentPlan || { deposit: 30, mid: 40, balance: 30 };
+  const planInput = c?.paymentPlan || {};
+  const plan = {
+    deposit: Number.isFinite(Number(planInput.deposit)) ? Number(planInput.deposit) : 30,
+    mid: Number.isFinite(Number(planInput.mid)) ? Number(planInput.mid) : 40,
+    balance: Number.isFinite(Number(planInput.balance)) ? Number(planInput.balance) : 30,
+  };
+  const planSum = plan.deposit + plan.mid + plan.balance;
+  const depositAmount = Math.round((finalPrice * plan.deposit) / 100);
+  const midAmount = Math.round((finalPrice * plan.mid) / 100);
+  const balanceAmount = Math.max(0, Math.round(finalPrice - depositAmount - midAmount));
+  const payments = {
+    deposit: { ratio: plan.deposit, amount: depositAmount },
+    mid: { ratio: plan.mid, amount: midAmount },
+    balance: { ratio: plan.balance, amount: balanceAmount },
+  };
   const paid = toNum(c?.paidAmount);
   const remaining = Math.max(0, finalPrice - paid);
   const balanceRatio = plan.balance;
@@ -567,6 +631,8 @@ export function computeEstimate(c) {
     trade,
     tradeLabel: info.short,
     targetSummary,
+    clientSummary: clientSafeText(targetSummary),
+    materialSet: mset,
     items: markedItems,
     excludedIds,
     excludedAmount,
@@ -605,6 +671,8 @@ export function computeEstimate(c) {
     minApplied,
     minJob,
     plan,
+    planSum,
+    payments,
     paid,
     remaining,
     balanceRatio,
