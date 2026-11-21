@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowUpFromLine, ExternalLink, HardHat, Loader2, MapPin, Truck } from 'lucide-react';
 import { BUFFER_OPTIONS, REGIONS } from '../lib/constants.js';
-import { DEFAULT_RATES, RATE_FIELDS, cloneRates, getRate, mergeRates, perPyeong, setRate } from '../lib/rates.js';
+import { DEFAULT_RATES, RATE_FIELDS, cloneRates, getRate, mergeRates, normalizeRates, perPyeong, rateRaw, setRate } from '../lib/rates.js';
 import { resetState } from '../lib/storage.js';
 import { GEMINI_KEY_URL, getGeminiKey, setGeminiKey, testGeminiKey } from '../lib/gemini.js';
 import { getSupplier, saveSupplier } from '../lib/supplier.js';
@@ -51,7 +51,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
         apiKey: apiKey.trim(),
         useAi: !!apiKey.trim(),
         agencyFeeRate: Number(agencyFeeRate) || 10,
-        rates,
+        rates: normalizeRates(rates),
       },
     }));
     setGeminiKey(apiKey.trim());
@@ -192,11 +192,20 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
                         <span className="ml-1 font-normal text-slate-400">{f.unit}</span>
                       </span>
                       <input
-                        type="number"
+                        type="text"
                         step="0.5"
                         inputMode="decimal"
-                        value={getRate(rates, f.path)}
-                        onChange={(e) => setRates((prev) => setRate(prev, f.path, e.target.value))}
+                        value={rateRaw(rates, f.path)}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d.]/g, '');
+                          setRates((prev) => setRate(prev, f.path, v));
+                        }}
+                        onBlur={(e) => {
+                          // 다 지우고 다른 칸으로 넘어가면 기본 단가로 되돌린다 (0원 인건비 방지)
+                          if (String(e.target.value).trim() === '') {
+                            setRates((prev) => setRate(prev, f.path, getRate(DEFAULT_RATES, f.path, 0)));
+                          }
+                        }}
                         aria-label={f.label}
                         className="num w-full border-0 bg-transparent p-0 text-base font-extrabold text-ink outline-none focus:ring-0"
                       />

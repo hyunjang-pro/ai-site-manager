@@ -500,7 +500,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
                       inputMode="numeric"
                       value={c.paymentPlan?.[p.key] ?? 0}
                       onChange={(e) =>
-                        update({ paymentPlan: { ...(c.paymentPlan || {}), [p.key]: Number(e.target.value) || 0 } })
+                        update({ paymentPlan: { ...(c.paymentPlan || {}), [p.key]: e.target.value.replace(/[^\d.]/g, '') } })
                       }
                       aria-label={`${p.label} 비율`}
                     />

@@ -1423,6 +1423,45 @@ async function main() {
     await page.waitForTimeout(300);
   });
 
+  await step('설정 — 단가 칸을 완전히 지우고 새 숫자 입력', async () => {
+    await openSettings();
+    const modal = page.locator('[role=dialog]');
+    const field = modal.getByLabel('철거 기공', { exact: true });
+    record('단가: 철거 기공 입력칸 있음', (await field.count()) === 1);
+    const before = await field.inputValue();
+    await field.fill('');
+    await page.waitForTimeout(200);
+    const cleared = await field.inputValue();
+    record('단가: 다 지우면 빈칸 (0이 안 남음)', cleared === '', `"${cleared}"`);
+    await field.fill('30');
+    await page.waitForTimeout(200);
+    record('단가: 새 숫자 입력됨', (await field.inputValue()) === '30', await field.inputValue());
+    // 빈칸으로 두고 다른 곳을 누르면 기본 단가로 되돌아온다(0원 인건비 방지)
+    await field.fill('');
+    await field.press('Tab');
+    await page.waitForTimeout(300);
+    record('단가: 빈칸으로 나가면 기본값 복귀', (await field.inputValue()) === '27', await field.inputValue());
+    // 저장 → 다시 열어도 입력한 값이 남는지
+    await field.fill('30');
+    await page.getByRole('button', { name: '저장하기' }).click();
+    await page.waitForTimeout(500);
+    const stored = await page.evaluate(() => {
+      try {
+        return JSON.parse(localStorage.getItem('aiSiteManager.v1') || '{}')?.settings?.rates?.labor?.demolition;
+      } catch (e) {
+        return null;
+      }
+    });
+    record('단가: 저장하면 30으로 저장', Number(stored) === 30, String(stored));
+    await openSettings();
+    const reopened = page.locator('[role=dialog]').getByLabel('철거 기공', { exact: true });
+    record('단가: 다시 열어도 30이 남음', (await reopened.inputValue()) === '30', await reopened.inputValue());
+    // 뒤 테스트 금액에 영향 없게 원래 값으로 되돌린다
+    await reopened.fill(String(before));
+    await page.getByRole('button', { name: '저장하기' }).click();
+    await page.waitForTimeout(500);
+  });
+
   await step('새 현장 — 현장 사진은 0초 첨부 · AI 정밀 분석', async () => {
     await goHome();
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();

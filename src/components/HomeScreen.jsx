@@ -463,7 +463,7 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
               <input
                 inputMode="numeric"
                 value={c.paidAmount ?? ''}
-                onChange={(e) => onUpdate({ paidAmount: e.target.value === '' ? 0 : Number(e.target.value) || 0 })}
+                onChange={(e) => onUpdate({ paidAmount: e.target.value.replace(/[^\d.]/g, '') })}
                 aria-label="실제로 받은 돈"
                 className="num mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-base font-extrabold text-ink outline-none focus:border-brand focus:bg-white"
               />

@@ -847,7 +847,9 @@ function SiteCostCard({ verify, c, update, showToast }) {
         ))}
       </div>
       <p className="mt-1.5 rounded-xl bg-slate-50 px-3 py-2 text-2xs font-bold leading-4 text-ink-2">
-        부대비용 {n(verify.includedTotal)}만이 견적에 포함되어 있습니다 · 금액은 3. 답사에서 직접 고칠 수 있습니다
+        {verify.includedTotal > 0
+          ? `부대비용 ${n(verify.includedTotal)}만이 견적에 포함되어 있습니다 · 금액은 3. 답사에서 직접 고칠 수 있습니다`
+          : '이 현장은 부대비용 없이 계산했습니다 · 필요한 항목을 누르면 견적에 더해집니다'}
       </p>
     </Card>
   );

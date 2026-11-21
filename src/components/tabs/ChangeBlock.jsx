@@ -123,7 +123,7 @@ export function ChangeBlock({ c, update, showToast, num = '4' }) {
               <TextInput
                 inputMode="numeric"
                 value={parsed?.amount ?? ''}
-                onChange={(e) => setDraft({ ...(parsed || {}), amount: Number(e.target.value) || 0 })}
+                onChange={(e) => setDraft({ ...(parsed || {}), amount: e.target.value.replace(/[^\d.]/g, '') })}
                 aria-label="추가금 금액"
               />
             </Field>
@@ -131,7 +131,7 @@ export function ChangeBlock({ c, update, showToast, num = '4' }) {
               <TextInput
                 inputMode="numeric"
                 value={parsed?.days ?? ''}
-                onChange={(e) => setDraft({ ...(parsed || {}), days: Number(e.target.value) || 0 })}
+                onChange={(e) => setDraft({ ...(parsed || {}), days: e.target.value.replace(/[^\d.]/g, '') })}
                 aria-label="추가금 일정"
               />
             </Field>

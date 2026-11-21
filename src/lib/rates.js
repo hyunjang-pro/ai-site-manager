@@ -259,19 +259,46 @@ export function getRate(rates, path, fallback = 0) {
     if (cur === null || cur === undefined) return fallback;
     cur = cur[key];
   }
+  // 편집 중 빈칸('')은 0이 아니라 기본값을 쓴다 (0원 인건비로 견적이 나가지 않게)
+  if (cur === '' || cur === null) return fallback;
   const n = Number(cur);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// 입력칸에서 쓰는 '가공하지 않은' 값 — 사용자가 다 지운 순간('')을 그대로 돌려준다.
+// (예전에는 모든 입력이 즉시 Number(...)||0 으로 바뀌어 0을 지울 수 없었다)
+export function rateRaw(rates, path) {
+  let cur = rates;
+  for (const key of path) {
+    if (cur === null || cur === undefined) return '';
+    cur = cur[key];
+  }
+  return cur === undefined || cur === null ? '' : cur;
 }
 
 export function setRate(rates, path, value) {
   const next = cloneRates(rates || DEFAULT_RATES);
   let cur = next;
+  // 빈칸은 빈칸으로 둔다 — 저장할 때 normalizeRates가 기본값으로 정리한다
+  const empty = value === '' || value === null || value === undefined;
   path.forEach((key, i) => {
-    if (i === path.length - 1) cur[key] = Number(value) || 0;
+    if (i === path.length - 1) cur[key] = empty ? '' : Number(value) || 0;
     else {
       if (!cur[key] || typeof cur[key] !== 'object') cur[key] = {};
       cur = cur[key];
     }
   });
+  return next;
+}
+
+// 저장 직전 정리 — 비어 있거나 숫자가 아닌 칸은 기본 단가표 값으로 되돌린다.
+export function normalizeRates(rates) {
+  const next = cloneRates(rates || DEFAULT_RATES);
+  const fix = (path) => {
+    const raw = rateRaw(next, path);
+    if (raw === '' || !Number.isFinite(Number(raw))) setRate(next, path, getRate(DEFAULT_RATES, path, 0));
+  };
+  RATE_FIELDS.forEach((group) => group.fields.forEach((f) => fix(f.path)));
+  [['buffer'], ['elevator'], ['minimumJob']].forEach(fix);
   return next;
 }
