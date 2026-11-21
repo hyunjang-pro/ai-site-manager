@@ -66,6 +66,7 @@ function baseCase(overrides = {}) {
     smsStrength: true,
     bid: null,
     customClientPrice: '',
+    calledPrice: '', // 내가 손님께 실제로 부른 금액(만원) — 비우면 앱 계산가로 계산
     includeVat: false,
     stage: 'prelim',
     collection: 'deposit_wait',

@@ -1090,7 +1090,17 @@ export function computeEstimate(c) {
   const adjustmentTotal = Math.round(
     changeLogs.reduce((sum, l) => sum + (l?.type === 'decrease' ? -1 : 1) * (Number(l?.amount) || 0), 0)
   );
-  clientPrice = Math.max(0, baseClientPrice + adjustmentTotal);
+
+  // 앱이 계산한 최종 견적(참고용) — 단가·변동을 모두 반영한 값
+  const appClientPrice = Math.max(0, baseClientPrice + adjustmentTotal);
+
+  // 내가 부른 금액(손님에게 실제로 부른 합의가) — 있으면 이 금액이 최종 견적이다.
+  // 답사 변동·자재 변경을 이미 반영해 손님과 말한 숫자이므로, 앱 계산가로 다시 더하지 않는다.
+  const calledRaw = c?.calledPrice;
+  const hasCalledPrice =
+    calledRaw !== null && calledRaw !== undefined && String(calledRaw).trim() !== '' && Number.isFinite(Number(calledRaw));
+  const calledPrice = hasCalledPrice ? Math.max(0, Math.round(Number(calledRaw))) : null;
+  clientPrice = calledPrice !== null ? calledPrice : appClientPrice;
 
   const vatAmount = c?.includeVat ? Math.round(clientPrice * 0.1) : 0;
   const finalPrice = clientPrice + vatAmount;
@@ -1147,6 +1157,7 @@ export function computeEstimate(c) {
     detailSurcharge: detail,
     lifting,
     crew,
+    crewCosts: crew,
     totalDirectCost,
     bufferRate,
     costBuffer,
@@ -1156,6 +1167,9 @@ export function computeEstimate(c) {
     marginTarget: safeMargin,
     suggestedPrice,
     baseClientPrice,
+    appClientPrice,
+    calledPrice,
+    hasCalledPrice,
     adjustmentTotal,
     changeLogs,
     clientPrice,
@@ -1166,8 +1180,16 @@ export function computeEstimate(c) {
     marginPercent,
     isBelowBreakEven,
     // 예상 범위: 최소(인건비·단순 공정) ~ 기준 ~ 최대(폐기물·양중·자재 추가)
-    rangeMin: Math.round((customPrice !== null ? baseClientPrice * 0.95 : rangePriceFromCost(costWithBuffer * 0.96)) + adjustmentTotal),
-    rangeMax: Math.round((customPrice !== null ? baseClientPrice * 1.12 : rangePriceFromCost(costWithBuffer * 1.18)) + adjustmentTotal),
+    rangeMin: Math.round(
+      calledPrice !== null
+        ? calledPrice * 0.95
+        : (customPrice !== null ? baseClientPrice * 0.95 : rangePriceFromCost(costWithBuffer * 0.96)) + adjustmentTotal
+    ),
+    rangeMax: Math.round(
+      calledPrice !== null
+        ? calledPrice * 1.12
+        : (customPrice !== null ? baseClientPrice * 1.12 : rangePriceFromCost(costWithBuffer * 1.18)) + adjustmentTotal
+    ),
     rangeBase: clientPrice,
     minimumDefense: Math.round(costWithBuffer * 1.05),
     minApplied,

@@ -669,6 +669,91 @@ async function main() {
     await shotAt('33-profit.png', '가견적 → 최종 견적', -110);
   });
 
+
+  await step('4단계 — 내가 부른 금액 기준 재계산', async () => {
+    await goTab(4);
+    const t0 = await mainText();
+    const input = page.getByLabel('내가 부른 금액(만원)');
+    record('부른 금액: 4단계 최상단 입력칸', (await input.count()) === 1);
+    const appMatch = t0.match(/앱 계산가 ([\d,]+)만원/);
+    const costMatch = t0.match(/보수적 원가 ([\d,]+)만원은 이렇게 나옵니다/);
+    const bufMatch = t0.match(/돌발 예비비 [\d.]+%\(([\d,]+)\)/);
+    const appPrice = appMatch ? Number(appMatch[1].replace(/,/g, '')) : 0;
+    const cost = costMatch ? Number(costMatch[1].replace(/,/g, '')) : 0;
+    const buffer = bufMatch ? Number(bufMatch[1].replace(/,/g, '')) : 0;
+    record('부른 금액: 기본값 = 앱 계산가', appPrice > 0 && (await input.inputValue()) === String(appPrice), `${await input.inputValue()} vs ${appPrice}`);
+
+    const called = appPrice - 50;
+    await input.fill(String(called));
+    await page.waitForTimeout(400);
+    const t1 = await mainText();
+    const net = Number((await page.getByTestId('called-net').innerText()).replace(/[^\d-]/g, ''));
+    record('부른 금액: 순익 = 부른 금액 − 보수적 원가', net === called - cost, `${net} vs ${called - cost}`);
+    const margin = Number((await page.getByTestId('called-margin').innerText()).replace(/[^\d-]/g, ''));
+    record('부른 금액: 남는 비율 즉시 반영', margin === Math.round(((called - cost) / called) * 100), `${margin}%`);
+    record(
+      '부른 금액: 계약금·중도금·잔금 분할',
+      t1.includes(`${Math.round(called * 0.3).toLocaleString('ko-KR')}`) && t1.includes(`${Math.round(called * 0.4).toLocaleString('ko-KR')}`),
+      `계약금 ${Math.round(called * 0.3)} · 중도금 ${Math.round(called * 0.4)}`
+    );
+    record('부른 금액: 빠른 +-·원복 버튼', (await page.getByRole('button', { name: '플러스 10만원' }).count()) === 1 && (await page.getByRole('button', { name: '앱 계산가로 되돌리기' }).count()) === 1);
+    await page.getByRole('button', { name: '플러스 10만원' }).click();
+    await page.waitForTimeout(250);
+    record('부른 금액: +10만 즉시 반영', (await input.inputValue()) === String(called + 10), await input.inputValue());
+    await input.fill(String(called));
+    await page.waitForTimeout(300);
+
+    // 원가 이하로 부르면 적자 경고
+    await input.fill(String(cost - 20));
+    await page.waitForTimeout(400);
+    const tBad = await mainText();
+    record('부른 금액: 원가 이하 → 적자 경고', tBad.includes('적자') && tBad.includes('적자 · 원가 이하'));
+    record('부른 금액: 적자는 순익 마이너스', (await page.getByTestId('called-net').innerText()).includes('-'));
+
+    await page.getByRole('button', { name: '앱 계산가로 되돌리기' }).click();
+    await page.waitForTimeout(400);
+    record('부른 금액: 앱 계산가로 되돌리기', (await input.inputValue()) === String(appPrice), await input.inputValue());
+
+    // 다시 내가 부른 금액으로 확정 → 문서·홈까지 연동 확인
+    await input.fill(String(called));
+    await page.waitForTimeout(400);
+    await shotAt('33b-called.png', '내가 부른 금액', -80);
+
+    await goTab(6);
+    const docTxt = await page.locator('.print-area').innerText();
+    const subtotal = Number(await page.locator('[data-testid=quote-subtotal]').getAttribute('data-amount'));
+    const total = Number(await page.locator('[data-testid=quote-total]').getAttribute('data-amount'));
+    const lineSum = await page.evaluate(() =>
+      [...document.querySelectorAll('.print-area [data-quote-line]')].reduce(
+        (s, el) => s + Number(el.getAttribute('data-amount') || 0),
+        0
+      )
+    );
+    record('문서: 공급가 = 내가 부른 금액', subtotal === called, `${subtotal} vs ${called}`);
+    record('문서: 줄 합계 = 공급가(1만원 오차 없음)', lineSum === subtotal, `${lineSum} vs ${subtotal}`);
+    record('문서: 합계 = 부른 금액', total === called, `${total} vs ${called}`);
+    record(
+      '문서: 자재비·인건비·폐기물·식비 항목',
+      ['자재비', '인건비', '폐기물 처리·운반비', '식비'].every((x) => docTxt.includes(x)),
+      docTxt.split('\n').filter((l) => /비|료/.test(l)).slice(0, 6).join(' / ')
+    );
+    record('문서: 수량·단가 표기', docTxt.includes('수량') && docTxt.includes('단가'));
+    const leakWords = ['순익', '마진', '알선료', '예비비', '남는', '일당', '원가'].filter((w) => docTxt.includes(w));
+    record('문서: 내부 수익·원가 용어 0건', leakWords.length === 0, leakWords.join(', '));
+    record('문서: 견적번호·유효기간', /견적번호/.test(docTxt) && /유효기간/.test(docTxt));
+
+    // 홈 장부 카드 금액·순익도 같은 금액으로
+    await goHome();
+    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').waitFor();
+    const cardTxt = await page.locator('div.card').filter({ hasText: '구미 형곡동 32평 아파트 욕실 1칸' }).first().innerText();
+    record('홈 카드: 표시 금액 = 내가 부른 금액', cardTxt.includes(`${called.toLocaleString('ko-KR')}만원`), cardTxt.split('\n').slice(0, 6).join(' / '));
+    const homeNet = Number((cardTxt.match(/순익 (-?[\d,]+)만/) || [])[1]?.replace(/,/g, '') || 0);
+    const expectHomeNet = called - (cost - buffer);
+    record('홈 카드: 순익 = 부른 금액 − 기본원가', Math.abs(homeNet - expectHomeNet) <= 2, `${homeNet} vs ${expectHomeNet}`);
+    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').click();
+    await page.getByLabel('받은 내용').waitFor();
+  });
+
   await step('5단계 시공 — 숫자·날짜 버그', async () => {
     await goTab(5);
     const days = page.getByLabel('공사기간', { exact: true });
@@ -687,10 +772,50 @@ async function main() {
     record('날씨: 예보 표시(계절 안내 아님)', !wx.includes('예보는 16일 앞까지만 나옵니다'));
   });
 
+
+  await step('5단계 — 일차별 브리핑(1·2·3일차)', async () => {
+    await goTab(5);
+    await mainText();
+    const chips = page.getByRole('tab', { name: /일차 브리핑$/ });
+    record('일차: 공사기간(3일)만큼 일차 칩', (await chips.count()) === 3, String(await chips.count()));
+    const panel = () => page.locator('details').filter({ hasText: '일차별 투입 인원' }).first();
+    const t1 = await panel().innerText();
+    record('일차: 1일차 날짜·공정', t1.includes('1일차') && t1.includes(mmdd(TODAY)) && t1.includes('철거·방수'), t1.match(/1일차 · [^\n]*/)?.[0] || '');
+    record('일차: 2일차 날짜 표시', t1.includes(`2일차`) && t1.includes(mmdd(addDaysISO(TODAY, 1))), t1.match(/2일차\s*[^\n]*/)?.[0] || '');
+    const day1Crew = t1.split('\n').find((l) => /기공|인부|보조/.test(l)) || '';
+
+    await page.getByRole('tab', { name: '2일차 브리핑' }).click();
+    await page.waitForTimeout(350);
+    const t2 = await panel().innerText();
+    record('일차: 2일차 브리핑으로 전환', t2.includes('담수 확인·타일') && !t2.includes('기존 타일·도기 철거'), t2.match(/2일차 · [^\n]*/)?.[0] || '');
+    record('일차: 2일차는 2일차 날짜 강조', t2.includes(mmdd(addDaysISO(TODAY, 1))));
+    record('일차: 2일차 장비도 다름', t2.includes('레벨링 클립') && !t2.includes('방수재·롤러'));
+    const day2Crew = t2.split('\n').find((l) => /기공|인부|보조/.test(l)) || '';
+    record('일차: 일차마다 브리핑 내용이 바뀜', t2.split('\n').slice(0, 14).join('|') !== t1.split('\n').slice(0, 14).join('|'), `${day1Crew} / ${day2Crew}`);
+
+    await page.getByRole('tab', { name: '3일차 브리핑' }).click();
+    await page.waitForTimeout(350);
+    const t3 = await panel().innerText();
+    record('일차: 3일차 마감·검수', t3.includes('준공 검수') && t3.includes('준공 사진 3컷'), t3.match(/3일차 · [^\n]*/)?.[0] || '');
+    record('일차: 마지막 날은 보조 철수(기공만)', !/보조 1명/.test(t3.split('\n').slice(0, 8).join(' ')), t3.match(/필요 인원[\s\S]{0,40}/)?.[0]?.replace(/\n/g, ' ') || '');
+    await shotAt('34b-day3.png', '일차별 투입 인원', -90);
+
+    // 1일 공사는 1일차만
+    const days = page.getByLabel('공사기간', { exact: true });
+    await days.fill('1');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(450);
+    record('일차: 1일 공사는 1일차만', (await chips.count()) === 1, String(await chips.count()));
+    await days.fill('3');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(450);
+    record('일차: 3일로 되돌리면 3칩', (await chips.count()) === 3, String(await chips.count()));
+  });
+
   await step('5단계 시공 — 타임라인·출근 안내·사진·안내문', async () => {
     const t = await mainText();
     record('시공: 공종 타임라인', t.includes('D-2 · D-1 사전 준비'));
-    record('시공: 투입 인원·차량 브리핑', t.includes('오늘 투입 인원 · 차량 · 현장 브리핑') && t.includes('필요 인원') && t.includes('필요 차량'));
+    record('시공: 투입 인원·차량 브리핑', t.includes('일차별 투입 인원 · 차량 · 현장 브리핑') && t.includes('필요 차량'));
     record('시공: 현장 환경·장비', t.includes('현장 환경') && t.includes('챙길 장비'));
     record('시공: 숨고 원문·배차 요청 없음', !t.includes('전날 18시까지') && !t.includes('[배차 요청]') && !t.includes('가능한 빨리'));
     record('시공: 작업 전·후 사진(인테리어)', t.includes('작업 전 전체 사진') && t.includes('자재 입고 사진'));

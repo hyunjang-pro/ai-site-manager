@@ -22,6 +22,29 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
 
   const initial = Number(c.negotiation?.proposal) || listPrice;
   const [proposal, setProposal] = useState(initial);
+
+  // ---- 내가 부른 금액(손님 합의가) — 이 화면의 기준 금액 ----
+  // 저장값이 없으면 앱이 계산한 최종 견적이 기본값이다.
+  const appPrice = Math.round(calc.appClientPrice);
+  const storedCalled = c.calledPrice;
+  const noCalled = storedCalled === '' || storedCalled === null || storedCalled === undefined;
+  const [calledDraft, setCalledDraft] = useState(() => (noCalled ? String(appPrice) : String(storedCalled)));
+  useEffect(() => {
+    setCalledDraft(noCalled ? String(appPrice) : String(storedCalled));
+  }, [storedCalled, appPrice, noCalled]);
+  const commitCalled = (v) => {
+    const clean = String(v ?? '').replace(/[^0-9]/g, '').slice(0, 7);
+    setCalledDraft(clean);
+    update({ calledPrice: clean });
+  };
+  const draftNum = Number(calledDraft);
+  const effectiveCalled = String(calledDraft).trim() === '' || !Number.isFinite(draftNum) ? appPrice : Math.max(0, Math.round(draftNum));
+  const nudgeCalled = (delta) => commitCalled(String(Math.max(0, effectiveCalled + delta)));
+  const restoreAppPrice = () => {
+    setCalledDraft(String(appPrice));
+    update({ calledPrice: '' });
+    showToast(`앱 계산가 ${appPrice.toLocaleString('ko-KR')}만원으로 되돌렸습니다`);
+  };
   const [negoOpen, setNegoOpen] = useState(false);
   useEffect(() => {
     // 손님이 실제로 깎자고 했을 때만 펼친다
@@ -187,6 +210,125 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
 
   return (
     <div className="space-y-4">
+      {/* 내가 부른 금액 — 4단계의 기준 금액. 바꾸면 순익·수금·홈 카드·견적서가 같이 바뀐다 */}
+      <Card className="overflow-hidden p-0 ring-2 ring-brand/30">
+        <div className="flex items-center justify-between gap-2 bg-brand-soft px-4 pb-2 pt-3">
+          <p className="text-[13px] font-extrabold text-brand-strong">내가 부른 금액 (손님 합의가)</p>
+          <span className="rounded-lg bg-white px-1.5 py-0.5 text-2xs font-extrabold text-brand">이 금액으로 계산</span>
+        </div>
+        <div className="p-4">
+          <div className="flex items-end gap-2">
+            <input
+              inputMode="numeric"
+              aria-label="내가 부른 금액(만원)"
+              value={calledDraft}
+              onChange={(e) => commitCalled(e.target.value)}
+              onBlur={() => {
+                if (String(calledDraft).trim() === '') restoreAppPrice();
+              }}
+              className="num w-full min-w-0 border-b-2 border-slate-200 bg-transparent pb-1 text-right text-[34px] font-black leading-none tracking-tight text-ink outline-none placeholder:text-slate-300 focus:border-brand"
+              placeholder={String(appPrice)}
+            />
+            <span className="shrink-0 pb-2 text-sm font-bold text-ink-3">만원</span>
+          </div>
+
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {[-10, -5, 5, 10].map((d) => (
+              <SmallButton key={d} className="min-w-[58px] flex-1" onClick={() => nudgeCalled(d)} aria-label={`${d > 0 ? '플러스' : '마이너스'} ${Math.abs(d)}만원`}>
+                {d > 0 ? `+${d}` : d}만
+              </SmallButton>
+            ))}
+            <SmallButton
+              variant={noCalled ? 'soft' : 'white'}
+              className="flex-[1.4] whitespace-nowrap"
+              onClick={restoreAppPrice}
+              disabled={noCalled}
+            >
+              앱 계산가로 되돌리기
+            </SmallButton>
+          </div>
+
+          <p className="mt-2 text-2xs font-semibold leading-4 text-ink-3">
+            앱 계산가 <b className="num text-ink-2">{pers(appPrice)}만원</b>
+            {calc.adjustmentTotal ? ` (답사 변동 ${calc.adjustmentTotal > 0 ? '+' : ''}${calc.adjustmentTotal}만 반영)` : ''}
+            {' · '}비우면 앱 계산가로 계산합니다
+          </p>
+
+          {/* 이 금액에서 손에 쥐는 돈 */}
+          <div
+            className={cx(
+              'mt-3 rounded-2xl p-3 ring-1',
+              calc.netProfitBuffered <= 0
+                ? 'bg-rose-50 ring-rose-200'
+                : effectiveCalled < defense
+                ? 'bg-amber-50 ring-amber-200'
+                : 'bg-emerald-50 ring-emerald-200'
+            )}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold text-ink-3">손에 쥐는 돈</p>
+                <p
+                  data-testid="called-net"
+                  className={cx(
+                    'num mt-0.5 whitespace-nowrap text-[clamp(26px,7.5vw,32px)] font-black leading-9 tracking-tight',
+                    calc.netProfitBuffered > 0 ? 'text-emerald-600' : 'text-rose-600'
+                  )}
+                >
+                  {calc.netProfitBuffered > 0 ? '+' : ''}
+                  {pers(calc.netProfitBuffered)}
+                  <span className="ml-1 text-sm font-bold text-ink-3">만원</span>
+                </p>
+              </div>
+              <Pill tone={calc.netProfitBuffered <= 0 ? 'bad' : calc.marginBuffered < 12 || effectiveCalled < defense ? 'warn' : 'ok'}>
+                {calc.netProfitBuffered <= 0 ? '적자 · 원가 이하' : calc.marginBuffered < 12 || effectiveCalled < defense ? '위험 · 방어선 이하' : '좋음'}
+              </Pill>
+            </div>
+            <p className="mt-1 text-sm font-extrabold text-ink-2">
+              남는 비율 <b data-testid="called-margin" className="num text-ink">{calc.marginBuffered}%</b>
+              <span className="ml-1 text-2xs font-bold text-ink-3">(보수적 원가 {pers(cost)}만 기준)</span>
+            </p>
+            <p className="mt-1 rounded-xl bg-white/70 px-2.5 py-1.5 text-[12.5px] font-extrabold text-emerald-800">
+              하루 뛰면 {pers(dailyProfit)}만원 · 공사 {workDays}일 기준
+              <span className="ml-1 text-2xs font-bold text-emerald-700">(총 남는 돈 ÷ 공사일수)</span>
+            </p>
+          </div>
+
+          {calc.netProfitBuffered <= 0 ? (
+            <p className="mt-2 rounded-xl bg-rose-600 px-3 py-2 text-[13px] font-extrabold leading-5 text-white">
+              이 금액은 보수적 원가({pers(cost)}만)보다 {pers(Math.abs(calc.netProfitBuffered))}만원 적자입니다. 하자·추가비 한 번이면 그대로 손해입니다.
+            </p>
+          ) : effectiveCalled < defense ? (
+            <p className="mt-2 rounded-xl bg-amber-100 px-3 py-2 text-[13px] font-extrabold leading-5 text-amber-900">
+              최소 방어선({pers(defense)}만)보다 낮습니다. 이 아래로 계약하면 내 일당·유류비도 못 건지는 선입니다.
+            </p>
+          ) : null}
+
+          {/* 이 금액이 어디로 나가는지 — 수금 분할과 손님 문서 총액 */}
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
+            {[
+              { key: 'deposit', label: '계약금' },
+              { key: 'mid', label: '중도금' },
+              { key: 'balance', label: '잔금' },
+            ].map((p) => (
+              <div key={p.key} className="rounded-xl bg-slate-50 px-2 py-1.5 text-center">
+                <p className="text-2xs font-bold text-ink-3">
+                  {p.label} {calc.payments[p.key].ratio}%
+                </p>
+                <p className="num mt-0.5 text-[15px] font-extrabold text-ink">
+                  {Math.round(calc.payments[p.key].amount).toLocaleString('ko-KR')}
+                  <span className="ml-0.5 text-2xs font-bold text-ink-3">만</span>
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-2xs font-semibold leading-4 text-ink-3">
+            6단계 손님 견적서 총액도 <b className="num text-ink-2">{pers(calc.finalPrice)}만원</b>
+            {c.includeVat ? ' (부가세 포함)' : ' (부가세 별도)'}으로 같습니다. 홈 장부 카드 금액·순익도 함께 바뀝니다.
+          </p>
+        </div>
+      </Card>
+
       <SignalBanner signal={aiSignalOf(c.aiSurveySignal) || aiSignalOf(c.aiAnalysis) || finalSignal(calc, c)} caption="답사 후 원가·리스크와 고객 희망가를 함께 본 판정입니다." />
 
       {/* 가견적 → 최종 비교 */}
@@ -208,6 +350,11 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
             <p className="num mt-0.5 whitespace-nowrap text-[clamp(18px,6vw,24px)] font-black text-brand-strong">{pers(calc.clientPrice)}<span className="ml-0.5 text-2xs font-bold text-ink-3">만</span></p>
           </div>
         </div>
+        {calc.hasCalledPrice ? (
+          <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-2xs font-bold leading-4 text-brand-strong">
+            최종 금액은 <b>내가 부른 금액 {pers(calc.calledPrice)}만원</b>입니다. 앱 계산가는 {pers(calc.appClientPrice)}만원이고, 아래 답사 변동은 참고 내역입니다.
+          </p>
+        ) : null}
         {(calc.changeLogs || []).length ? (
           <div className="mt-2 space-y-1">
             {(calc.changeLogs || []).map((l) => {
@@ -232,26 +379,17 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         )}
       </Card>
 
-      {/* 손에 쥐는 돈 + 하루 순수익 */}
+      {/* 원가·방어선 — 내가 부른 금액에서 무엇이 남는지의 근거 */}
       <Card className="p-4">
-        <div className="flex items-start justify-between">
-          <p className="text-xs font-bold text-ink-3">이 현장에서 손에 쥐는 돈 (보수적)</p>
-          <Pill tone={calc.netProfitBuffered <= 0 ? 'bad' : calc.marginBuffered < 12 ? 'warn' : 'ok'}>
-            {calc.netProfitBuffered <= 0 ? '원가 이하' : calc.marginBuffered < 12 ? '위험' : '좋음'}
-          </Pill>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-base font-extrabold text-ink">보수적 원가 {pers(cost)}만원은 이렇게 나옵니다</p>
+          <Pill tone="plain">원가 근거</Pill>
         </div>
-        <p className={cx('num mt-1 whitespace-nowrap text-[clamp(28px,8vw,34px)] font-black leading-[42px] tracking-tight', calc.netProfitBuffered > 0 ? 'text-emerald-600' : 'text-rose-600')}>
-          {pers(calc.netProfitBuffered)}
-          <span className="ml-1 text-base font-bold text-ink-3">만원</span>
-        </p>
-        <p className="mt-1 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-extrabold text-emerald-800">
-          하루 뛰면 {pers(dailyProfit)}만원 · 공사 {workDays}일 기준
-          <span className="ml-1 text-2xs font-bold text-emerald-700">(총 남는 돈 ÷ 공사일수)</span>
+        <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
+          이 원가를 빼고 남는 돈이 위 ‘손에 쥐는 돈’입니다. 원가를 줄이면 같은 금액에서 더 남습니다.
         </p>
 
-        {/* 왜 이 금액인지 — 산출 설명 */}
-        <div className="mt-3 rounded-2xl bg-slate-50 p-3">
-          <p className="text-sm font-extrabold text-ink">보수적 원가 {pers(cost)}만원은 이렇게 나옵니다</p>
+        <div className="mt-2 rounded-2xl bg-slate-50 p-3">
           <p className="mt-1 text-[13px] font-semibold leading-5 text-ink-2">
             인건비 {pers(calc.laborTotal)} + 폐기물 {pers(calc.wasteTotal)} + 자재·운반 {pers(calc.materialTotal)} + 장비{' '}
             {pers(calc.equipTotal + (calc.lifting?.cost || 0))} = 기본 원가 <b className="text-ink">{pers(baseCost)}</b>
@@ -313,33 +451,29 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         <div className="mt-3 grid grid-cols-3 gap-1.5">
           <Metric label="보수적 원가" value={cost} />
           <Metric label="최소 방어선" value={defense} tone="warn" />
-          <Metric label="부른 금액" value={listPrice} />
+          <Metric label="내가 부른 금액" value={listPrice} />
         </div>
       </Card>
 
       {/* 원가·마진·수금 — 항상 펼쳐 둔다 */}
       <SectionCard fold num="2" title="원가·마진·수금 조절" subtitle="여기 숫자를 바꾸면 3단계 입금 카드와 홈 장부 금액까지 함께 바뀝니다.">
         <div className="space-y-3">
-          <Field label={`남는 비율 ${c.marginRate}%`} hint="고객에게 받는 금액 = 원가 ÷ (1 − 남는 비율)">
+          <Field label={`남는 비율 ${c.marginRate}%`} hint="고객에게 받는 금액 = 원가 ÷ (1 − 남는 비율). 움직이면 ‘내가 부른 금액’을 지우고 이 비율로 다시 계산합니다.">
             <input
               type="range"
               min={5}
               max={55}
               step={1}
               value={Number(c.marginRate) || 20}
-              onChange={(e) => update({ marginRate: Number(e.target.value), customClientPrice: '' })}
+              onChange={(e) => update({ marginRate: Number(e.target.value), customClientPrice: '', calledPrice: '' })}
               className="h-3 w-full accent-slate-900"
             />
           </Field>
 
-          <Field label="고객에게 받을 금액 직접 정하기 (만원)" hint="비우면 남는 비율로 자동 계산합니다.">
-            <TextInput
-              inputMode="numeric"
-              value={c.customClientPrice ?? ''}
-              onChange={(e) => update({ customClientPrice: e.target.value })}
-              placeholder={`자동: ${calc.suggestedPrice}만원`}
-            />
-          </Field>
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-2xs font-semibold leading-4 text-ink-3">
+            지금은 <b className="num text-ink-2">{pers(listPrice)}만원</b>으로 계산합니다
+            {!noCalled ? ' (내가 부른 금액)' : ` (앱 계산가 ${pers(appPrice)}만원)`}. 금액은 맨 위 ‘내가 부른 금액’에서 바꾸세요.
+          </div>
 
           <Toggle
             checked={!!c.includeVat}
@@ -644,7 +778,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
                   variant="dark"
                   className="w-full"
                   onClick={() => {
-                    update({ customClientPrice: Number(proposal) || 0 });
+                    commitCalled(String(Math.max(0, Math.round(Number(proposal) || 0))));
                     showToast(`${pers(Number(proposal))}만원으로 견적을 확정했습니다`);
                   }}
                 >

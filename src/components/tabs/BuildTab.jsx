@@ -22,6 +22,7 @@ import { wasteVehicle } from '../../lib/waste.js';
 import { materialSetFor, BRAND_PRICES } from '../../lib/materials.js';
 import { hasInteriorStyle, hasScope } from '../../lib/constants.js';
 import { estimateWorkDays } from '../../lib/schedule.js';
+import { buildDayPlans } from '../../lib/dayPlan.js';
 import { kstToday, addDaysISO, korDateLabel } from '../../lib/date.js';
 import { BigButton, Card, CheckRow, Details, Field, Fold, Pill, ProgressTrack, SectionCard, SmallButton, TextInput, WarningBox, cx } from '../ui.jsx';
 import { copyText } from '../../lib/clipboard.js';
@@ -258,6 +259,18 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
       ? '급배수·수평 및 마감 검수'
       : aiPlan?.phases?.[1]?.label || '공정·마감 검수';
   const prepLine = aiPlan?.checks?.length ? `${prepByTrade} · ${aiPlan.checks.slice(0, 2).map((x) => x.label).join(' · ')}` : prepByTrade;
+
+  // 일차별 브리핑 — 공사기간만큼 1일차·2일차…를 만들고 그날 인원·차량·작업을 보여준다
+  const crewForPlan = aiCrew.length ? aiCrew.map((p) => ({ role: p.role, count: p.count })) : crew;
+  const dayPlans = useMemo(
+    () => buildDayPlans({ c, calc, workDays, startDate, crew: crewForPlan, trade }),
+    [c, calc, workDays, startDate, crewForPlan, trade]
+  );
+  const [dayIdx, setDayIdx] = useState(0);
+  useEffect(() => {
+    if (dayIdx > dayPlans.length - 1) setDayIdx(0);
+  }, [dayPlans.length, dayIdx]);
+  const dayPlan = dayPlans[Math.min(dayIdx, dayPlans.length - 1)];
 
   return (
     <div className="space-y-4">
@@ -573,28 +586,63 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
         </div>
       </SectionCard>
 
-      {/* 오늘 투입 인원 · 차량 · 현장 브리핑 */}
+      {/* 일차별 투입 인원 · 차량 · 현장 브리핑 */}
       <SectionCard fold
         num="5"
-        title="오늘 투입 인원 · 차량 · 현장 브리핑"
-        subtitle="아침에 이 카드만 보면 누구를 몇 명, 차를 몇 대 보낼지 바로 정해집니다."
-        status={<Pill tone="info">{korDateLabel(c.startDate || c.dispatch?.date || '') || '날짜 미정'}</Pill>}
+        title="일차별 투입 인원 · 차량 · 현장 브리핑"
+        subtitle="1일차·2일차를 눌러 그날 누구를 몇 명, 차를 몇 대 보낼지 확인하세요."
+        status={<Pill tone="info">{dayPlan ? `${dayPlan.day}일차 ${dayPlan.dateLabel}` : '날짜 미정'}</Pill>}
       >
         <div className="space-y-2.5">
+          {/* 일차 선택 — 공사기간만큼 1일차·2일차… */}
+          <div role="tablist" aria-label="일차별 브리핑" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
+            {dayPlans.map((p, i) => {
+              const on = i === Math.min(dayIdx, dayPlans.length - 1);
+              return (
+                <button
+                  key={p.day}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  aria-label={`${p.day}일차 브리핑`}
+                  onClick={() => setDayIdx(i)}
+                  className={cx(
+                    'min-h-12 shrink-0 rounded-xl border px-3 text-center transition',
+                    on ? 'border-brand bg-brand-soft text-brand-strong' : 'border-slate-200 bg-white text-ink-3 active:bg-slate-50'
+                  )}
+                >
+                  <span className="block whitespace-nowrap text-sm font-extrabold">{p.day}일차</span>
+                  <span className={cx('block whitespace-nowrap text-2xs font-bold', on ? 'text-brand' : 'text-ink-3')}>{p.dateLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-2xs font-semibold leading-4 text-ink-3">
+            {workDays > 1
+              ? `공사 ${workDays}일 — 일차를 누르면 그날 브리핑으로 바뀝니다. 오늘 공정: ${dayPlan?.phase || ''}`
+              : '1일 공사 — 1일차 브리핑만 나옵니다.'}
+          </p>
+
           <div className="rounded-2xl bg-brand-soft p-3">
-            <p className="text-2xs font-extrabold text-brand">필요 인원</p>
-            <p className="mt-1 text-[15px] font-black leading-6 text-brand-strong">
-              {aiCrew.length ? aiCrew.map((p) => `${p.role} ${p.count}명`).join(' · ') : crewLine}
+            <p className="text-2xs font-extrabold text-brand">
+              {dayPlan?.day}일차 · {dayPlan?.phase}
             </p>
+            <p className="mt-1 text-[15px] font-black leading-6 text-brand-strong">{dayPlan?.crewText || crewLine}</p>
             <p className="mt-0.5 text-2xs font-semibold text-brand">
-              {trade === 'labor' ? '요청 인원 그대로 파견' : trade === 'waste' ? '상차·분리 인부' : '기공 + 보조 구성'}
+              {trade === 'labor'
+                ? '요청 인원 그대로 파견'
+                : trade === 'waste'
+                ? '상차·분리 인부'
+                : dayPlan?.isLast
+                ? '마감·검수 — 보조 인력은 철수'
+                : '기공 + 보조 구성'}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-2xl bg-slate-50 p-3">
               <p className="text-2xs font-extrabold text-ink-3">필요 차량</p>
-              <p className="mt-1 text-[13px] font-extrabold leading-5 text-ink">{vehicleLine}</p>
+              <p className="mt-1 text-[13px] font-extrabold leading-5 text-ink">{dayPlan?.vehicle || vehicleLine}</p>
             </div>
             <div className="rounded-2xl bg-slate-50 p-3">
               <p className="text-2xs font-extrabold text-ink-3">현장 환경</p>
@@ -609,8 +657,16 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
           </div>
 
           <div className="rounded-2xl bg-slate-50 p-3">
-            <p className="text-2xs font-extrabold text-ink-3">핵심 작업 · 제외사항</p>
-            <p className="mt-1 text-[13px] font-bold leading-5 text-ink">{calc.targetSummary}</p>
+            <p className="text-2xs font-extrabold text-ink-3">{dayPlan?.day}일차 핵심 작업</p>
+            <ul className="mt-1 space-y-0.5">
+              {(dayPlan?.work || []).map((w) => (
+                <li key={w} className="flex gap-1.5 text-[13px] font-bold leading-5 text-ink">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" strokeWidth={3} />
+                  <span>{w}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-2xs font-bold leading-4 text-ink-3">전체 범위: {calc.targetSummary}</p>
             {c.excludedScopes?.length ? (
               <p className="mt-1 text-2xs font-bold leading-4 text-rose-700">제외: {c.excludedScopes.map((x) => (x === 'window' ? '창호' : x)).join(' · ')}</p>
             ) : null}
@@ -619,15 +675,17 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
 
           <div className="rounded-2xl bg-amber-50 p-3">
             <p className="text-2xs font-extrabold text-amber-900">챙길 장비 · 주의사항</p>
-            <p className="mt-1 text-[12.5px] font-bold leading-5 text-amber-900">{prepLine}</p>
+            <p className="mt-1 text-[12.5px] font-bold leading-5 text-amber-900">
+              {(dayPlan?.prep?.length ? dayPlan.prep : [prepLine]).join(' · ')}
+            </p>
             {calc.lifting?.warnings?.length ? (
               <p className="mt-1 text-2xs font-semibold leading-4 text-amber-800">{calc.lifting.warnings.join(' · ')}</p>
             ) : null}
           </div>
 
           <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-            <span className="text-xs font-bold text-ink-3">출근 날짜</span>
-            <span className="text-sm font-extrabold text-ink">{startDate || c.dispatch?.date || '시공 시작일 미정'}</span>
+            <span className="text-xs font-bold text-ink-3">{dayPlan?.day}일차 출근</span>
+            <span className="text-sm font-extrabold text-ink">{dayPlan?.dateLabel || startDate || c.dispatch?.date || '시공 시작일 미정'}</span>
           </div>
         </div>
       </SectionCard>

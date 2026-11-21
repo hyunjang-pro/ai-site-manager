@@ -6,6 +6,7 @@ import { subsidyInfo, SUBSIDY_DOCS, SUBSIDY_AGENCY } from './subsidy.js';
 import { cleanOcrText } from './ocr.js';
 import { korDateLabel, addDaysISO, kstToday } from './date.js';
 import { wasteVehicle } from './waste.js';
+import { estimateWorkDays } from './schedule.js';
 import { combinedScopeSpecs } from './materials.js';
 import { combinedTitle } from './classify.js';
 import { hasScope, hasInteriorStyle, scopeList, workTypeLabel } from './constants.js';
@@ -76,151 +77,105 @@ const EXCLUDED = {
   unclassified: ['공종 확정 후 별도 협의'],
 };
 
-// 손님 견적서에 찍히는 공정 줄 — 원가 항목(노무·자재·폐기물)을 그대로 쓰지 않고
-// 고객이 이해하는 '공정 이름'으로 묶은 뒤, 견적가를 그 비율대로 나눠 담는다.
-// → 각 줄 금액의 합계는 최종 견적가와 100% 일치하고, 원가·마진은 역산할 수 없다.
-const TRADE_GROUPS = {
-  demolition: [
-    { key: 'demo', name: '철거·해체 공사', desc: '천장·벽체·바닥 마감재 철거 및 해체', ids: ['labor'] },
-    { key: 'waste', name: '폐기물 수거·반출·처리', desc: '성상 분리 후 차량 반출, 처리장 운반', ids: ['waste', 'waste_actual', 'grapple', 'waste_disposal', 'waste_truck'] },
-    { key: 'consum', name: '철거 소모품·현장 정리', desc: '마대·보양·커터날 등 소모품', ids: ['consumables', 'ticket'] },
-  ],
-  wallpaper: [
-    { key: 'wall', name: '도배 시공(벽지·부자재)', desc: '기존 벽지 제거·초배 후 벽지 시공', ids: ['wallpaper', 'submat', 'labor'] },
-    { key: 'floor', name: '장판 시공', desc: '바닥 정리 후 장판 시공', ids: ['floor'] },
-  ],
-  bathroom: [
-    { key: 'demo', name: '철거 및 폐기', desc: '기존 타일·도기 철거', ids: ['demolition'] },
-    { key: 'water', name: '방수 및 담수시험', desc: '액체방수 2회 + 48시간 담수시험', ids: ['waterproof'] },
-    { key: 'tile', name: '타일 시공(벽·바닥)', desc: '타일 자재 및 시공', ids: ['tile', 'labor'] },
-    { key: 'fixture', name: '도기·수전 교체', desc: '양변기·세면대·수전·장 설치', ids: ['fixture'] },
-    { key: 'waste', name: '욕실 폐기물 반출', desc: '타일·도기 수거 및 반출', ids: ['waste'] },
-  ],
-  kitchen: [
-    { key: 'cab', name: '싱크대·상판 설치', desc: '상·하부장 및 상판 제작·설치', ids: ['sink', 'top'] },
-    { key: 'work', name: '철거·설비·설치 공정', desc: '기존 싱크대 철거, 단수·가스 차단 후 설치', ids: ['labor', 'waste'] },
-  ],
-  tilewaterproof: [
-    { key: 'tile', name: '타일 시공', desc: '타일 자재 및 시공', ids: ['tile', 'tile_labor'] },
-    { key: 'water', name: '방수 및 담수시험', desc: '방수 2회 + 담수시험', ids: ['waterproof'] },
-    { key: 'demo', name: '기존 마감 철거', desc: '기존 타일·마감 철거', ids: ['demolition'] },
-    { key: 'waste', name: '폐기물 반출', desc: '철거재 수거·반출', ids: ['waste'] },
-  ],
-  plaster: [
-    { key: 'plaster', name: '바닥 미장', desc: '몰탈 미장 및 양생', ids: ['plaster', 'mat'] },
-    { key: 'tile', name: '타일 시공', desc: '타일 자재 및 시공', ids: ['tile', 'tile_labor'] },
-    { key: 'waste', name: '폐기물·잔재 반출', desc: '몰탈 잔재·포대 반출', ids: ['waste'] },
-  ],
-  window: [
-    { key: 'win', name: '창호·발코니 교체', desc: '창호 자재 및 시공', ids: ['window'] },
-    { key: 'demo', name: '기존 창호 철거', desc: '유리·프레임 분리', ids: ['removal'] },
-    { key: 'waste', name: '창호·유리 폐기물', desc: '분리 반출', ids: ['waste'] },
-  ],
-  waste: [
-    { key: 'dispose', name: '폐기물 처리', desc: '중간처리 및 처리확인서', ids: ['waste_disposal'] },
-    { key: 'truck', name: '수집·운반 차량', desc: '상차 및 처리장 운반', ids: ['waste_truck'] },
-    { key: 'load', name: '상차·분리 인부', desc: '성상 분리 및 상차', ids: ['labor', 'ticket'] },
-  ],
-  labor: [
-    { key: 'supply', name: '인력 지원', desc: '요청 인원·일수만큼 인력 파견', ids: ['labor'] },
-    { key: 'insurance', name: '4대보험·안전관리', desc: '법정 보험 및 안전관리', ids: ['insurance'] },
-  ],
-  repair: [
-    { key: 'repair', name: '부분 수선 작업', desc: '해당 부위 보수·교체', ids: ['labor', 'mat'] },
-    { key: 'waste', name: '자재·잔재 정리', desc: '수선 후 정리', ids: ['waste'] },
-  ],
-  carpentry: [
-    { key: 'labor', name: '목공 시공', desc: '문틀·몰딩·가구·데크 설치', ids: ['labor'] },
-    { key: 'mat', name: '목재·부자재', desc: 'MDF·각재·경첩·몰딩', ids: ['mat', 'consumables'] },
-    { key: 'waste', name: '잔재 반출', desc: '목재 잔재·포장재', ids: ['waste'] },
-  ],
-  electric: [
-    { key: 'labor', name: '전기 공사', desc: '배선·스위치·조명 설치', ids: ['labor'] },
-    { key: 'mat', name: '전기 자재', desc: '전선·콘센트·조명', ids: ['mat'] },
-  ],
-  plumbing: [
-    { key: 'labor', name: '설비·배관 공사', desc: '배관·수전·밸브 교체', ids: ['labor'] },
-    { key: 'mat', name: '배관 자재', desc: '배관·이음쇠·수전', ids: ['mat'] },
-  ],
-  film: [
-    { key: 'labor', name: '필름 시공', desc: '재단·부착·마감', ids: ['labor'] },
-    { key: 'mat', name: '필름 자재', desc: '인테리어 필름·시트지', ids: ['mat'] },
-  ],
-  groundwork: [
-    { key: 'labor', name: '터파기·다짐', desc: '기초 터파기와 다짐', ids: ['labor'] },
-    { key: 'mat', name: '골재·철근·시멘트', desc: '기초 자재', ids: ['mat'] },
-    { key: 'equip', name: '장비·반출', desc: '굴삭기·다짐 장비, 잔토 반출', ids: ['equip', 'waste'] },
-  ],
-  combined: [
-    { key: 'demo', name: '철거·해체', desc: '기존 마감 철거', ids: ['labor'] },
-    { key: 'mat', name: '자재·마감 시공', desc: '도배·타일·바닥 등 마감', ids: ['mat', 'wallpaper', 'floor', 'tile', 'fixture', 'sink', 'top'] },
-    { key: 'waste', name: '폐기물 반출·처리', desc: '철거재 반출', ids: ['waste'] },
-  ],
-};
-TRADE_GROUPS.custom = TRADE_GROUPS.combined;
-TRADE_GROUPS.unclassified = TRADE_GROUPS.combined;
-
-const SHARED_GROUPS = [
-  { key: 'carry', name: '자재·폐기물 운반 및 보양', desc: '양중·운반·보양·현장 관리 포함', ids: ['lift', 'longCarry', 'noParking', 'narrowDoor', 'materialLift', 'ladderSmall', 'protect', 'residential', 'clean', 'worktime', 'cut', 'gas', 'adminDeposit', 'deposit'] },
-  { key: 'structure', name: '구조·설비 보강', desc: '누수·배관·난방 보강 등 현장 조건 반영', ids: ['heating', 'leak', 'plumbing', 'loadBearing', 'asbestos'] },
-  { key: 'detail', name: '선택 마감·디테일 추가', desc: '고객 요청 마감·디테일 공사', ids: ['design_detail'] },
-  { key: 'min', name: '출동·마감 최소 반영', desc: '소규모 현장 출동·자재 하차·마감', ids: ['min_floor'] },
+// 고객용 견적서 내역 — 실제 업체 견적서처럼 재료비·노무비·경비(폐기물·운반·식비·차비)를 나눠 쓴다.
+// 금액은 '내가 부른 금액'(없으면 앱 계산가)을 원가 비중대로 나눈 값이라,
+// 각 줄 금액의 합계는 공급가액과 1만원 단위까지 정확히 일치하고 원가·마진은 역산할 수 없다.
+const CLIENT_COST_GROUPS = [
+  { key: 'material', name: '자재비', desc: '마감재·부자재 (아래 사용 자재 참조)', unit: '식' },
+  { key: 'labor', name: '인건비 (노무비)', desc: '기공·보조 인력 품삯', unit: '명·일' },
+  { key: 'meal', name: '식비', desc: '현장 인력 식대', unit: '명·일' },
+  { key: 'travel', name: '원거리 교통비', desc: '현장 거리 기준 추가 운행비', unit: '식' },
+  { key: 'waste', name: '폐기물 처리·운반비', desc: '철거 폐기물 상차·운반·처리', unit: '대' },
+  { key: 'equip', name: '장비 사용료', desc: '사다리차·집게차 등 장비 사용', unit: '식' },
+  { key: 'extra', name: '현장 추가 공사', desc: '답사에서 확인된 추가 작업', unit: '식' },
 ];
 
-function combinedScopeGroups(scopes = []) {
-  const out = [];
-  if (scopes.includes('demolition')) out.push({ key: 'demo', name: '철거·해체', desc: '기존 마감 철거·폐기물 반출', ids: ['labor', 'waste'] });
-  if (scopes.includes('wallpaper')) out.push({ key: 'wall', name: '도배·장판', desc: '벽지·장판 자재 및 시공', ids: ['wallpaper', 'floor', 'submat', 'labor_wall'] });
-  if (scopes.includes('bathroom')) out.push({ key: 'bath', name: '욕실 리모델링 (철거·방수·타일·도기)', desc: '1칸 기준 철거·방수·타일·도기 교체', ids: ['bath_mat', 'bath_labor', 'bath_waste'] });
-  if (scopes.includes('kitchen')) out.push({ key: 'kitchen', name: '주방 (싱크대·상판)', desc: '기본형 싱크대·인조대리석 상판·철거', ids: ['sink', 'top', 'kitchen_labor', 'kitchen_waste'] });
-  if (scopes.includes('entrance')) out.push({ key: 'ent', name: '현관 (중문·신발장·타일)', desc: '중문·신발장·현관 타일', ids: ['entrance'] });
-  if (scopes.includes('plaster')) out.push({ key: 'plaster', name: '바닥 미장', desc: '몰탈 미장·양생', ids: ['plaster', 'plaster_mat'] });
-  if (scopes.includes('groundwork')) out.push({ key: 'ground', name: '기초·정지 (터파기·다짐)', desc: '터파기·정지·골재·장비', ids: ['groundwork', 'groundwork_mat', 'groundwork_equip'] });
-  if (scopes.includes('carpentry')) out.push({ key: 'carp', name: '문·몰딩', desc: '문틀·몰딩', ids: ['carpentry'] });
-  if (scopes.includes('electric')) out.push({ key: 'elec', name: '전기·조명', desc: '스위치·콘센트·조명', ids: ['electric'] });
-  return out;
-}
-
 export function allocateClientLines(trade, calc, c) {
+  const price = Math.max(0, Math.round(calc?.clientPrice || 0));
   const items = (calc?.items || []).filter((i) => !i.excluded && Number(i.amount) !== 0);
-  // 공고는 설계내역서 확인 전 — 공종별로 금액을 나눠 쓰면 엉뚱한 비중이 생긴다
+  // 공고는 설계내역서 확인 전 — 항목을 나눠 쓰면 엉뚱한 비중이 생긴다
   if (calc?.isBid) {
     const work = workTypeLabel(c?.bid?.workTypes) || '공고 공사';
-    return [{ id: 'total', name: `${work} 일체`, desc: '설계내역서·물량 확정 후 세부 내역 제시', amount: Math.max(0, Math.round(calc?.clientPrice || 0)) }];
+    return [
+      {
+        id: 'total',
+        name: `${work} 일체`,
+        desc: '설계내역서·물량 확정 후 세부 내역 제시',
+        amount: price,
+        qty: 1,
+        unit: '식',
+        unitPrice: price,
+      },
+    ];
   }
-  const baseGroups =
-    trade === 'combined' && Array.isArray(c?.subScopes) && c.subScopes.length
-      ? combinedScopeGroups(c.subScopes)
-      : TRADE_GROUPS[trade] || TRADE_GROUPS.combined;
-  const groups = [...baseGroups, ...SHARED_GROUPS].map((g) => ({ ...g, weight: 0 }));
-  const idTo = new Map();
-  groups.forEach((g) => g.ids.forEach((id) => idTo.set(id, g)));
-  let leftover = 0;
-  items.forEach((it) => {
-    const g = idTo.get(it.id);
-    const amount = Math.abs(Number(it.amount) || 0);
-    if (g) g.weight += amount;
-    else leftover += amount;
-  });
-  if (leftover > 0) {
-    const carry = groups.find((g) => g.key === 'carry') || groups[groups.length - 1];
-    carry.weight += leftover;
-  }
-  const price = Math.max(0, Math.round(calc?.clientPrice || 0));
-  const live = groups.filter((g) => g.weight > 0);
+
+  const sumBy = (pred) => items.filter(pred).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const crew = calc?.crewCosts || {};
+  const crewDays = Math.max(0, Math.round((Number(crew.days) || 0) * 10) / 10);
+  const money = (i) => (Number(i.amount) || 0) > 0;
+  const weights = {
+    material: sumBy((i) => i.category === '자재' && money(i)),
+    // '교통비 · 식비'는 아래 식비·교통비 줄로 따로 나눈다
+    labor: sumBy((i) => i.category === '노무' && i.id !== 'crew_cost'),
+    meal: Math.max(0, Number(crew.mealCost) || 0),
+    travel: Math.max(0, Number(crew.travelCost) || 0),
+    waste: sumBy((i) => i.category === '폐기물'),
+    equip: sumBy((i) => i.category === '장비' && money(i)),
+    extra: sumBy((i) => /^추가/.test(String(i.category || '')) && money(i)),
+  };
+  const live = CLIENT_COST_GROUPS.filter((g) => weights[g.key] > 0);
   if (!live.length || price <= 0) {
-    return [{ id: 'total', name: '공사 일체', desc: '현장 조건에 맞춘 공사', amount: price }];
+    return [{ id: 'total', name: '공사 일체', desc: '현장 조건에 맞춘 공사', amount: price, qty: 1, unit: '식', unitPrice: price }];
   }
-  const totalWeight = live.reduce((s, g) => s + g.weight, 0);
-  const raw = live.map((g) => (g.weight / totalWeight) * price);
+
+  const totalWeight = live.reduce((s, g) => s + weights[g.key], 0);
+  const raw = live.map((g) => (weights[g.key] / totalWeight) * price);
   const amounts = raw.map((v) => Math.floor(v));
-  const rest = price - amounts.reduce((s, v) => s + v, 0);
+  // 단수 조정 — 내림한 나머지 만원은 소수부가 큰 줄부터 1만원씩 더해 합계를 정확히 맞춘다
+  const rest = Math.max(0, price - amounts.reduce((s, v) => s + v, 0));
   const order = raw.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
   for (let k = 0; k < rest; k += 1) amounts[order[k % order.length].i] += 1;
+
+  const trucks = Math.max(1, Math.round(Number(c?.waste?.trucks) || 1));
+  const distanceKm = Math.max(0, Number(crew.distanceKm) || 0);
+  const descOf = (key) => {
+    if (key === 'labor') return crewDays ? `기공·보조 인력 품삯 (연인원 ${crewDays}명·일)` : '기공·보조 인력 품삯';
+    if (key === 'meal') return crewDays ? `현장 인력 식대 (연인원 ${crewDays}명·일 기준)` : '현장 인력 식대';
+    if (key === 'travel') return distanceKm ? `현장 거리 ${distanceKm}km 기준 운행비` : '현장 운행비';
+    if (key === 'waste') return `폐기물 상차·운반·처리 (${trucks}대 기준)`;
+    return null;
+  };
+  // 수량·단가는 실제로 믿을 수 있는 곳(폐기물 차량 대수)만 적는다.
+  // 인건비·식비는 품삯 총액이라 '일식'으로 두고, 연인원은 설명에 적는다.
+  const qtyOf = (key) => (key === 'waste' ? trucks : 1);
+  const unitOf = (key) => (key === 'waste' ? '대' : '식');
+
   return live
-    .map((g, i) => ({ id: g.key, name: g.name, desc: g.desc, amount: amounts[i] }))
+    .map((g, i) => ({
+      id: g.key,
+      name: g.name,
+      desc: descOf(g.key) || g.desc,
+      amount: amounts[i],
+      qty: qtyOf(g.key),
+      unit: unitOf(g.key),
+      unitPrice: Math.round((amounts[i] / qtyOf(g.key)) * 10) / 10,
+    }))
     .filter((l) => l.amount !== 0);
 }
+
+// 복합 현장 견적서에 '무엇이 포함됐는지' 공정 이름으로 적는다 (금액은 위 내역표에)
+const SCOPE_TITLES = {
+  demolition: ['철거·해체', '기존 마감 철거·폐기물 반출'],
+  groundwork: ['기초·정지', '터파기·다짐·되메우기'],
+  wallpaper: ['도배·장판', '기존 벽지 제거·초배·도배·장판'],
+  bathroom: ['욕실 리모델링', '철거·방수·타일·도기 교체'],
+  kitchen: ['주방 (싱크대·상판)', '싱크대·상판·수전·후드'],
+  entrance: ['현관 (중문·신발장·타일)', '중문·신발장·현관 타일'],
+  plaster: ['바닥 미장', '몰탈 미장·양생'],
+  carpentry: ['문·몰딩', '문틀·몰딩·걸레받이'],
+  electric: ['전기·조명', '스위치·콘센트·조명'],
+  window: ['창호', '창호 교체·단열'],
+};
 
 export function buildQuote(c, calc, design, waste) {
   const trade = calc?.trade || c?.trade || 'unclassified';
@@ -286,11 +241,29 @@ export function buildQuote(c, calc, design, waste) {
   const baseLines = [
     { name: '공사 범위', detail: calc?.targetSummary || '', amount: null },
   ];
+  const scopeLines =
+    trade === 'combined' && Array.isArray(c?.subScopes) && c.subScopes.length
+      ? c.subScopes
+          .filter((sc) => SCOPE_TITLES[sc])
+          .map((sc) => ({ key: sc, name: SCOPE_TITLES[sc][0], desc: SCOPE_TITLES[sc][1] }))
+      : [];
 
   const pay = calc?.payments || { deposit: { ratio: 30, amount: 0 }, mid: { ratio: 40, amount: 0 }, balance: { ratio: 30, amount: 0 } };
   const depositRatio = pay.deposit.ratio;
   const midRatio = pay.mid.ratio;
   const balanceRatio = pay.balance.ratio;
+
+  // 견적서 기본정보 — 실제 업체 견적서처럼 견적번호·유효기간·공사기간을 적는다
+  const issueDate = c?.createdAt || kstToday();
+  const workDays = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
+  const startISO = c?.startDate || c?.dispatch?.date || '';
+  const periodText = startISO
+    ? `${korDateLabel(startISO)}${workDays ? ` ~ ${korDateLabel(addDaysISO(startISO, workDays - 1))} (${workDays}일)` : ''}`
+    : workDays
+    ? `${workDays}일 (일정 협의)`
+    : '일정 협의';
+  const idHash = Array.from(String(c?.id || c?.title || 'ASM')).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1000, 7);
+  const quoteNo = `Q-${String(issueDate).replace(/-/g, '').slice(2, 8)}-${String(idHash).padStart(3, '0')}`;
 
   return {
     title: c?.bid?.title
@@ -305,11 +278,18 @@ export function buildQuote(c, calc, design, waste) {
     size: sizeText(c),
     date: c?.createdAt || new Date().toISOString().slice(0, 10),
     baseLines,
+    scopeLines,
     lines,
     materialSpecs,
     summary: calc?.clientSummary || clientSafeText(calc?.targetSummary || ''),
     changeLines,
+    quoteNo,
+    issueDate,
+    validUntil: addDaysISO(issueDate, 14),
+    periodText,
     basePrice: calc?.baseClientPrice || 0,
+    appPrice: calc?.appClientPrice ?? calc?.clientPrice ?? 0,
+    calledPrice: calc?.calledPrice ?? null,
     adjustmentTotal: calc?.adjustmentTotal || 0,
     subtotal: calc?.clientPrice || 0,
     vat: calc?.vatAmount || 0,
@@ -343,13 +323,18 @@ export function quoteText(doc, calc) {
   const lines = [];
   lines.push(`[${doc.title}]`);
   lines.push(`${doc.client} / ${doc.site} / ${doc.size}`);
-  lines.push(`작성일: ${doc.date}`);
+  lines.push(`작성일: ${doc.date} · 견적번호 ${doc.quoteNo} · 유효기간 ${doc.validUntil}까지`);
+  lines.push(`공사기간: ${doc.periodText}`);
   lines.push('');
   lines.push(`■ 공사 범위`);
   lines.push(doc.summary || doc.baseLines.map((b) => b.detail).filter(Boolean).join(' '));
   lines.push('');
   lines.push(`■ 공사 내역`);
-  doc.lines.forEach((l) => lines.push(` · ${l.name} — ${l.amount}만원${l.desc ? ` (${l.desc})` : ''}`));
+  doc.lines.forEach((l) =>
+    lines.push(
+      ` · ${l.name} — ${l.amount}만원${l.desc ? ` (${l.desc})` : ''}${l.qty ? ` [${l.qty}${l.unit || ''} × ${l.unitPrice}만]` : ''}`
+    )
+  );
   if (doc.materialSpecs?.length) {
     lines.push('');
     lines.push(`■ 사용 자재`);
@@ -369,11 +354,19 @@ export function quoteText(doc, calc) {
   doc.clauses.forEach((cl, i) => lines.push(` ${i + 1}. ${cl}`));
   if (doc.changeLines.length) {
     lines.push('');
-    lines.push('■ 현장 변동 내역');
+    lines.push('■ 현장 변동 반영 내역');
     doc.changeLines.forEach((l) => {
-      lines.push(` · ${l.at ? `${l.at} ` : ''}${l.item} — ${l.amount > 0 ? '+' : ''}${l.amount}만원${l.reason ? ` (${l.reason})` : ''}`);
+      lines.push(
+        doc.calledPrice === null || doc.calledPrice === undefined
+          ? ` · ${l.at ? `${l.at} ` : ''}${l.item} — ${l.amount > 0 ? '+' : ''}${l.amount}만원${l.reason ? ` (${l.reason})` : ''}`
+          : ` · ${l.at ? `${l.at} ` : ''}${l.item}`
+      );
     });
-    lines.push(` 최초 견적 ${wonFull(doc.basePrice)} → 현재 ${wonFull(doc.subtotal)}`);
+    lines.push(
+      doc.calledPrice === null || doc.calledPrice === undefined
+        ? ` 최초 견적 ${wonFull(doc.basePrice)} → 현재 ${wonFull(doc.subtotal)}`
+        : ' 답사 후 현장 변동(추가·감소)은 위 공사 내역 금액에 반영되어 있습니다.'
+    );
   }
   if (doc.notes.length) {
     lines.push('');

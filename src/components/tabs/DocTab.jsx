@@ -98,18 +98,42 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
           <p className="text-sm text-slate-500">
             {doc.size} · 작성일 {doc.date}
           </p>
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] leading-5 text-slate-600">
+            <p>견적번호 <b className="font-bold text-slate-800">{doc.quoteNo}</b></p>
+            <p>유효기간 {doc.validUntil}까지</p>
+            <p className="col-span-2">공사기간 {doc.periodText}</p>
+          </div>
         </div>
 
         <p className="mt-3 text-base leading-7 text-slate-800">{doc.summary}</p>
 
+        {doc.scopeLines?.length ? (
+          <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2">
+            <p className="text-sm font-extrabold text-ink">포함 공정</p>
+            <ul className="mt-1 space-y-0.5">
+              {doc.scopeLines.map((s) => (
+                <li key={s.key} className="text-sm leading-6 text-slate-700">
+                  · <b className="font-bold text-slate-800">{s.name}</b> — {s.desc}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="mt-4">
-          <p className="text-base font-extrabold text-ink">공사 내역</p>
+          <p className="text-base font-extrabold text-ink">공사 내역 (재료비 · 노무비 · 경비)</p>
           <ul className="mt-1 space-y-1.5" data-testid="quote-lines">
             {doc.lines.map((m) => (
-              <li key={m.id} className="flex justify-between gap-3 text-base" data-quote-line data-amount={m.amount}>
-                <span className="text-slate-700">
+              <li key={m.id} className="flex items-start justify-between gap-3 text-base" data-quote-line data-amount={m.amount}>
+                <span className="min-w-0 text-slate-700">
                   {m.name}
                   {m.desc ? <span className="block text-sm text-slate-500">{m.desc}</span> : null}
+                  {m.qty && (m.qty > 1 || m.unit === '대') ? (
+                    <span className="mt-0.5 block text-2xs text-slate-500">
+                      수량 {m.qty}
+                      {m.unit || ''} · 단가 {Number(m.unitPrice).toLocaleString('ko-KR')}만원
+                    </span>
+                  ) : null}
                 </span>
                 <span className="num shrink-0 font-bold tabular-nums text-slate-800">
                   {Math.round(m.amount).toLocaleString('ko-KR')}만
@@ -175,7 +199,7 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
 
         {doc.changeLines.length ? (
           <div className="mt-4">
-            <p className="text-base font-extrabold text-slate-900">현장 변동 내역</p>
+            <p className="text-base font-extrabold text-slate-900">현장 변동 반영 내역</p>
             <ul className="mt-1 space-y-1">
               {doc.changeLines.map((l, i) => (
                 <li key={i} className="flex justify-between gap-2 text-base">
@@ -183,15 +207,19 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
                     {l.at ? `${l.at} · ` : ''}
                     {l.item}
                   </span>
-                  <span className={cx('shrink-0 font-bold tabular-nums', l.amount > 0 ? 'text-rose-700' : 'text-emerald-700')}>
-                    {l.amount > 0 ? '+' : ''}
-                    {l.amount}만
-                  </span>
+                  {doc.calledPrice === null || doc.calledPrice === undefined ? (
+                    <span className={cx('shrink-0 font-bold tabular-nums', l.amount > 0 ? 'text-rose-700' : 'text-emerald-700')}>
+                      {l.amount > 0 ? '+' : ''}
+                      {l.amount}만
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ul>
             <p className="mt-1 text-sm text-slate-600">
-              최초 견적 {Math.round(doc.basePrice).toLocaleString('ko-KR')}만원 → 현재 {Math.round(doc.subtotal).toLocaleString('ko-KR')}만원
+              {doc.calledPrice === null || doc.calledPrice === undefined
+                ? `최초 견적 ${Math.round(doc.basePrice).toLocaleString('ko-KR')}만원 → 현재 ${Math.round(doc.subtotal).toLocaleString('ko-KR')}만원`
+                : '답사 후 현장 변동(추가·감소)은 위 공사 내역 금액에 반영되어 있습니다.'}
             </p>
           </div>
         ) : null}
