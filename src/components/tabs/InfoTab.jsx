@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Camera, Check, Copy, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { BATHROOM_METHODS, DEMOLITION_SCOPES, SIZE_UNITS, TRADES, TRADE_LIST } from '../../lib/constants.js';
 import { classifyRequest, summarizeRequest, autoCaseTitle } from '../../lib/classify.js';
-import { ocrAnalyzeWithTimeout, scenePhotoNote } from '../../lib/ocr.js';
+import { ocrAnalyzeWithTimeout } from '../../lib/ocr.js';
 import { fileToThumb } from '../../lib/image.js';
 import {
   BigButton,
@@ -112,8 +112,9 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
       else showToast('스샷에서 읽을 글자가 없습니다. 설명을 직접 적어주세요');
       return true;
     }
-    const note = scenePhotoNote(shots.length || 1);
-    update({ ocrSceneNote: note, ...(String(c.rawInput || '').trim() ? {} : { rawInput: note }) });
+    // 스샷에서 글자를 못 찾은 경우 — 외계어를 넣지 않고 이 한 줄만 보여준다.
+    const note = `💬 스샷 ${shots.length || 1}장에서 읽을 글자를 찾지 못했습니다 — 현장 사진이면 설명을 한 줄 적어 주세요.`;
+    update({ ocrSceneNote: note });
     showToast('스샷에서 글자를 찾지 못했습니다 — 현장 사진이면 설명을 한 줄 적어주세요');
     return false;
   };

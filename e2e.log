@@ -283,7 +283,7 @@ PASS  탐색: 목록에서 새 flash 모델 선택 — 연결됨 · gemini-3.0-f
 PASS  503: 다음 모델로 자동 전환 — 연결됨 · gemini-2.0-flash
 PASS  503: 과부하 모델부터 시도함 — gemini-2.5-flash → gemini-2.5-flash-latest → gemini-2.0-flash
 PASS  503: 실패로 끝나지 않음 — 없음
-PASS  503: 막힌 모델을 쿨다운에 기록 — {"fp":"17ow9yf-14","until":{"gemini-2.5-flash":1795242528937,"gemini-2.5-flash-latest":179
+PASS  503: 막힌 모델을 쿨다운에 기록 — {"fp":"17ow9yf-14","until":{"gemini-2.5-flash":1795242749852,"gemini-2.5-flash-latest":179
 PASS  503: 재시도 때 503 모델은 건너뜀 — gemini-2.0-flash
 PASS  503: 재시도도 연결됨 — 연결됨 · gemini-2.0-flash
 PASS  설정: 업체 상호 입력칸 1개 — 1
@@ -297,7 +297,7 @@ PASS  설정: 평당 환산 5곳 — 5
 PASS  설정: 타일 시공 4.5 → (평당 약 14.9만)
 PASS  모달: 스샷·현장 버튼 2열 배치 — 스샷 20,538 171x / 현장 199,538 171x
 PASS  모달: 두 버튼 모두 화면 안 — 191 / 370
-PASS  현장 사진: 즉시 첨부(2.5초 안) — 58ms
+PASS  현장 사진: 즉시 첨부(2.5초 안) — 44ms
 PASS  현장 사진: OCR 호출 없음 — 요청 0→0
 PASS  현장 사진: 글자 읽기 안내 없음 — 진행 안내 없음
 PASS  현장 사진: 입력칸 그대로
@@ -321,7 +321,7 @@ PASS  폴백: 로컬 규칙으로 도배 분류
 PASS  폴백: 안내 문구
 PASS  분리: 현장 사진은 tesseract 요청 0회 — 요청 0회
 PASS  분리: 현장 사진은 OCR 안내·오류 없음
-PASS  분리: 현장 사진은 즉시 첨부 — 82ms
+PASS  분리: 현장 사진은 즉시 첨부 — 40ms
 PASS  분리: 현장 사진은 입력칸을 안 건드림
 PASS  분리: 썸네일에 「현장」 구분
 PASS  분리: 스샷은 OCR을 실행 — tesseract 요청 1회 cdn.jsdelivr.net
