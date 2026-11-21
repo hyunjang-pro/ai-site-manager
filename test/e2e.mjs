@@ -501,6 +501,13 @@ async function main() {
     if (m.type() === 'error') consoleErrors.push(m.text());
   });
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
+  // OCR(tesseract) 요청 수 — 현장 사진은 0회여야 한다.
+  let ocrRequests = 0;
+  page.on('request', (r) => {
+    if (/tesseract|tessdata/i.test(r.url())) ocrRequests += 1;
+  });
+  // Gemini에 사진(inline_data)이 함께 갔는지
+  let geminiImageParts = 0;
 
   // Gemini 모킹 (키가 있을 때) — 이미지/답사/현장분석 응답을 나눠 보낸다.
   let geminiCalls = 0;
@@ -511,6 +518,8 @@ async function main() {
       body = JSON.parse(route.request().postData() || '{}');
     } catch (e) {}
     const text = (body?.contents?.[0]?.parts || []).map((p) => p.text || '').join(' ');
+    const parts = body?.contents?.[0]?.parts || [];
+    if (parts.some((p) => p?.inline_data || p?.inlineData)) geminiImageParts += 1;
     const wantsImage = (body?.generationConfig?.responseModalities || []).includes('IMAGE');
     let payload;
     if (wantsImage) {
@@ -583,6 +592,8 @@ async function main() {
     const t = await mainText();
     record('정보: 받은 내용·공종·규모·고객 정보', t.includes('받은 내용') && t.includes('공종·규모') && t.includes('고객 정보'));
     record('정보: 사진/자동 분류', t.includes('사진') && (t.includes('자동으로 분류') || t.includes('AI 정밀 분석')));
+    record('정보: 스샷·현장 사진 버튼 분리', t.includes('숨고·카톡 스샷') && t.includes('현장 사진'));
+    record('정보: 사진 없으면 “스샷 글자만 읽기” 숨김', !t.includes('스샷 속 글자만 다시 읽기'));
     record('정보: 무엇을 하는지 입력칸 없음', !t.includes('무엇을 하는지 적어주세요'));
     record('정보: 로컬 규칙 모드 표시', t.includes('로컬 규칙 모드'));
     await shot('30-info.png');
@@ -797,7 +808,9 @@ async function main() {
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
     const modal = await page.locator('[role=dialog]').innerText();
     record('모달: 예시 칩 삭제', !modal.includes('폐기물 2톤만 치워주세요') && !modal.includes('욕실+도배 15평'));
-    record('모달: 안내 1줄', modal.includes('사진 글자는 기기 안에서만'));
+    record('모달: 사진 버튼 2개로 분리', modal.includes('숨고·카톡 스샷') && modal.includes('현장 사진') && !modal.includes('사진·스샷 올리기'));
+    record('모달: 안내 1줄', modal.includes('스샷 글자는 기기 안에서만'));
+    record('모달: 스샷/현장 설명', modal.includes('스샷은 글자를 읽어') && modal.includes('현장 사진은 글자를 읽지 않고'));
     record('모달: 로컬 규칙 모드 표시', modal.includes('로컬 규칙 모드'));
     await page.getByLabel('현장 요청 내용').fill('경북 안동시 용산동 생활폐기물 한차, 엘리베이터로 운반, 재활용 가능');
     await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
@@ -1155,22 +1168,51 @@ async function main() {
     await page.waitForTimeout(300);
   });
 
-  await step('새 현장 — 사진만 올리고 AI 정밀 분석', async () => {
+  await step('새 현장 — 현장 사진은 0초 첨부 · AI 정밀 분석', async () => {
     await goHome();
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    // 글자 없이 사진만 붙인다 (사용자 제보: '붙여넣은 내용이나 사진이 없습니다' 오류)
-    await page.locator('[role=dialog] input[type=file]').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
-    await page.waitForTimeout(400);
-    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 }).catch(() => {});
-    const attached = await page.locator('[role=dialog]').innerText();
-    record('사진만: 첨부 후 바로 분석', /자동으로 잡았습니다|공종/.test(attached), attached.split('\n').slice(0, 3).join(' / '));
-    const btn = page.getByLabel('AI 정밀 분석');
-    if (await btn.count()) await btn.first().click();
-    await page.waitForTimeout(1500);
+    // 두 버튼이 2열로 나란히, 화면 안에 들어오는지 (모바일 390)
+    const shotBtn = await page.getByLabel('숨고·카톡 스샷 올리기').boundingBox();
+    const siteBtn = await page.getByLabel('현장 사진 올리기').boundingBox();
+    record(
+      '모달: 스샷·현장 버튼 2열 배치',
+      !!shotBtn && !!siteBtn && Math.abs(shotBtn.y - siteBtn.y) < 6 && siteBtn.x >= shotBtn.x + shotBtn.width - 2,
+      `스샷 ${shotBtn ? `${Math.round(shotBtn.x)},${Math.round(shotBtn.y)} ${Math.round(shotBtn.width)}x` : '없음'} / 현장 ${siteBtn ? `${Math.round(siteBtn.x)},${Math.round(siteBtn.y)} ${Math.round(siteBtn.width)}x` : '없음'}`
+    );
+    record('모달: 두 버튼 모두 화면 안', !!shotBtn && !!siteBtn && shotBtn.x >= 0 && siteBtn.x + siteBtn.width <= 390.5, `${shotBtn && Math.round(shotBtn.x + shotBtn.width)} / ${siteBtn && Math.round(siteBtn.x + siteBtn.width)}`);
+
+    const ocrBefore = ocrRequests;
+    const t0 = Date.now();
+    // 글자 없는 현장 사진만 붙인다 — OCR 없이 바로 붙어야 한다.
+    await page.getByLabel('현장 사진 선택').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+    await page.getByText('현장 사진 1장 붙였습니다', { exact: false }).waitFor({ timeout: 5000 });
+    const attachMs = Date.now() - t0;
+    record('현장 사진: 즉시 첨부(2.5초 안)', attachMs < 2500, `${attachMs}ms`);
+    record('현장 사진: OCR 호출 없음', ocrRequests === ocrBefore, `요청 ${ocrBefore}→${ocrRequests}`);
+    const afterUpload = await page.locator('[role=dialog]').innerText();
+    record(
+      '현장 사진: 글자 읽기 안내 없음',
+      !afterUpload.includes('읽는 중') &&
+        !afterUpload.includes('불러오지 못했습니다') &&
+        !afterUpload.includes('스샷에서 읽은 글자') &&
+        (await page.getByTestId('shot-summary').count()) === 0,
+      afterUpload.match(/[^\n]*읽는 중[^\n]*/)?.[0] || '진행 안내 없음'
+    );
+    record('현장 사진: 입력칸 그대로', (await page.getByLabel('현장 요청 내용').inputValue()).trim() === '');
+    record('현장 사진: 썸네일 「현장」 배지', afterUpload.includes('현장') && (await page.getByLabel('현장 사진 삭제').count()) === 1);
+
+    // 이제 AI 정밀 분석 → 현장 사진이 Gemini에 이미지로 함께 간다.
+    geminiImageParts = 0;
+    await page.getByLabel('현장 요청 내용').fill('부엌을 전면 인테리어. 최신식으로');
+    await page.getByLabel('AI 정밀 분석').click();
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
+    await page.waitForTimeout(300);
     const dialogText = await page.locator('[role=dialog]').innerText();
-    record('사진만: 빈 입력 경고 안 뜸', !dialogText.includes('붙여넣은 내용이나 사진이 없습니다'), dialogText.match(/확인이 필요합니다[^\n]*/)?.[0] || '');
-    record('사진만: AI가 공종을 잡음', /자동으로 잡았습니다|공종/.test(dialogText), dialogText.split('\n').slice(0, 4).join(' / '));
+    record('현장 사진: Gemini에 사진(시각)으로 전달', geminiImageParts > 0, `image 파트 ${geminiImageParts}회`);
+    record('현장 사진: 빈 입력 경고 안 뜸', !dialogText.includes('붙여넣은 내용이 없습니다'), dialogText.match(/확인이 필요합니다[^\n]*/)?.[0] || '');
+    record('현장 사진: AI가 공종을 잡음', /자동으로 잡았습니다|공종/.test(dialogText), dialogText.split('\n').slice(0, 4).join(' / '));
+    record('결과: 첨부 사진 함께 저장 안내', dialogText.includes('현장 사진 1장') && dialogText.includes('함께 저장'), dialogText.match(/📎[^\n]*/)?.[0] || '');
     await shot('41b-photo-only.png');
     await page.getByLabel('닫기').first().click();
     await page.waitForTimeout(300);
@@ -1230,44 +1272,84 @@ async function main() {
 
   }
 
-  // ---------- 글자 없는 현장 사진 OCR ----------
+  // ---------- 스샷 / 현장 사진 분리 (#21408) ----------
   const SKIP_OCR = !!process.env.SKIP_OCR;
-  if (!SKIP_OCR) await step('현장 사진 OCR 오인 방지', async () => {
+
+  // 새 브라우저 창에서 tesseract를 막아 두면 'OCR을 돌렸는지'가 확실히 드러난다.
+  //  · 현장 사진: 요청 0회, 안내 문구도 없어야 한다.
+  //  · 스샷: OCR을 부르므로 요청이 생기고(막혀 있으니) 안내 문구가 뜬다.
+  await step('스샷·현장 사진 분리 — 현장은 OCR 시도 0회, 스샷은 OCR 실행', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR' });
+    const hits = [];
+    await ctx.route(/tesseract|tessdata/i, (route) => {
+      hits.push(route.request().url());
+      return route.abort();
+    });
+    const p = await ctx.newPage();
+    p.setDefaultTimeout(20000);
+    try {
+      await p.goto('http://127.0.0.1:4173/', { waitUntil: 'networkidle' });
+      for (const d of ['3', '8', '5', '5']) await p.getByLabel(`${d} 번`).click();
+      await p.getByText('오늘 장부').waitFor({ timeout: 12000 });
+      await p.getByRole('button', { name: /새 현장 만들기/ }).click();
+      await p.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+
+      // 1) 현장 사진 — OCR 시도조차 하지 않는다
+      const t0 = Date.now();
+      await p.getByLabel('현장 사진 선택').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+      await p.getByText('현장 사진 1장 붙였습니다', { exact: false }).waitFor({ timeout: 5000 });
+      const ms = Date.now() - t0;
+      await p.waitForTimeout(1200);
+      const siteTxt = await p.locator('[role=dialog]').innerText();
+      record('분리: 현장 사진은 tesseract 요청 0회', hits.length === 0, `요청 ${hits.length}회`);
+      record('분리: 현장 사진은 OCR 안내·오류 없음', !siteTxt.includes('읽는 중') && !/불러오지 못했습니다|스샷에서 읽은 글자|글자를 찾지 못했습니다/.test(siteTxt));
+      record('분리: 현장 사진은 즉시 첨부', ms < 2500, `${ms}ms`);
+      record('분리: 현장 사진은 입력칸을 안 건드림', (await p.getByLabel('현장 요청 내용').inputValue()).trim() === '');
+      record('분리: 썸네일에 「현장」 구분', (await p.getByLabel('현장 사진 삭제').count()) === 1);
+
+      // 2) 스샷 — OCR을 돌린다 (여기서는 CDN을 막아 두었으므로 안내 문구가 뜬다)
+      await p.getByLabel('숨고·카톡 스샷 선택').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+      await p.getByText('사진 글자 읽기(OCR)를 불러오지 못했습니다', { exact: false }).waitFor({ timeout: 30000 });
+      record('분리: 스샷은 OCR을 실행', hits.length > 0, `tesseract 요청 ${hits.length}회 ${hits[0] ? new URL(hits[0]).host : ''}`);
+      record('분리: 썸네일에 「스샷」 구분', (await p.getByLabel('스샷 삭제').count()) === 1);
+      record('분리: 실패 문구는 한국어 안내', (await p.locator('[role=dialog]').innerText()).includes('한 줄만 직접 적어'));
+      await p.screenshot({ path: path.join(SHOTS, '47-shot-site-split.png') });
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  if (!SKIP_OCR) await step('숨고 스샷 OCR — 글자를 읽어 입력칸·분류에 반영', async () => {
+    const dir = '/workspace/attachments/2026-11-21';
+    const file = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith('IMG_1430') && f.endsWith('.jpg')));
     await page.evaluate(() => localStorage.removeItem('aiSiteManager.geminiKey'));
     await page.reload({ waitUntil: 'networkidle' });
     await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    await page.locator('input[type=file]').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
-    await page.getByText('첨부됨', { exact: false }).waitFor({ timeout: 240000 });
-    const modal = await page.locator('[role=dialog]').innerText();
-    record('현장 사진: 안내 문구', modal.includes('글자 없는 현장 사진'), modal.match(/📷[^\n]*/)?.[0] || modal.slice(0, 120).replace(/\n/g, ' '));
-    record('현장 사진: 외계어 없음', !/SERA|에출자|Sena|ae 10/.test(modal));
-    await page.getByLabel('현장 요청 내용').fill('부엌을 전면 인테리어. 최신식으로');
-    await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
+    await page.getByLabel('숨고·카톡 스샷 선택').setInputFiles(file);
+    // 스샷을 올리면 바로 글자를 읽어 입력칸과 분류를 채운다 — 화면은 입력 단계에 그대로 둔다.
+    await page.getByTestId('shot-summary').waitFor({ timeout: 240000 });
+    const typed = await page.getByLabel('현장 요청 내용').inputValue();
+    record('스샷 OCR: 글자를 입력칸에 넣음', typed.includes('경북 안동시') && typed.includes('15평'), typed.slice(0, 60).replace(/\n/g, ' | '));
+    const summary = await page.getByTestId('shot-summary').innerText();
+    record('스샷 OCR: 공종·규모·지역 자동 반영', summary.includes('복합') && summary.includes('15평') && summary.includes('경북 안동시'), summary);
+    record('스샷 OCR: 잡글자 없음', !/삭제하기|요청 상세|\d{1,2}:\d{2}/.test(typed));
+    record('스샷 OCR: 현장 사진 버튼 그대로 보임', (await page.getByLabel('현장 사진 올리기').count()) === 1);
+    await shot('45-ocr-shot.png');
+    await page.getByLabel(/자동으로 분류하기|AI 정밀 분석/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
+    const r = await page.locator('[role=dialog]').innerText();
+    record('스샷 OCR: 결과 단계 분류', r.includes('복합') && r.includes('15평'));
     await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
-    await page.getByText('받은 내용').first().waitFor();
+    await page.getByLabel('받은 내용').waitFor();
     await page.waitForTimeout(400);
     const received = await page.getByLabel('받은 내용').inputValue();
-    record('현장 사진: 받은 내용에 외계어 없음', !/SERA|에출자|Sena/.test(received), received.slice(0, 40));
-    record('현장 사진: 주방으로 분류', (await mainText()).includes('주방'));
-    await shot('44-scene-photo.png');
-  });
-
-  if (!SKIP_OCR) await step('숨고 스크린샷 OCR (실제 요청서)', async () => {
-    const dir = '/workspace/attachments/2026-11-21';
-    const file = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith('IMG_1430') && f.endsWith('.jpg')));
-    await goHome();
-    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
-    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    await page.locator('input[type=file]').setInputFiles(file);
-    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 240000 });
-    const r = await page.locator('[role=dialog]').innerText();
-    record('OCR: 아파트 인테리어 → 복합 15평', r.includes('복합 인테리어') && r.includes('15평'));
-    record('OCR: 잡글자 없음', !/삭제하기|요청 상세|\d{1,2}:\d{2}/.test(r));
-    await shot('45-ocr-shot.png');
-    await page.getByLabel('닫기').first().click();
+    record('스샷 OCR: 받은 내용에 요청 글', received.includes('15평') || received.includes('창호'), received.slice(0, 40));
+    const badges = await page.locator('[aria-label="스샷 삭제"]').count();
+    record('스샷 OCR: 1단계 썸네일에 「스샷」 구분', badges >= 1, `배지 ${badges}개`);
+    // 뒤 테스트는 AI 키가 있는 상태를 전제한다 — 지운 키를 돌려놓는다.
+    await page.evaluate(() => localStorage.setItem('aiSiteManager.geminiKey', 'AIzaTESTKEY123'));
   });
 
   // ---------- 사용자 제보: 만들 때 금액 ≠ 2단계 가견적 ----------
@@ -1359,7 +1441,9 @@ async function main() {
     await goHome();
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
-    await page.locator('[role=dialog] input[type=file]').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+    await page.getByLabel('현장 사진 선택').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+    await page.getByText('현장 사진 1장 붙였습니다', { exact: false }).waitFor({ timeout: 5000 });
+    await page.getByLabel('AI 정밀 분석').click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 25000 });
     await page.waitForTimeout(300);
     const draftAmount = Number(await page.locator('[data-testid=draft-quote]').first().getAttribute('data-amount'));
@@ -1498,7 +1582,10 @@ async function main() {
     try {
     await check('홈');
     last = '현장 카드 클릭';
-    await p2.getByText('구미 형곡동 32평 아파트 욕실 1칸').first().click();
+    // 카드가 화면 아래에 있으면 먼저 스크롤해 둔다 — 하단 고정 버튼에 가려 클릭이 막히는 경우를 피한다.
+    await p2.getByText('구미 형곡동 32평 아파트 욕실 1칸').first().scrollIntoViewIfNeeded();
+    await p2.waitForTimeout(250);
+    await p2.getByText('구미 형곡동 32평 아파트 욕실 1칸').first().click({ timeout: 20000 });
     await p2.getByLabel('받은 내용').waitFor({ timeout: 15000 });
     record('360: 현장 열림', true);
     for (let n = 1; n <= 6; n++) {
@@ -1518,11 +1605,24 @@ async function main() {
       return { top: Math.round(s.top), bottom: Math.round(s.bottom), vh: window.innerHeight };
     });
     record('360: 모달이 화면 안에 들어옴', sheet.top >= -1 && sheet.bottom <= sheet.vh + 1, JSON.stringify(sheet));
+    // 스샷·현장 사진 두 버튼이 360에서도 나란히, 글씨가 잘리지 않게
+    const b1 = await p2.getByLabel('숨고·카톡 스샷 올리기').boundingBox();
+    const b2 = await p2.getByLabel('현장 사진 올리기').boundingBox();
+    record(
+      '360: 스샷·현장 버튼 2열',
+      !!b1 && !!b2 && Math.abs(b1.y - b2.y) < 6 && b2.x >= b1.x + b1.width - 2 && b2.x + b2.width <= 360.5,
+      `스샷 ${b1 ? `${Math.round(b1.x)}+${Math.round(b1.width)}` : '없음'} / 현장 ${b2 ? `${Math.round(b2.x)}+${Math.round(b2.width)}` : '없음'}`
+    );
+    const cut = await p2.evaluate(() => {
+      const btns = [...document.querySelectorAll('[role=dialog] button')].filter((b) => /숨고·카톡 스샷|현장 사진/.test(b.innerText));
+      return btns.map((b) => b.scrollWidth - b.clientWidth);
+    });
+    record('360: 두 버튼 글씨 안 잘림', cut.length === 2 && cut.every((d) => d <= 1), cut.join(','));
     await p2.screenshot({ path: path.join(SHOTS, '48-360-newcase.png') });
     record('360: 페이지 오류 없음', errs.length === 0, errs.slice(0, 2).join(' | '));
     } catch (e) {
       await p2.screenshot({ path: path.join(SHOTS, 'error-360-step.png') }).catch(() => {});
-      record(`360: '${last}' 실패`, false, e.message.split('\n')[0].slice(0, 120));
+      record(`360: '${last}' 실패`, false, e.message.split('\n').slice(0, 6).join(' / ').slice(0, 400));
     }
     await ctx.close();
   });

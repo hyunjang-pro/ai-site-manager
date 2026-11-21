@@ -162,6 +162,8 @@ PASS  탭: 3열 × 2줄 — {"tops":[201,201,201,249,249,249],"cols":3}
 PASS  모바일 390px: 가로 스크롤 0px — overflow=0
 PASS  정보: 받은 내용·공종·규모·고객 정보
 PASS  정보: 사진/자동 분류
+PASS  정보: 스샷·현장 사진 버튼 분리
+PASS  정보: 사진 없으면 “스샷 글자만 읽기” 숨김
 PASS  정보: 무엇을 하는지 입력칸 없음
 PASS  정보: 로컬 규칙 모드 표시
 PASS  가견적: 1차 가견적 히어로
@@ -224,7 +226,9 @@ PASS  철거+정지: 스타일 카드 숨김
 PASS  철거+정지+도배: 스타일 카드 표시
 PASS  철거 복귀: 스타일 카드 다시 숨김
 PASS  모달: 예시 칩 삭제
+PASS  모달: 사진 버튼 2개로 분리
 PASS  모달: 안내 1줄
+PASS  모달: 스샷/현장 설명
 PASS  모달: 로컬 규칙 모드 표시
 PASS  한차: 폐기물로 분류
 PASS  한차: 1톤 1차 표시
@@ -279,7 +283,7 @@ PASS  탐색: 목록에서 새 flash 모델 선택 — 연결됨 · gemini-3.0-f
 PASS  503: 다음 모델로 자동 전환 — 연결됨 · gemini-2.0-flash
 PASS  503: 과부하 모델부터 시도함 — gemini-2.5-flash → gemini-2.5-flash-latest → gemini-2.0-flash
 PASS  503: 실패로 끝나지 않음 — 없음
-PASS  503: 막힌 모델을 쿨다운에 기록 — {"fp":"17ow9yf-14","until":{"gemini-2.5-flash":1795241034350,"gemini-2.5-flash-latest":179
+PASS  503: 막힌 모델을 쿨다운에 기록 — {"fp":"17ow9yf-14","until":{"gemini-2.5-flash":1795242528937,"gemini-2.5-flash-latest":179
 PASS  503: 재시도 때 503 모델은 건너뜀 — gemini-2.0-flash
 PASS  503: 재시도도 연결됨 — 연결됨 · gemini-2.0-flash
 PASS  설정: 업체 상호 입력칸 1개 — 1
@@ -291,9 +295,17 @@ PASS  설정: 스크롤해도 상단 헤더 그대로 — y=68 h=65
 PASS  설정: 헤더에 [← 닫기]·설정 — 닫기 설정
 PASS  설정: 평당 환산 5곳 — 5
 PASS  설정: 타일 시공 4.5 → (평당 약 14.9만)
-PASS  사진만: 첨부 후 바로 분석 — 다시 입력 / 자동으로 잡았습니다 / 
-PASS  사진만: 빈 입력 경고 안 뜸
-PASS  사진만: AI가 공종을 잡음 — 다시 입력 / 자동으로 잡았습니다 /  / 공종·규모는 아래에서 고쳐도 됩니다
+PASS  모달: 스샷·현장 버튼 2열 배치 — 스샷 20,538 171x / 현장 199,538 171x
+PASS  모달: 두 버튼 모두 화면 안 — 191 / 370
+PASS  현장 사진: 즉시 첨부(2.5초 안) — 58ms
+PASS  현장 사진: OCR 호출 없음 — 요청 0→0
+PASS  현장 사진: 글자 읽기 안내 없음 — 진행 안내 없음
+PASS  현장 사진: 입력칸 그대로
+PASS  현장 사진: 썸네일 「현장」 배지
+PASS  현장 사진: Gemini에 사진(시각)으로 전달 — image 파트 1회
+PASS  현장 사진: 빈 입력 경고 안 뜸
+PASS  현장 사진: AI가 공종을 잡음 — 다시 입력 / 자동으로 잡았습니다 /  / 공종·규모는 아래에서 고쳐도 됩니다
+PASS  결과: 첨부 사진 함께 저장 안내 — 📎
 PASS  모달: AI ON 뱃지
 PASS  AI: 주방 분류
 PASS  AI: 보수적 범위 표시
@@ -307,6 +319,21 @@ PASS  After: 생성됨 배지
 PASS  문서: 손님용 Before/After
 PASS  폴백: 로컬 규칙으로 도배 분류
 PASS  폴백: 안내 문구
+PASS  분리: 현장 사진은 tesseract 요청 0회 — 요청 0회
+PASS  분리: 현장 사진은 OCR 안내·오류 없음
+PASS  분리: 현장 사진은 즉시 첨부 — 82ms
+PASS  분리: 현장 사진은 입력칸을 안 건드림
+PASS  분리: 썸네일에 「현장」 구분
+PASS  분리: 스샷은 OCR을 실행 — tesseract 요청 1회 cdn.jsdelivr.net
+PASS  분리: 썸네일에 「스샷」 구분
+PASS  분리: 실패 문구는 한국어 안내
+PASS  스샷 OCR: 글자를 입력칸에 넣음 — 아파트 인테리어 | 1개월 이내 | 경북 안동시 | 면적 15평 | 공간 개수 방 2 / 욕실 1 / 부억 1 / 현관 (
+PASS  스샷 OCR: 공종·규모·지역 자동 반영 — 스샷에서 잡았어요 — 공종 복합 (전체 인테리어) · 규모 15평 · 지역 경북 안동시 · 제외 창호
+PASS  스샷 OCR: 잡글자 없음
+PASS  스샷 OCR: 현장 사진 버튼 그대로 보임
+PASS  스샷 OCR: 결과 단계 분류
+PASS  스샷 OCR: 받은 내용에 요청 글 — 희망사항: _ 지금 작성할게요: 창호는 시공한지 얼마안되서 안해되고 바닥
+PASS  스샷 OCR: 1단계 썸네일에 「스샷」 구분 — 배지 1개
 PASS  양중: 1층은 양중비 0 — none 0만
 PASS  양중: 3층 도배는 사다리차 없음 — carry
 PASS  양중: 엘베 8층은 엘베 사용 — elevator 5.5만
@@ -315,8 +342,8 @@ PASS  양중: 창호 4층은 사다리차 — ladder_half
 PASS  양중: 손으로 인력 반출로 바꿀 수 있음 — carry
 PASS  양중: 1층 철거도 사다리차 없음 — none
 PASS  양중: 도배 반출에 폐기물 트럭 안 붙음 — 인부 2명 × 19만 = 38만 (폐기물 차량은 별도)
-PASS  단순화: 가견적·답사·수익에 접는 카드 있음 — {"1":{"folds":0,"open":0,"height":2319},"2":{"folds":6,"open":0,"height":1552},"3":{"folds":7,"open":0,"height":1173},"4":{"folds":4,"open":1,"height":2576},"5":{"folds":9,"open":0,"height":3675},"6":{"folds":1,"open":0,"height":3347}}
-PASS  단순화: 답사·수익은 처음에 접혀 있음 — {"1":{"folds":0,"open":0,"height":2319},"2":{"folds":6,"open":0,"height":1552},"3":{"folds":7,"open":0,"height":1173},"4":{"folds":4,"open":1,"height":2576},"5":{"folds":9,"open":0,"height":3675},"6":{"folds":1,"open":0,"height":3347}}
+PASS  단순화: 가견적·답사·수익에 접는 카드 있음 — {"1":{"folds":0,"open":0,"height":2415},"2":{"folds":6,"open":0,"height":1552},"3":{"folds":7,"open":0,"height":1173},"4":{"folds":4,"open":1,"height":2576},"5":{"folds":9,"open":0,"height":3675},"6":{"folds":1,"open":0,"height":3347}}
+PASS  단순화: 답사·수익은 처음에 접혀 있음 — {"1":{"folds":0,"open":0,"height":2415},"2":{"folds":6,"open":0,"height":1552},"3":{"folds":7,"open":0,"height":1173},"4":{"folds":4,"open":1,"height":2576},"5":{"folds":9,"open":0,"height":3675},"6":{"folds":1,"open":0,"height":3347}}
 PASS  단순화: 가견적 화면이 짧아짐 — 1552px
 PASS  만들기: 견적 미리보기 카드 있음
 PASS  만들기: 미리보기 금액 > 0 — 556만
@@ -357,11 +384,13 @@ PASS  360: 5단계 가로 넘침 없음 — over=0
 PASS  360: 6단계 가로 넘침 없음 — over=0 
 PASS  360: 6단계 이동
 PASS  360: 새 현장 모달 가로 넘침 없음 — over=0 
-PASS  360: 모달이 화면 안에 들어옴 — {"top":59,"bottom":640,"vh":640}
+PASS  360: 모달이 화면 안에 들어옴 — {"top":57,"bottom":640,"vh":640}
+PASS  360: 스샷·현장 버튼 2열 — 스샷 20+156 / 현장 184+156
+PASS  360: 두 버튼 글씨 안 잘림 — 0,0
 PASS  360: 페이지 오류 없음
 PASS  모바일: 가로 스크롤 없음 — overflow=0px
-PASS  저장: LocalStorage — 104KB
+PASS  저장: LocalStorage — 144KB
 PASS  콘솔 에러 0건
 PASS  Gemini 호출 발생 — 8회
 
-결과: 355/355 통과
+결과: 384/384 통과

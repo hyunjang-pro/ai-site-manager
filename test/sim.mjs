@@ -315,7 +315,9 @@ async function main() {
           await inspect(`${where}/새현장`);
           await shot(`${where}-0-새현장`);
           if (sc.photo) {
-            await page.locator('[role=dialog] input[type=file]').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+            await page.getByLabel('현장 사진 선택').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+            await page.getByText('현장 사진 1장 붙였습니다', { exact: false }).waitFor({ timeout: 5000 });
+            await page.getByRole('button', { name: /자동으로 분류하기|AI 정밀 분석/ }).click();
             await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 25000 });
           } else {
             await page.getByLabel('현장 요청 내용').fill(sc.text);

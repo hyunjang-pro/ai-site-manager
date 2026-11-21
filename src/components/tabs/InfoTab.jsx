@@ -40,7 +40,11 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [ocrHint, setOcrHint] = useState('');
   const [newScope, setNewScope] = useState('');
-  const fileRef = useRef(null);
+  const shotRef = useRef(null);
+  const siteRef = useRef(null);
+  // 스샷(kind: 'screenshot')만 글자를 읽는다. 현장 사진(kind: 'site', 예전에 올린 사진 포함)은 글자를 읽지 않는다.
+  const shots = (c.photos || []).filter((p) => p && p.kind === 'screenshot');
+  const sites = (c.photos || []).filter((p) => p && p.kind !== 'screenshot');
   const info = TRADES[c.trade] || TRADES.unclassified;
   const isWaste = calc.trade === 'waste' || c.trade === 'waste';
   const customMode = calc.trade === 'custom' || calc.trade === 'unclassified' || c.trade === 'custom' || c.trade === 'unclassified';
@@ -105,12 +109,12 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
     if (!res || !res.isScenePhoto) {
       update({ ocrSceneNote: '' });
       if (res && res.text) applyOcr(res.text);
-      else showToast('사진에서 읽을 글자가 없습니다. 설명을 직접 적어주세요');
+      else showToast('스샷에서 읽을 글자가 없습니다. 설명을 직접 적어주세요');
       return true;
     }
-    const note = scenePhotoNote(c.photos?.length || 1);
+    const note = scenePhotoNote(shots.length || 1);
     update({ ocrSceneNote: note, ...(String(c.rawInput || '').trim() ? {} : { rawInput: note }) });
-    showToast('글자가 없는 현장 사진입니다 — 설명을 적으면 그 글로 분류합니다');
+    showToast('스샷에서 글자를 찾지 못했습니다 — 현장 사진이면 설명을 한 줄 적어주세요');
     return false;
   };
 
@@ -127,25 +131,29 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
     setAnalyzing(true);
     try {
       let text = `${c.rawInput || ''} ${c.notes || ''}`.trim();
-      // 키가 있으면 tesseract(느리고 오타)를 건너뛰고 사진을 곧장 AI로 보낸다.
-      if (!text && c.photos?.length && !getGeminiKey()) {
-        setOcrHint('사진에서 글자 읽는 중…');
+      // 키가 없을 때만, 그것도 스샷에서만 느린 OCR을 돌린다(현장 사진은 글자를 읽지 않는다).
+      if (!text && shots.length && !getGeminiKey()) {
+        setOcrHint('스샷에서 글자 읽는 중…');
         const res = await ocrAnalyzeWithTimeout(
-          c.photos.map((p) => p.dataUrl).filter(Boolean),
-          (pct) => setOcrHint(`사진 글자 읽는 중… ${pct || 0}%`)
+          shots.map((p) => p.dataUrl).filter(Boolean),
+          (pct) => setOcrHint(`스샷 글자 읽는 중… ${pct || 0}%`)
         );
         applyPhotoResult(res);
         text = res && !res.isScenePhoto ? res.text || '' : '';
       }
-      if (!text && !c.photos?.length) {
-        showToast('내용이 없습니다. 요청 글을 넣거나 사진을 올려주세요');
+      if (!text && !sites.length) {
+        showToast(
+          c.photos?.length
+            ? '현장 사진은 글자를 읽지 않습니다 — 설명을 한 줄 적으면 그 글로 분류합니다'
+            : '내용이 없습니다. 요청 글을 넣거나 스샷·현장 사진을 올려주세요'
+        );
         return;
       }
-      // 키가 있으면 멀티모달 AI가 사진까지 함께 본다. 실패하면 로컬 규칙으로 넘어간다.
+      // 키가 있으면 멀티모달 AI가 현장 사진(시각 정보)까지 함께 본다. 실패하면 로컬 규칙으로 넘어간다.
       const key = getGeminiKey();
       if (key) {
-        setOcrHint('🤖 AI가 사진·글을 함께 읽는 중…');
-        const ai = await analyzeCaseWithGemini({ apiKey: key, text, photos: c.photos || [], tradeHint: c.trade });
+        setOcrHint(sites.length ? '🤖 AI가 현장 사진·글을 함께 읽는 중…' : '🤖 AI가 글을 읽는 중…');
+        const ai = await analyzeCaseWithGemini({ apiKey: key, text, photos: sites, tradeHint: c.trade });
         if (ai.ok) {
           applyAi(ai.data);
           if (!String(c.rawInput || '').trim() && text) update({ rawInput: text });
@@ -154,13 +162,13 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
         showToast('AI 연결 실패 — 로컬 규칙으로 분류했습니다');
       }
       if (!text) {
-        showToast('글자 없는 현장 사진입니다 — 설명을 한 줄 적어주세요');
+        showToast('현장 사진은 글자를 읽지 않습니다 — 설명을 한 줄 적어주세요');
         return;
       }
       const res = classifyRequest(text);
       applyClassified(res, { rawInput: text });
     } catch (e) {
-      showToast(e.message || '사진 글자를 읽지 못했습니다');
+      showToast(e.message || '분류하지 못했습니다');
     } finally {
       setAnalyzing(false);
       setOcrHint('');
@@ -168,8 +176,8 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
   };
 
   const readPhotos = async () => {
-    if (!c.photos?.length) {
-      showToast('먼저 숨고·카톡 스크린샷을 올려주세요');
+    if (!shots.length) {
+      showToast('글자를 읽을 스샷이 없습니다 — 현장 사진은 글자를 읽지 않습니다');
       return;
     }
     if (getGeminiKey()) {
@@ -177,26 +185,36 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
       return;
     }
     setAnalyzing(true);
-    setOcrHint('사진에서 글자 읽는 중…');
+    setOcrHint('스샷에서 글자 읽는 중…');
     try {
       const res = await ocrAnalyzeWithTimeout(
-        c.photos.map((p) => p.dataUrl).filter(Boolean),
-        (pct) => setOcrHint(`사진 글자 읽는 중… ${pct || 0}%`)
+        shots.map((p) => p.dataUrl).filter(Boolean),
+        (pct) => setOcrHint(`스샷 글자 읽는 중… ${pct || 0}%`)
       );
       applyPhotoResult(res);
     } catch (e) {
-      showToast(e.message || '사진 글자를 읽지 못했습니다');
+      showToast(e.message || '스샷 글자를 읽지 못했습니다');
     } finally {
       setAnalyzing(false);
       setOcrHint('');
     }
   };
 
-  const onPhotos = async (files) => {
-    const list = Array.from(files || []).slice(0, 6);
+  const onPhotos = async (files, kind) => {
+    const room = 6 - (c.photos?.length || 0);
+    const list = Array.from(files || []).slice(0, Math.max(0, room));
+    if (!list.length) {
+      showToast('사진은 6장까지 올릴 수 있습니다 — 한 장 지우고 올려주세요');
+      return;
+    }
     const thumbs = await Promise.all(list.map(fileToThumb));
-    update({ photos: [...(c.photos || []), ...thumbs].slice(0, 6) });
-    showToast(`사진 ${thumbs.length}장을 붙였습니다`);
+    const tagged = thumbs.map((t) => ({ ...t, kind }));
+    update({ photos: [...(c.photos || []), ...tagged].slice(0, 6) });
+    showToast(
+      kind === 'screenshot'
+        ? `스샷 ${thumbs.length}장을 붙였습니다 — ‘AI 정밀 분석’을 누르면 글자를 읽어 채웁니다`
+        : `현장 사진 ${thumbs.length}장을 붙였습니다 — 글자를 읽지 않고 그대로 저장합니다`
+    );
   };
 
   return (
@@ -247,37 +265,65 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
             ) : null}
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <label className="chip flex-1 cursor-pointer gap-2 border-slate-200 bg-white text-slate-700">
-              <Camera className="h-5 w-5" />
-              사진 {c.photos?.length || 0}/6
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                aria-label="현장 사진 선택"
-                onChange={(e) => {
-                  onPhotos(e.target.files);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-            <BigButton variant="amber" className="flex-1" onClick={analyze} disabled={analyzing}>
-              {analyzing ? <Loader2 className="h-5 w-5 animate-spin" /> : aiOn ? <Sparkles className="h-5 w-5" /> : <Wand2 className="h-5 w-5" />}
-              {analyzing ? '읽는 중…' : aiOn ? 'AI 정밀 분석' : '자동으로 분류'}
-            </BigButton>
+          <div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="chip cursor-pointer gap-1.5 border-brand/30 bg-brand-soft px-2 text-brand-strong">
+                <span aria-hidden className="text-base leading-none">💬</span>
+                <span className="flex flex-col items-start leading-4">
+                  <span className="whitespace-nowrap text-[13px] font-extrabold">숨고·카톡 스샷</span>
+                  <span className="text-[10px] font-bold text-brand/80">글자 읽기 · {shots.length}/6</span>
+                </span>
+                <input
+                  ref={shotRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  aria-label="숨고·카톡 스샷 선택"
+                  onChange={(e) => {
+                    onPhotos(e.target.files, 'screenshot');
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <label className="chip cursor-pointer gap-1.5 border-slate-200 bg-white px-2 text-slate-700">
+                <span aria-hidden className="text-base leading-none">📷</span>
+                <span className="flex flex-col items-start leading-4">
+                  <span className="whitespace-nowrap text-[13px] font-extrabold">현장 사진</span>
+                  <span className="text-[10px] font-bold text-ink-3">바로 붙이기 · {sites.length}/6</span>
+                </span>
+                <input
+                  ref={siteRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  aria-label="현장 사진 선택"
+                  onChange={(e) => {
+                    onPhotos(e.target.files, 'site');
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+            <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
+              스샷은 글자를 읽어 내용을 채우고, 현장 사진은 글자를 읽지 않고 바로 저장합니다(AI 정밀 분석 때 사진으로 함께 봅니다).
+            </p>
           </div>
 
-          {c.photos?.length ? (
+          <BigButton variant="amber" className="w-full" onClick={analyze} disabled={analyzing}>
+            {analyzing ? <Loader2 className="h-5 w-5 animate-spin" /> : aiOn ? <Sparkles className="h-5 w-5" /> : <Wand2 className="h-5 w-5" />}
+            {analyzing ? '읽는 중…' : aiOn ? 'AI 정밀 분석' : '자동으로 분류'}
+          </BigButton>
+
+          {shots.length ? (
             <button
               type="button"
               onClick={readPhotos}
               disabled={analyzing}
               className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-ink-2 active:bg-slate-50 disabled:opacity-50"
             >
-              <ScanText className="h-4 w-4" /> 사진 속 글자만 다시 읽기
+              <ScanText className="h-4 w-4" /> 스샷 속 글자만 다시 읽기
             </button>
           ) : null}
           {ocrHint ? (
@@ -302,9 +348,17 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
                   ) : (
                     <div className="flex h-24 items-center justify-center text-2xl">🖼️</div>
                   )}
+                  <span
+                    className={cx(
+                      'absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-black leading-4 text-white',
+                      p.kind === 'screenshot' ? 'bg-brand' : 'bg-ink/80'
+                    )}
+                  >
+                    {p.kind === 'screenshot' ? '스샷' : p.kind === 'site' ? '현장' : '사진'}
+                  </span>
                   <button
                     type="button"
-                    aria-label="사진 삭제"
+                    aria-label={p.kind === 'screenshot' ? '스샷 삭제' : '현장 사진 삭제'}
                     onClick={() => update({ photos: c.photos.filter((_, idx) => idx !== i) })}
                     className="absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-rose-600"
                   >
