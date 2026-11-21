@@ -31,7 +31,7 @@ export default function WasteVehicleSwitch({ c, update, showToast, className = '
               )}
             >
               <span>{v.label}</span>
-              <span className={cx('num text-[10.5px] font-bold', on ? 'text-amber-50' : 'text-amber-700')}>
+              <span className={cx('num text-[11.5px] font-bold', on ? 'text-amber-50' : 'text-amber-700')}>
                 약 {Math.round(Number(v.rate) || 0)}만
               </span>
             </button>

@@ -146,7 +146,7 @@ export default function Workspace({
                 >
                   <span
                     className={cx(
-                      'num flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px] font-black',
+                      'num flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] font-black',
                       active ? 'bg-white/25 text-white' : 'bg-white text-ink-3'
                     )}
                   >
@@ -225,7 +225,7 @@ export default function Workspace({
       </div>
 
       {/* 다음 단계 */}
-      <div className="bottom-bar fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/70 bg-white/92 px-4 pt-2.5 backdrop-blur no-print">
+      <div className="bottom-bar fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/70 bg-white px-4 pt-2.5 shadow-[0_-6px_18px_rgba(15,23,42,0.06)] no-print">
         <div className="mx-auto max-w-3xl">
           <BigButton variant={tab === 6 ? 'ghost' : 'primary'} className="w-full" onClick={goNext}>
             {tab < 6 ? (

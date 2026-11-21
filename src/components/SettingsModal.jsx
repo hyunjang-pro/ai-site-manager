@@ -96,7 +96,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
       open={open}
       onClose={onClose}
       title="설정"
-      backLabel="닫기"
+      hideBack
       footer={
         <BigButton className="w-full" onClick={save}>
           저장하기
@@ -112,7 +112,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
               사진+글을 함께 읽어 공종·자재·인력·답사 체크를 뽑고, 비포→애프터 예상 사진도 만듭니다. 키가 없으면 내장 규칙으로 100% 동작합니다.
             </p>
           </div>
-          <span className={cx('shrink-0 rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold', apiKey.trim() ? 'bg-brand text-white' : 'bg-white text-ink-3')}>
+          <span className={cx('shrink-0 rounded-lg px-1.5 py-0.5 text-[11px] font-extrabold', apiKey.trim() ? 'bg-brand text-white' : 'bg-white text-ink-3')}>
             {apiKey.trim() ? 'ON' : 'OFF'}
           </span>
         </div>
@@ -252,7 +252,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
                         className="num w-full border-0 bg-transparent p-0 text-base font-extrabold text-ink outline-none focus:ring-0"
                       />
                       {String(f.unit).includes('㎡') ? (
-                        <span className="mt-0.5 block text-[10px] font-bold leading-3 text-brand/80">
+                        <span className="mt-0.5 block text-[11px] font-bold leading-3 text-brand/80">
                           (평당 약 {perPyeong(getRate(rates, f.path))}만)
                         </span>
                       ) : null}

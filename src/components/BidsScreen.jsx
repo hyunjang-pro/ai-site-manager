@@ -58,15 +58,15 @@ export default function BidsScreen({ onImport }) {
       >
         <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-white/10 p-1.5 text-center">
           <div>
-            <p className="text-[10px] font-bold text-blue-200">안동시</p>
+            <p className="text-[11px] font-bold text-blue-200">안동시</p>
             <p className="num text-lg font-black text-white">{stats.andong}</p>
           </div>
           <div>
-            <p className="text-[10px] font-bold text-blue-200">경북·인근</p>
+            <p className="text-[11px] font-bold text-blue-200">경북·인근</p>
             <p className="num text-lg font-black text-white">{stats.open - stats.andong}</p>
           </div>
           <div>
-            <p className="text-[10px] font-bold text-blue-200">전체 수집</p>
+            <p className="text-[11px] font-bold text-blue-200">전체 수집</p>
             <p className="num text-lg font-black text-white">{stats.total}</p>
           </div>
         </div>
@@ -206,9 +206,9 @@ function BidRow({ bid, onOpen }) {
               <Pill tone={statusTone(bid)} icon={false} dot>
                 {closed ? '마감' : dLabel(bid.deadline)}
               </Pill>
-              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-extrabold text-ink-2">{bid.trade}</span>
+              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-extrabold text-ink-2">{bid.trade}</span>
               {bid.regionKey === 'andong' ? (
-                <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-extrabold text-blue-700">안동</span>
+                <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-extrabold text-blue-700">안동</span>
               ) : null}
             </div>
             <h3 className="mt-1.5 line-clamp-2 text-[15px] font-extrabold leading-5 tracking-tight text-ink">{bid.title}</h3>
@@ -222,15 +222,15 @@ function BidRow({ bid, onOpen }) {
 
         <div className="mt-2.5 flex items-end justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
           <div>
-            <p className="text-[10px] font-bold text-ink-3">추정가격</p>
+            <p className="text-[11px] font-bold text-ink-3">추정가격</p>
             <p className="num text-lg font-black leading-6 text-ink">{wonText(p.est)}원</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold text-ink-3">예상 투찰가 (88%)</p>
+            <p className="text-[11px] font-bold text-ink-3">예상 투찰가 (88%)</p>
             <p className="num text-sm font-extrabold text-brand-strong">{wonText(p.bidPrice)}원</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold text-ink-3">예상 남는 돈</p>
+            <p className="text-[11px] font-bold text-ink-3">예상 남는 돈</p>
             <p className={cx('num text-sm font-extrabold', p.profit > 0 ? 'text-emerald-600' : 'text-rose-600')}>+{wonText(p.profit)}원</p>
           </div>
         </div>

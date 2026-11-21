@@ -228,8 +228,8 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
         status={
           <div className="flex flex-col items-end gap-1">
             <Pill tone={c.rawInput ? 'ok' : 'warn'}>{c.rawInput ? '입력됨' : '비어 있음'}</Pill>
-            <span className={cx('rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold', aiOn ? 'bg-brand text-white' : 'bg-slate-100 text-ink-3')}>
-              {aiOn ? '🤖 AI 정밀 분석 ON' : '로컬 규칙 모드'}
+            <span className={cx('rounded-lg px-1.5 py-0.5 text-[11px] font-extrabold', aiOn ? 'bg-brand text-white' : 'bg-slate-100 text-ink-3')}>
+              {aiOn ? '🤖 AI 정밀 분석 ON' : 'AI 없이 자동 분류'}
             </span>
           </div>
         }
@@ -272,7 +272,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
                 <span aria-hidden className="text-base leading-none">💬</span>
                 <span className="flex flex-col items-start leading-4">
                   <span className="whitespace-nowrap text-[13px] font-extrabold">숨고·카톡 스샷</span>
-                  <span className="text-[10px] font-bold text-brand/80">글자 읽기 · {shots.length}/6</span>
+                  <span className="text-[11px] font-bold text-brand/80">글자 읽기 · {shots.length}/6</span>
                 </span>
                 <input
                   ref={shotRef}
@@ -291,7 +291,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
                 <span aria-hidden className="text-base leading-none">📷</span>
                 <span className="flex flex-col items-start leading-4">
                   <span className="whitespace-nowrap text-[13px] font-extrabold">현장 사진</span>
-                  <span className="text-[10px] font-bold text-ink-3">바로 붙이기 · {sites.length}/6</span>
+                  <span className="text-[11px] font-bold text-ink-3">바로 붙이기 · {sites.length}/6</span>
                 </span>
                 <input
                   ref={siteRef}
@@ -310,7 +310,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
             <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
               스샷은 글자를 읽어 내용을 채우고, 현장 사진은 글자를 읽지 않고 바로 저장합니다(AI 정밀 분석 때 사진으로 함께 봅니다).
             </p>
-            <p className="mt-1 text-[10.5px] font-semibold leading-4 text-ink-4">
+            <p className="mt-1 text-[11.5px] font-semibold leading-4 text-ink-4">
               갤럭시에서 ‘갤러리’가 안 보이면 <b>내 파일 &gt; 이미지</b>에서 골라도 똑같이 붙습니다.
             </p>
           </div>
@@ -354,7 +354,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
                   )}
                   <span
                     className={cx(
-                      'absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-black leading-4 text-white',
+                      'absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[11px] font-black leading-4 text-white',
                       p.kind === 'screenshot' ? 'bg-brand' : 'bg-ink/80'
                     )}
                   >
@@ -450,7 +450,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
               <TextInput
                 value={newScope}
                 onChange={(e) => setNewScope(e.target.value)}
-                placeholder="목록에 없는 공종 (예) 부지 정지, 배수로 정비"
+                placeholder="예) 부지 정지"
                 aria-label="직접 공종 추가"
               />
               <SmallButton

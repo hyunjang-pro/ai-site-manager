@@ -11,13 +11,25 @@ export const SUBSIDY_RULES = {
   phone: '1533-0100',
 };
 
-const STORE_TEXT = /상가|점포|매장|폐업|원상복구|임차|사무실/;
+const STORE_TEXT = /상가|점포|매장|폐업|원상복구|임차|사무실|식당|음식점|카페|학원|병원|약국|마트|편의점|미용실|네일|피시방|PC방|공장|창고|근린|상업|건물|빌딩/;
+// 주거용은 점포철거비 대상이 아니다 (건축물대장 용도가 주거면 지원 불가).
+// '상가주택'처럼 상가가 섮인 건물은 상가로 본다.
+const HOME_TEXT = /아파트|오피스텔|빌라|원룸|투룸|기숙사|주거용|주택|단독주택|전원주택|농가|한옥/;
+
+function isResidential(text = '') {
+  if (/상가주택|상가\s*건물|1층\s*상가|근린상가|상가\s*임대/.test(text)) return false;
+  return HOME_TEXT.test(text);
+}
 
 export function subsidyInfo(c) {
   const text = `${c?.title || ''} ${c?.notes || ''} ${c?.rawInput || ''} ${c?.location || ''}`;
-  // 점포철거비는 '철거'가 들어간 상가 현장만 — 폐기물 수거·욕실·도배 현장에는 해당 없음
   const demoJob = c?.trade === 'demolition' || hasScope(c, 'demolition');
-  const storeish = demoJob && (c?.trade === 'demolition' || c?.trade === 'combined' || STORE_TEXT.test(text));
+  // 점포철거비는 '상가 점포' 철거만 — 주거(아파트·주택·빌라) 철거에 "정부 지원 300만"을
+  // 안내하면 손님에게 잘못된 약속을 하게 된다. 상가 글자가 없으면 상가로 단정하지 않는다.
+  const storeish =
+    demoJob &&
+    !isResidential(text) &&
+    (STORE_TEXT.test(text) || (!c?.trade || c?.trade === 'demolition' || c?.trade === 'combined'));
   const value = parseFloat(c?.sizeValue);
   const unit = c?.sizeUnit;
   let pyung = null;

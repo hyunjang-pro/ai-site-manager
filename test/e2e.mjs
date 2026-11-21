@@ -640,7 +640,7 @@ async function main() {
     record('정보: 스샷·현장 사진 버튼 분리', t.includes('숨고·카톡 스샷') && t.includes('현장 사진'));
     record('정보: 사진 없으면 “스샷 글자만 읽기” 숨김', !t.includes('스샷 속 글자만 다시 읽기'));
     record('정보: 무엇을 하는지 입력칸 없음', !t.includes('무엇을 하는지 적어주세요'));
-    record('정보: 로컬 규칙 모드 표시', t.includes('로컬 규칙 모드'));
+    record('정보: AI 없이 자동 분류 표시', t.includes('AI 없이 자동 분류'));
     await shot('30-info.png');
   });
 
@@ -753,7 +753,7 @@ async function main() {
     await page.waitForTimeout(350);
     record('견적 멘트: 1탭 복사', (await page.getByText('견적 멘트를 복사했습니다').count()) >= 1);
 
-    await page.getByRole('button', { name: '앱 계산가로', exact: true }).click();
+    await page.getByRole('button', { name: '앱 계산가로 되돌리기', exact: true }).click();
     await page.waitForTimeout(350);
     record('가견적 호가: 앱 계산가로 원복', (await input.inputValue()) === String(appPrice), await input.inputValue());
   });
@@ -871,7 +871,7 @@ async function main() {
   await step('3단계 답사 · 빠뜨리기 쉬운 비용 0원', async () => {
     await goTab(3);
     const t = await mainText();
-    record('답사: 메모·현장 점검·부대비용', t.includes('답사 메모·사진') && t.includes('현장 점검') && t.includes('현장 부대비용'));
+    record('답사: 메모·현장 점검·부대비용', t.includes('답사 메모·사진') && t.includes('현장 점검') && t.includes('답사에서 더 챙길 비용'));
     const row = page.getByRole('button', { name: /거주 중 시공/ });
     await row.first().click();
     await page.waitForTimeout(250);
@@ -898,7 +898,7 @@ async function main() {
     const t = await mainText();
     record('수익: 최종 판단 신호등', /진행 추천|조율 후 진행|포기·패스 권장/.test(t));
     record('수익: 가견적 → 최종 비교', t.includes('가견적 → 최종 견적'));
-    record('수익: 하루 일당', /하루 뛰면 [\d,]+만원/.test(t));
+    record('수익: 하루 일당', /하루 뛰면 [-−]?[\d,]+만원/.test(t));
     record('수익: 방어선 근거', t.includes('최소 안전마진 5%'));
     record('수익: −0만 숨김', !t.includes('−0만') && !t.includes('-0만'));
     const toggle = page.getByRole('button', { name: /손님이 가격 깎자고 할 때만 열어보기/ });
@@ -909,7 +909,7 @@ async function main() {
     record('수익: 열면 절감 대안 표시', tOpen.includes('가격을 맞추려면 이렇게 줄이세요'));
     record('수익: 마감 공종 대안', tOpen.includes('자재 등급 한 단계 낮추기') || tOpen.includes('준공 청소는 손님이 직접'));
     record('수익: −0만 없음(대안)', !/[-−]0만/.test(tOpen));
-    record('수익: 항목별 산출 근거', t.includes('항목별 산출 근거') && t.includes('인건비') && /인건비 [\d,]+만 · 폐기물/.test(t));
+    record('수익: 항목별 산출 근거', t.includes('항목별 산출 근거') && t.includes('인건비') && /다섯 줄을 더하면 보수적 원가 [\d,]+만원/.test(t));
     record('수익: Before/After 카드', t.includes('BEFORE') && t.includes('AFTER (예상)'));
     record('수익: AI 미연결 안내', t.includes('설정에서 Gemini API 키를 연결하면'));
     await page.getByRole('button', { name: '일 끝나고 전액' }).click();
@@ -926,6 +926,9 @@ async function main() {
     const t0 = await mainText();
     const input = page.getByLabel('내가 부른 금액(만원)');
     record('부른 금액: 4단계 최상단 입력칸', (await input.count()) === 1);
+    // 앞 단계에서 입력한 금액이 남아 있으면 먼저 되돌린다 — '기본값 = 앱 계산가'는 빈 상태의 약속이다
+    await page.getByRole('button', { name: '앱 계산가로 되돌리기' }).click();
+    await page.waitForTimeout(300);
     const appMatch = t0.match(/앱 계산가 ([\d,]+)만원/);
     const costMatch = t0.match(/보수적 원가 ([\d,]+)만원은 이렇게 나옵니다/);
     const bufMatch = t0.match(/돌발 예비비 [\d.]+%\(([\d,]+)\)/);
@@ -1187,7 +1190,7 @@ async function main() {
     record('모달: 사진 버튼 2개로 분리', modal.includes('숨고·카톡 스샷') && modal.includes('현장 사진') && !modal.includes('사진·스샷 올리기'));
     record('모달: 안내 1줄', modal.includes('스샷 글자는 기기 안에서만'));
     record('모달: 스샷/현장 설명', modal.includes('스샷은 글자를 읽어') && modal.includes('현장 사진은 글자를 읽지 않고'));
-    record('모달: 로컬 규칙 모드 표시', modal.includes('로컬 규칙 모드'));
+    record('모달: AI 없이 자동 분류 표시', modal.includes('AI 없이 자동 분류'));
     await page.getByLabel('현장 요청 내용').fill('경북 안동시 용산동 생활폐기물 한차, 엘리베이터로 운반, 재활용 가능');
     await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
@@ -1536,7 +1539,8 @@ async function main() {
     const stuck = !!box && box.y > -1 && box.y + box.height <= 845;
     record('설정: 스크롤해도 상단 헤더 그대로', stuck, box ? `y=${Math.round(box.y)} h=${Math.round(box.height)}` : '헤더 없음');
     const headTxt = await head.innerText();
-    record('설정: 헤더에 [← 닫기]·설정', headTxt.includes('설정') && headTxt.includes('닫기'), headTxt.replace(/\n/g, ' '));
+    // 상단에 ← 닫기와 × 닫기가 겹쳐 있던 것을 × 하나로 정리했다 (헤더는 그대로 고정)
+    record('설정: 헤더에 설정·닫기(×) 하나', headTxt.includes('설정') && (await modal.getByLabel('닫기').count()) === 1, headTxt.replace(/\n/g, ' '));
     record('설정: 평당 환산 5곳', (await modal.getByText(/\(평당 약 [\d.]+만\)/).count()) === 5, String(await modal.getByText(/\(평당 약 [\d.]+만\)/).count()));
     record('설정: 타일 시공 4.5 → (평당 약 14.9만)', (await modal.getByText('(평당 약 14.9만)').count()) >= 1);
     await shot('50-settings-sticky.png');

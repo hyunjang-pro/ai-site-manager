@@ -168,7 +168,10 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
             </div>
           ) : null}
           <div className="mt-2 flex items-end justify-between border-t border-slate-200 pt-2">
-            <span className="text-base font-extrabold">합계</span>
+            <span className="text-base font-extrabold">
+              합계
+              <span className="ml-1.5 align-middle text-[11px] font-bold text-slate-500">{c.includeVat ? '부가세 포함' : '부가세 별도'}</span>
+            </span>
             <span className="text-3xl font-extrabold tabular-nums text-slate-900" data-testid="quote-total" data-amount={Math.round(doc.total)}>
               {Math.round(doc.total).toLocaleString('ko-KR')}
               <span className="ml-1 text-lg">만원</span>
@@ -194,7 +197,6 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
               <span className="num">{Math.round(doc.payments.balance.amount).toLocaleString('ko-KR')}만원</span>
             </div>
           </div>
-          <p className="mt-1 text-sm text-slate-600">{c.includeVat ? '부가세 포함' : '부가세 별도'}</p>
         </div>
 
         {doc.changeLines.length ? (

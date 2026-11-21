@@ -9,6 +9,7 @@ import { estimateWorkDays } from '../../lib/schedule.js';
 import AfterPreview, { PREVIEW_TRADES } from '../AfterPreview.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import { finalSignal, aiSignalOf } from '../../lib/budget.js';
+import { clientHonorific } from '../../lib/docs.js';
 import { materialSetFor, materialSetsFor } from '../../lib/materials.js';
 import { hasInteriorStyle } from '../../lib/constants.js';
 import { useCalledPrice } from '../../lib/useCalledPrice.js';
@@ -62,10 +63,11 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   // ---- 원가 구성 비중 ----
   const parts = [
     { id: 'labor', label: '인건비', value: Math.round(calc.laborTotal), tone: 'bg-brand' },
-    { id: 'waste', label: '폐기물·운반', value: Math.round(calc.wasteTotal + calc.equipTotal + (calc.lifting?.cost || 0)), tone: 'bg-amber-500' },
+    { id: 'waste', label: '폐기물·운반', value: Math.round(calc.wasteTotal + calc.equipTotal), tone: 'bg-amber-500' },
     { id: 'material', label: '자재', value: Math.round(calc.materialTotal), tone: 'bg-cyan-500' },
+    { id: 'site', label: '현장·규제', value: Math.round(calc.surchargeExtra || 0), tone: 'bg-violet-500' },
     { id: 'buffer', label: `예비비 ${calc.bufferRate}%`, value: Math.round(calc.costBuffer), tone: 'bg-slate-400' },
-  ];
+  ].filter((p) => p.value > 0);
   const partsTotal = Math.max(1, parts.reduce((s, p) => s + Math.max(0, p.value), 0));
 
   // ---- 실전 원가 절감 스위치 ----
@@ -123,7 +125,8 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
     },
   ].filter((s) => s.show && Math.round(s.saving) > 0);
 
-  const savingsTotal = switches.filter((s) => s.on).reduce((sum, s) => sum + s.saving, 0);
+  // 반올림한 값으로 합계를 낸다 — 0.4만처럼 남는 소수가 '−0만'으로 찍히지 않게
+  const savingsTotal = Math.round(switches.filter((s) => s.on).reduce((sum, s) => sum + s.saving, 0));
 
   // 공종에 맞는 '진짜 아끼는' 대안만 — 0만원짜리는 목록에서 뺀다.
   const isFinishTrade = ['wallpaper', 'bathroom', 'kitchen', 'tilewaterproof', 'window', 'plaster', 'combined', 'custom', 'repair'].includes(calc.trade);
@@ -190,12 +193,14 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
 
 
   // 고객에게 보내는 말에는 내 순수익·남는 돈을 절대 쓰지 않는다.
+  // 상가면 사장님, 집·아파트면 고객님 — 앱 공종 이름이 아니라 손님이 적어 준 말로 고른다
+  const who = clientHonorific(c, calc);
   const message = useMemo(() => {
     if (result.below || result.thin) {
-      return `사장님, 인건비와 폐기물 처리 실비가 워낙 올라서 ${pers(result.price)}만원으로는 손해라 어렵습니다. ${pers(defense)}만원까지 맞춰주시면 바로 진행하겠습니다.`;
+      return `${who}, 인건비와 폐기물 처리 실비가 워낙 올라서 ${pers(result.price)}만원으로는 손해라 어렵습니다. ${pers(defense)}만원까지 맞춰주시면 바로 진행하겠습니다.`;
     }
-    return '사장님, 말씀하신 금액 선에서 인력·자재 빠짐없이 챙겨서 꼼꼼히 책임 시공하겠습니다.';
-  }, [result, defense]);
+    return `${who}, 말씀하신 금액 선에서 인력·자재 빠짐없이 챙겨서 꼼꼼히 책임 시공하겠습니다.`;
+  }, [result, defense, who]);
 
   const sliderMax = Math.max(Math.ceil(listPrice * 1.5), Math.ceil((Number(proposal) || 0) * 1.2), 500);
   const sliderMin = Math.max(0, Math.floor(cost * 0.7));
@@ -284,8 +289,18 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
               <span className="ml-1 text-2xs font-bold text-ink-3">(보수적 원가 {pers(cost)}만 기준)</span>
             </p>
             <p className="mt-1 rounded-xl bg-white/70 px-2.5 py-1.5 text-[12.5px] font-extrabold text-emerald-800">
-              하루 뛰면 {pers(dailyProfit)}만원 · 공사 {workDays}일 기준
-              <span className="mt-0.5 block text-2xs font-bold text-emerald-700">총 남는 돈 ÷ 공사일수</span>
+              {/* 관공서 공고는 공사기간을 모른다 — '공사 1일 기준 하루 1,809만원' 같은 숫자가 나오면 안 된다 */}
+              {calc.isBid ? (
+                <>
+                  공사 기간은 공고문에서 확인하세요
+                  <span className="mt-0.5 block text-2xs font-bold text-emerald-700">기간을 넣으면 하루 수익까지 계산됩니다</span>
+                </>
+              ) : (
+                <>
+                  하루 뛰면 {pers(dailyProfit)}만원 · 공사 {workDays}일 기준
+                  <span className="mt-0.5 block text-2xs font-bold text-emerald-700">총 남는 돈 ÷ 공사일수</span>
+                </>
+              )}
             </p>
           </div>
 
@@ -354,7 +369,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         ) : null}
         {(calc.changeLogs || []).length ? (
           <div className="mt-2 space-y-1">
-            {(calc.changeLogs || []).map((l) => {
+            {(calc.changeLogs || []).filter((l) => Number(l.amount) !== 0).map((l) => {
               const up = l.type !== 'decrease';
               return (
                 <div key={l.id} className="flex items-start justify-between gap-2 rounded-xl bg-white px-2.5 py-1.5 ring-1 ring-slate-200">
@@ -388,8 +403,16 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
 
         <div className="mt-2 rounded-2xl bg-slate-50 p-3">
           <p className="mt-1 text-[13px] font-semibold leading-5 text-ink-2">
-            인건비 {pers(calc.laborTotal)} + 폐기물 {pers(calc.wasteTotal)} + 자재·운반 {pers(calc.materialTotal)} + 장비{' '}
-            {pers(calc.equipTotal + (calc.lifting?.cost || 0))} = 기본 원가 <b className="text-ink">{pers(baseCost)}</b>
+            {[
+              ['인건비', calc.laborTotal],
+              ['폐기물·운반', calc.wasteTotal + calc.equipTotal],
+              ['자재', calc.materialTotal],
+              ['현장·규제', calc.surchargeExtra || 0],
+            ]
+              .filter(([, v]) => Math.round(v) > 0)
+              .map(([label, v]) => `${label} ${pers(v)}`)
+              .join(' + ')}{' '}
+            = 기본 원가 <b className="text-ink">{pers(baseCost)}</b>
             <br />+ 돌발 예비비 {calc.bufferRate}%({pers(calc.costBuffer)}) = <b className="text-ink">{pers(cost)}만원</b>
           </p>
           <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-white">
@@ -420,17 +443,23 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
               .map((i) => (
                 <div key={i.id} className="flex items-start justify-between gap-2 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-200">
                   <div className="min-w-0">
-                    <p className="text-[12px] font-bold leading-4 text-ink">{i.name}</p>
+                    <p className="text-[12px] font-bold leading-4 text-ink">
+                      {i.name}
+                      {/* 조건부 비용은 원가 합계에 안 들어간다 — '별도'라고 적어 두지 않으면 항목 합이 안 맞아 보인다 */}
+                      {i.conditional ? (
+                        <span className="ml-1 rounded bg-amber-50 px-1 py-0.5 text-[11px] font-extrabold text-amber-800">별도 · 발생 시</span>
+                      ) : null}
+                    </p>
                     {i.detail ? <p className="text-[11px] leading-4 text-ink-3">{i.detail}</p> : null}
                   </div>
-                  <span className={cx('num shrink-0 whitespace-nowrap text-[12px] font-extrabold', i.amount < 0 ? 'text-emerald-700' : 'text-ink-2')}>
+                  <span className={cx('num shrink-0 whitespace-nowrap text-[12px] font-extrabold', i.conditional ? 'text-ink-3' : i.amount < 0 ? 'text-emerald-700' : 'text-ink-2')}>
                     {i.amount > 0 ? '+' : ''}
                     {pers(i.amount)}만
                   </span>
                 </div>
               ))}
             <p className="text-2xs font-semibold leading-4 text-ink-3">
-              인건비 {pers(calc.laborTotal)}만 · 폐기물·운반 {pers(calc.wasteTotal + calc.equipTotal + (calc.lifting?.cost || 0))}만 · 자재 {pers(calc.materialTotal)}만 · 예비비 {pers(calc.costBuffer)}만
+              위 다섯 줄을 더하면 보수적 원가 {pers(cost)}만원입니다 (기본 원가 {pers(baseCost)} + 예비비 {pers(calc.costBuffer)})
             </p>
           </div>
 

@@ -468,7 +468,7 @@ export function WarningBox({ tone = 'warn', title, children }) {
 export function Toast({ message }) {
   if (!message) return null;
   return (
-    <div className="fixed inset-x-4 bottom-24 z-[90] flex justify-center no-print" role="status" aria-live="polite">
+    <div className="fixed inset-x-4 bottom-[7.75rem] z-[90] flex justify-center no-print" role="status" aria-live="polite">
       <div className="animate-rise flex max-w-md items-center gap-2.5 rounded-2xl bg-ink/95 px-4 py-3.5 text-sm font-bold text-white shadow-float backdrop-blur">
         <Check className="h-4 w-4 shrink-0 text-emerald-400" strokeWidth={3} />
         <span>{message}</span>
@@ -477,22 +477,24 @@ export function Toast({ message }) {
   );
 }
 
-export function Modal({ open, onClose, title, children, footer, subtitle, onBack, backLabel = '뒤로' }) {
+export function Modal({ open, onClose, title, children, footer, subtitle, onBack, backLabel = '뒤로', hideBack = false }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-900/50 backdrop-blur-[2px] sm:items-center sm:p-6 no-print">
       <div role="dialog" aria-modal="true" aria-label={title} className="animate-rise modal-sheet flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-float sm:max-h-[88dvh] sm:rounded-3xl">
         {/* 상단 바 — 스크롤해도 절대 가려지지 않는다 */}
         <div className="modal-top flex shrink-0 items-center gap-2 border-b border-slate-200/70 bg-white/95 px-3 py-2.5 backdrop-blur">
-          <button
-            type="button"
-            onClick={onBack || onClose}
-            aria-label={backLabel}
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-slate-100 px-3 text-sm font-bold text-ink-2 active:bg-slate-200"
-          >
-            <ArrowLeft className="h-4 w-4" strokeWidth={2.6} />
-            <span>{backLabel}</span>
-          </button>
+          {hideBack ? null : (
+            <button
+              type="button"
+              onClick={onBack || onClose}
+              aria-label={backLabel}
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-slate-100 px-3 text-sm font-bold text-ink-2 active:bg-slate-200"
+            >
+              <ArrowLeft className="h-4 w-4" strokeWidth={2.6} />
+              <span>{backLabel}</span>
+            </button>
+          )}
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-lg font-extrabold tracking-tight text-ink">{title}</h2>
             {subtitle ? <p className="truncate text-2xs font-medium text-ink-3">{subtitle}</p> : null}

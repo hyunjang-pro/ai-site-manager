@@ -1,4 +1,6 @@
 // 고객 예산 · 보수적 원가 · 마진으로 '이 일을 잡을지' 신호등을 만든다.
+import { estimateWorkDays } from './schedule.js';
+
 export function parseBudget(text = '') {
   const t = String(text || '').replace(/\s+/g, ' ');
   const m = t.match(/예산\s*[:：]?\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외|정도|까지)?/);
@@ -16,7 +18,8 @@ export function quoteSignal(calc, c) {
   const price = Math.round(calc.clientPrice);
   const cost = Math.round(calc.costWithBuffer);
   const margin = calc.marginBuffered;
-  const days = Math.max(1, parseInt(c?.workDays, 10) || 1);
+  // 공사일수는 화면에 보이는 기간과 같은 값을 쓴다 — 4단계처럼 '하루 32만', 2단계만 '하루 96만'으로 어긋나지 않게.
+  const days = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
   const daily = Math.round(calc.netProfitBuffered / days);
   const reasons = [];
 
@@ -34,6 +37,9 @@ export function quoteSignal(calc, c) {
     if (margin <= 8 || calc.netProfitBuffered <= 0) {
       tone = 'red';
       reasons.push(`보수적 마진 ${pct(margin)} · 남는 돈 ${Math.round(calc.netProfitBuffered)}만 — 하자 한 번이면 적자입니다.`);
+    } else if (calc.isBid) {
+      // 공고는 공사기간이 없어 '하루 수익'이 의미 없다 — 마진으로만 말한다
+      reasons.push(`보수적 마진 ${pct(margin)} — 공고 실행원가(수주금액 80%) 기준입니다.`);
     } else if (margin < 18) {
       tone = 'yellow';
       reasons.push(`보수적 마진 ${pct(margin)} · 하루 ${daily}만 — 실측·범위 조율 조건으로 제안하세요.`);
@@ -45,9 +51,9 @@ export function quoteSignal(calc, c) {
     reasons.push(`고객 예산 ${budget.toLocaleString('ko-KR')}만 안에 들어옵니다.`);
   }
   const map = {
-    green: { emoji: '🟢', title: '적극 추천 (견적 캐시 써도 좋습니다)', tone: 'ok' },
+    green: { emoji: '🟢', title: '적극 추천 (바로 견적 내도 좋습니다)', tone: 'ok' },
     yellow: { emoji: '🟡', title: '해볼 만함 (실측·범위 조율 조건으로 제안)', tone: 'warn' },
-    red: { emoji: '🔴', title: '비추천 · 패스 권장 (캐시 아깝습니다)', tone: 'bad' },
+    red: { emoji: '🔴', title: '비추천 · 패스 권장 (이 금액이면 손해)', tone: 'bad' },
   };
   return { ...map[tone], level: tone, budget, price, cost, margin, daily, reasons };
 }
@@ -59,7 +65,7 @@ export function finalSignal(calc, c) {
   const target = proposal > 0 ? proposal : Math.round(calc.clientPrice);
   const cost = Math.round(calc.costWithBuffer);
   const margin = target > 0 ? Math.round(((target - cost) / target) * 100) : 0;
-  const days = Math.max(1, parseInt(c?.workDays, 10) || 1);
+  const days = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
   const daily = Math.round((target - cost) / days);
   const risks = [];
   const logs = Array.isArray(c?.changeLogs) ? c.changeLogs : [];

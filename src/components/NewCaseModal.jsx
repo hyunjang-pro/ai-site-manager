@@ -273,7 +273,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       onBack={headerBack}
       backLabel={step === 'result' ? '다시 입력' : '닫기'}
       title={step === 'input' ? '새 현장 만들기' : '자동으로 잡았습니다'}
-      subtitle={step === 'input' ? '숨고·카톡·스샷을 그대로 넣으면 알아서 분류합니다' : '공종·규모는 아래에서 고쳐도 됩니다'}
+      subtitle={step === 'input' ? '숨고·카톡·스샷으로 자동 분류' : '공종·규모는 아래에서 고쳐도 됩니다'}
       footer={
         step === 'result' ? (
           <>
@@ -294,16 +294,14 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
                 <span className="mr-1 rounded-md bg-ink px-1.5 py-0.5 text-2xs font-black text-white">1</span>
                 숨고·카톡·메모를 그대로 넣으세요
               </span>
-              <span className="flex items-center gap-1.5">
-                <span
-                  className={cx(
-                    'rounded-lg px-1.5 py-0.5 text-[10px] font-extrabold',
-                    aiOn ? 'bg-brand text-white' : 'bg-slate-100 text-ink-3'
-                  )}
-                >
-                  {aiOn ? '🤖 AI 정밀 분석 ON' : '로컬 규칙 모드'}
-                </span>
-                <Pill tone="info" icon={false}>자동 분류</Pill>
+              {/* 상태 배지 하나만 — '자동 분류' 배지를 겹쳐 두면 두 줄로 꺾이고 뜻이 겹친다 */}
+              <span
+                className={cx(
+                  'shrink-0 whitespace-nowrap rounded-lg px-1.5 py-0.5 text-[11px] font-extrabold',
+                  aiOn ? 'bg-brand text-white' : 'bg-slate-100 text-ink-3'
+                )}
+              >
+                {aiOn ? '🤖 AI 정밀 분석 ON' : 'AI 없이 자동 분류'}
               </span>
             </div>
             <TextArea
@@ -327,7 +325,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
                 <span className="flex items-center gap-1 whitespace-nowrap text-[13px] font-extrabold leading-5">
                   <span aria-hidden className="text-base leading-none">💬</span> 숨고·카톡 스샷
                 </span>
-                <span className="text-[10.5px] font-bold leading-4 text-brand/80">글자 읽기 · {shotCount}/6</span>
+                <span className="text-[11.5px] font-bold leading-4 text-brand/80">글자 읽기 · {shotCount}/6</span>
               </button>
               <button
                 type="button"
@@ -338,7 +336,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
                 <span className="flex items-center gap-1 whitespace-nowrap text-[13px] font-extrabold leading-5">
                   <span aria-hidden className="text-base leading-none">📷</span> 현장 사진
                 </span>
-                <span className="text-[10.5px] font-bold leading-4 text-ink-3">바로 첨부 · {siteCount}/6</span>
+                <span className="text-[11.5px] font-bold leading-4 text-ink-3">바로 첨부 · {siteCount}/6</span>
               </button>
             </div>
             <input
@@ -369,7 +367,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
               <b className="text-brand-strong">스샷은 글자를 읽어</b> 내용을 채우고, <b className="text-ink-2">현장 사진은 글자를 읽지 않고</b> 바로
               붙어요. 현장 사진은 AI 정밀 분석 때 사진으로 함께 봅니다.
             </p>
-            <p className="mt-1 text-[10.5px] font-semibold leading-4 text-ink-4">
+            <p className="mt-1 text-[11.5px] font-semibold leading-4 text-ink-4">
               갤럭시에서 ‘갤러리’가 안 보이면 같은 화면의 <b>내 파일 &gt; 이미지</b>에서 골라도 똑같이 붙습니다.
             </p>
           </div>
@@ -397,7 +395,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
                   />
                   <span
                     className={cx(
-                      'absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-black leading-4',
+                      'absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[11px] font-black leading-4',
                       p.kind === 'screenshot' ? 'bg-brand text-white' : 'bg-ink/80 text-white'
                     )}
                   >

@@ -885,32 +885,40 @@ export function computeEstimate(c) {
 
   // ---- 실측 체크리스트 가산 ----
   let surchargeTotal = 0;
-  const addSurcharge = (id, category, name, detail, amount) => {
+  // 현장·규제·운반 가산은 '항목'으로만 쌓이고 원가 합계에 안 들어가면 화면엔 뜨는데
+  // 정작 견적엔 안 실려 사장님이 그 돈을 손해 본다(관리소 신고·석면·내력벽·단전단수 등).
+  // 그래서 합계에 이미 들어간 항목(inTotals)만 빼고 나머지는 surchargeExtra에 모아 원가에 더한다.
+  let surchargeExtra = 0;
+  // mode: 'extra' = 원가에 더한다(기본) · 'in' = 이미 인건비·자재 등 합계에 들어감 · 'aside' = 조건부 별도비(발생 시에만 청구)
+  const addSurcharge = (id, category, name, detail, amount, mode = 'extra') => {
     if (!amount) return;
     surchargeTotal += amount;
-    items.push({ id, category, name, detail, amount, isSurcharge: true });
+    if (mode === 'extra') surchargeExtra += amount;
+    items.push({ id, category, name, detail, amount, isSurcharge: true, conditional: mode === 'aside' });
   };
 
   const lifting = computeLifting(c, rates);
   if (lifting.cost > 0) {
-    addSurcharge('lift', '추가(운반)', `자재·폐기물 운반 — ${lifting.chosen.label}`, lifting.chosen.detail, lifting.cost);
+    addSurcharge('lift', '추가(운반)', `자재·폐기물 운반 — ${lifting.chosen.label}`, lifting.chosen.detail, lifting.cost, 'in');
     laborTotal += lifting.cost;
   }
 
   if (surveyOn(c, 'longCarry') && lifting.carryM < 30) addSurcharge('longCarry', '추가(운반)', '운반거리 30m 이상', '잡부 반일 추가', 8);
   if (surveyOn(c, 'noParking')) addSurcharge('noParking', '추가(운반)', '차량 진입·주차 곤란', '반출 대기·추가 운반', 5);
   if (surveyOn(c, 'narrowDoor')) addSurcharge('narrowDoor', '추가(운반)', '출입문·복도 협소', '소형 운반·분해 반입', 5);
-  if (surveyOn(c, 'floorHeatingPipe')) { addSurcharge('heating', '추가(구조)', '난방배관 매설 대비', '저속 파쇄·보수 예비비', 35); laborTotal += 35; }
-  if (surveyOn(c, 'existingLeak')) { addSurcharge('leak', '추가(구조)', '기존 누수 보수·방수', '보강 시공비', 30); laborTotal += 30; }
-  if (surveyOn(c, 'oldPlumbing')) { addSurcharge('plumbing', '추가(구조)', '노후 급배수관 정리', '배관 교체·압력 테스트', 25); materialTotal += 25; }
+  if (surveyOn(c, 'floorHeatingPipe')) { addSurcharge('heating', '추가(구조)', '난방배관 매설 대비', '저속 파쇄·보수 예비비', 35, 'in'); laborTotal += 35; }
+  if (surveyOn(c, 'existingLeak')) { addSurcharge('leak', '추가(구조)', '기존 누수 보수·방수', '보강 시공비', 30, 'in'); laborTotal += 30; }
+  if (surveyOn(c, 'oldPlumbing')) { addSurcharge('plumbing', '추가(구조)', '노후 급배수관 정리', '배관 교체·압력 테스트', 25, 'in'); materialTotal += 25; }
   if (surveyOn(c, 'loadBearingWall')) addSurcharge('loadBearing', '추가(구조)', '내력벽 철거 구조검토', '구조기술사 검토·보강(없으면 착공 금지)', 30);
-  if (surveyOn(c, 'asbestosRisk')) addSurcharge('asbestos', '추가(규제)', '석면 사전조사 착수비', '시료 분석·조사기관 수수료', 30);
-  if (surveyOn(c, 'workTimeLimit')) { addSurcharge('worktime', '추가(규제)', '작업시간 제한', '공사 기간이 늘어난 인건비', 20); laborTotal += 20; }
+  // 석면은 견적서 '별도 사항(발견 시 조사·처리)'과 같은 조건부 비용이다 — 미리 원가에 넣으면
+  // 작은 텍스 철거(40만)에 조사비 30만이 붙어 손님이 가격을 못 받아준다. 찾으면 그때 청구한다.
+  if (surveyOn(c, 'asbestosRisk')) addSurcharge('asbestos', '추가(규제)', '석면 사전조사 착수비', '시료 분석·조사기관 수수료(발견 시 청구)', 30, 'aside');
+  if (surveyOn(c, 'workTimeLimit')) { addSurcharge('worktime', '추가(규제)', '작업시간 제한', '공사 기간이 늘어난 인건비', 20, 'in'); laborTotal += 20; }
   // 혼합 폐기물 — 성상 분리를 안 하면 처리비가 3~6배가 된다. 현장 확인 후 체크하는 항목.
   if (surveyOn(c, 'wasteMixed')) {
     // 체크한 항목은 현장마다 금액을 직접 고칠 수 있다(0원 = 서비스·직접 처리).
     const mixed = surveyAmount(c, 'wasteMixed', Math.max(15, Math.round(wasteTotal * 0.35)));
-    addSurcharge('mixedWaste', '추가(폐기물)', '혼합 폐기물 분리·추가 처리', '성상 분리 인력 + 혼합 처리 단가', mixed);
+    addSurcharge('mixedWaste', '추가(폐기물)', '혼합 폐기물 분리·추가 처리', '성상 분리 인력 + 혼합 처리 단가', mixed, 'in');
     wasteTotal += mixed;
   }
   if (surveyOn(c, 'adminDeposit')) {
@@ -921,28 +929,28 @@ export function computeEstimate(c) {
   if (surveyOn(c, 'gasFirePermit')) addSurcharge('gas', '추가(규제)', '가스·소방 작업허가', '허가·보양', 10);
   if (surveyOn(c, 'residential')) {
     const live = surveyAmount(c, 'residential', 12);
-    addSurcharge('residential', '추가(현장)', '거주 중 시공 보양', '가구 이동·먼지막이·매일 청소', live);
+    addSurcharge('residential', '추가(현장)', '거주 중 시공 보양', '가구 이동·먼지막이·매일 청소', live, 'in');
     laborTotal += live;
   }
   if (surveyOn(c, 'protectLevel')) {
     const spots = Math.max(1, parseInt(c?.protectSpots, 10) || 1);
     const protect = surveyAmount(c, 'protectLevel', getRate(rates, ['site', 'protect'], 8) * spots);
+    // 보양은 '자재'가 아니다 — 자재 합계에 넣으면 원가 구성표의 '자재비'가 틀려 보인다
     addSurcharge('protect', '추가(현장)', '보양(엘베·복도·현관)', `${spots}곳 기준 (아래에서 금액 수정)`, protect);
-    materialTotal += protect;
   }
   if (surveyOn(c, 'materialLift')) {
     const liftCost = surveyAmount(c, 'materialLift', getRate(rates, ['site', 'materialLift'], 15));
-    addSurcharge('materialLift', '추가(운반)', '자재 올리기', '자재를 층까지 올리는 인력', liftCost);
+    addSurcharge('materialLift', '추가(운반)', '자재 올리기', '자재를 층까지 올리는 인력', liftCost, 'in');
     laborTotal += liftCost;
   }
   if (surveyOn(c, 'ladderSmall')) {
     const small = surveyAmount(c, 'ladderSmall', getRate(rates, ['ladder', 'small'], 12));
-    addSurcharge('ladderSmall', '추가(운반)', '사다리차 소형 1회', '4층 규모 자재·폐기물 반출', small);
+    addSurcharge('ladderSmall', '추가(운반)', '사다리차 소형 1회', '4층 규모 자재·폐기물 반출', small, 'in');
     equipTotal += small;
   }
   if (surveyOn(c, 'ladderHalf')) {
     const halfDay = surveyAmount(c, 'ladderHalf', getRate(rates, ['ladder', 'half'], 35));
-    addSurcharge('ladderHalf', '추가(운반)', '사다리차 반나절', '자재·폐기물 반출', halfDay);
+    addSurcharge('ladderHalf', '추가(운반)', '사다리차 반나절', '자재·폐기물 반출', halfDay, 'in');
     equipTotal += halfDay;
   }
   if (surveyOn(c, 'afterCare')) {
@@ -950,7 +958,7 @@ export function computeEstimate(c) {
     const cleanPeople = Math.max(1, Math.ceil(pyungForClean / 20));
     const cleanRate = getRate(rates, ['labor', 'cleaner'], 19);
     const cleanup = surveyAmount(c, 'afterCare', Math.round(cleanPeople * cleanRate));
-    addSurcharge('clean', '추가(현장)', '준공 청소', `청소 ${cleanPeople}명 × 1일 × ${cleanRate}만 (${pyungForClean}평 기준)`, cleanup);
+    addSurcharge('clean', '추가(현장)', '준공 청소', `청소 ${cleanPeople}명 × 1일 × ${cleanRate}만 (${pyungForClean}평 기준)`, cleanup, 'in');
     laborTotal += cleanup;
     crewDays += cleanPeople;
   }
@@ -960,7 +968,7 @@ export function computeEstimate(c) {
     const key = `custom_${it.id || it.label}`;
     if (!surveyOn(c, key)) return;
     const amount = surveyAmount(c, key, Math.max(0, Number(it.amount) || 0));
-    addSurcharge(key, '추가(현장)', it.label || '직접 추가 항목', it.memo || '현장에서 직접 추가', amount);
+    addSurcharge(key, '추가(현장)', it.label || '직접 추가 항목', it.memo || '현장에서 직접 추가', amount, 'in');
     laborTotal += amount;
   });
 
@@ -1071,7 +1079,7 @@ export function computeEstimate(c) {
   const costFloor = smallJob ? 12 : 30;
   let totalDirectCost = Math.max(
     costFloor,
-    Math.round(laborTotal + materialTotal + wasteTotal + equipTotal - excludedAmount)
+    Math.round(laborTotal + materialTotal + wasteTotal + equipTotal + surchargeExtra - excludedAmount)
   );
 
   // ---- 관공서 공고: 설계내역서 확인 전까지 실행원가를 수주금액의 80%로 보수적으로 잡는다 ----
@@ -1204,6 +1212,13 @@ export function computeEstimate(c) {
     wasteTotal,
     equipTotal,
     surchargeTotal,
+    surchargeExtra,
+    // 견적서 '폐기물 ○대' 표기용 — 화면·문서가 같은 대수를 쓰게 한다
+    wasteTrucks: (() => {
+      const w = markedItems.find((i) => /폐기물/.test(i.category || '') && !i.excluded && Number(i.amount) > 0);
+      const m = w && String(w.name || '').match(/(\d+)\s*대/);
+      return m ? Number(m[1]) : Math.max(1, parseInt(c?.waste?.trucks, 10) || 1);
+    })(),
     detailSurcharge: detail,
     lifting,
     crew,

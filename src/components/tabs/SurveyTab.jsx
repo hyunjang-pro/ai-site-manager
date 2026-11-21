@@ -116,7 +116,7 @@ function SurveyGuideCard({ c, update, calc }) {
         {guide.rows.map((r, i) => (
           <div key={i} className="rounded-2xl bg-slate-50 p-3">
             <p className="flex items-center gap-1.5 text-sm font-extrabold text-ink">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-900 text-[10px] font-black text-white">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-900 text-[11px] font-black text-white">
                 {i + 1}
               </span>
               {r.check}
@@ -529,7 +529,7 @@ function ChangeQuick({ c, update, calc, showToast }) {
           ? '“아래집 누수 흔적 있음”, “배관도 갈아야 할듯”'
           : '“자재 입고 하루 늦어짐”, “작업 범위 한 곳 추가”'
       }`}
-      status={<Pill tone={calc.adjustmentTotal === 0 ? 'plain' : calc.adjustmentTotal > 0 ? 'warn' : 'ok'}>누적 {calc.adjustmentTotal > 0 ? '+' : ''}{calc.adjustmentTotal}만</Pill>}
+      status={<Pill tone={calc.adjustmentTotal === 0 ? 'plain' : calc.adjustmentTotal > 0 ? 'warn' : 'ok'}>답사 변동 {calc.adjustmentTotal > 0 ? '+' : ''}{calc.adjustmentTotal}만</Pill>}
     >
       <div className="space-y-2.5">
         <TextArea
@@ -755,8 +755,8 @@ function MissingLines({ c, update, calc }) {
 
   return (
     <Fold
-      label="현장 부대비용"
-      hint="현장 조건에 맞는 항목은 자동으로 들어가 있습니다 — 필요 없는 것만 눌러서 빼세요"
+      label="답사에서 더 챙길 비용"
+      hint="현장 조건에 맞는 항목은 자동으로 켜져 있습니다 — 필요 없는 것만 눌러서 빼세요(2단계 부대비용과 같은 금액으로 계산됩니다)"
       badge={
         <Pill tone={checkedRows.length ? 'warn' : 'plain'}>
           {checkedRows.length}/{rows.length} · {total.toLocaleString('ko-KR')}만
@@ -782,7 +782,7 @@ function MissingLines({ c, update, calc }) {
                     <span className={cx('block text-sm font-bold leading-5', on ? 'text-brand-strong' : 'text-ink-2')}>
                       {r.label}
                       {isAuto(r) ? (
-                        <span className="ml-1 rounded bg-white px-1 py-0.5 text-[10px] font-extrabold text-ink-3 ring-1 ring-slate-200">자동</span>
+                        <span className="ml-1 rounded bg-white px-1 py-0.5 text-[11px] font-extrabold text-ink-3 ring-1 ring-slate-200">자동</span>
                       ) : null}
                     </span>
                     <span className="mt-0.5 block text-xs leading-4 text-ink-3">{r.detail}</span>

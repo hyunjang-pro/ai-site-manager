@@ -47,7 +47,7 @@ function StatNumber({ text, unit, tone = 'text-white' }) {
       <span className={`truncate ${size}`} title={`${text}${unit || ''}`}>
         {text}
       </span>
-      {unit ? <span className="ml-0.5 shrink-0 text-[10px] font-bold text-blue-200">{unit}</span> : null}
+      {unit ? <span className="ml-0.5 shrink-0 text-[11px] font-bold text-blue-200">{unit}</span> : null}
     </p>
   );
 }
@@ -145,11 +145,11 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
       >
         <div className="grid grid-cols-3 gap-1.5">
           <div className="min-w-0 overflow-hidden rounded-xl bg-white/10 px-1.5 py-2 text-center">
-            <p className="text-[10px] font-bold text-blue-200">보수적 원가</p>
+            <p className="text-[11px] font-bold text-blue-200">보수적 원가</p>
             <StatNumber text={Math.round(calc.costWithBuffer).toLocaleString('ko-KR')} unit="만" />
           </div>
           <div className="min-w-0 overflow-hidden rounded-xl bg-white/10 px-1.5 py-2 text-center">
-            <p className="text-[10px] font-bold text-blue-200">보수적 남는 돈</p>
+            <p className="text-[11px] font-bold text-blue-200">보수적 남는 돈</p>
             <StatNumber
               text={`${calc.netProfitBuffered > 0 ? '+' : ''}${Math.round(calc.netProfitBuffered).toLocaleString('ko-KR')}`}
               unit="만"
@@ -157,7 +157,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
             />
           </div>
           <div className="min-w-0 overflow-hidden rounded-xl bg-white/10 px-1.5 py-2 text-center" data-testid="hero-margin">
-            <p className="text-[10px] font-bold text-blue-200">남는 비율</p>
+            <p className="text-[11px] font-bold text-blue-200">남는 비율</p>
             <StatNumber text={`${calc.marginBuffered}%`} />
           </div>
         </div>
@@ -184,27 +184,29 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           />
           <span className="shrink-0 pb-1.5 text-sm font-bold text-ink-3">만원</span>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-2 grid grid-cols-4 gap-1.5">
           {[-10, -5, 5, 10].map((d) => (
             <SmallButton
               key={d}
-              className="min-w-[52px] flex-1"
+              className="min-w-0 whitespace-nowrap px-1"
               onClick={() => called.commit(String(Math.max(0, called.effective + d)))}
               aria-label={`가견적 ${d > 0 ? '플러스' : '마이너스'} ${Math.abs(d)}만원`}
             >
               {d > 0 ? `+${d}` : d}만
             </SmallButton>
           ))}
+        </div>
+        <div className="mt-1.5">
           <SmallButton
             variant={called.noCalled ? 'soft' : 'white'}
-            className="flex-[1.4] whitespace-nowrap"
+            className="w-full whitespace-nowrap"
             disabled={called.noCalled}
             onClick={() => {
               called.reset();
               showToast(`앱 계산가 ${called.appPrice.toLocaleString('ko-KR')}만원으로 되돌렸습니다`);
             }}
           >
-            앱 계산가로
+            앱 계산가로 되돌리기
           </SmallButton>
         </div>
         <p className="mt-2 text-2xs font-semibold leading-4 text-ink-3">
@@ -306,7 +308,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
               <div key={r.id} data-similar-case className={cx('rounded-xl bg-white p-3 ring-1', r.own ? 'ring-brand/30' : 'ring-slate-100')}>
                 <div className="flex items-start justify-between gap-2">
                   <p className="flex min-w-0 items-center gap-1.5 text-sm font-bold text-ink">
-                    {r.own ? <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-extrabold text-brand">우리 현장</span> : null}
+                    {r.own ? <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[11px] font-extrabold text-brand">우리 현장</span> : null}
                     <span className="min-w-0">{r.title}</span>
                   </p>
                   <p className="num shrink-0 text-sm font-extrabold text-ink">
@@ -437,7 +439,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
                       <span className="flex items-center justify-between gap-2">
                         <span className={cx('text-sm font-extrabold', on ? 'text-brand-strong' : 'text-ink')}>
                           {set.label}
-                          <span className="ml-1.5 rounded bg-white px-1 py-0.5 text-[10px] font-extrabold text-ink-3 ring-1 ring-slate-200">{set.tier}</span>
+                          <span className="ml-1.5 rounded bg-white px-1 py-0.5 text-[11px] font-extrabold text-ink-3 ring-1 ring-slate-200">{set.tier}</span>
                         </span>
                         {on ? <Check className="h-4 w-4 shrink-0 text-brand" strokeWidth={3} /> : <span className="text-2xs font-bold text-ink-3">탭해서 선택</span>}
                       </span>
@@ -737,7 +739,7 @@ function VerifyCard({ verify, calc, c, update, showToast, completedCases = [] })
               title={`우리 견적 ${n(market.ours)}만`}
             />
           </div>
-          <div className="mt-1 flex justify-between text-[10px] font-bold text-ink-3">
+          <div className="mt-1 flex justify-between text-[11px] font-bold text-ink-3">
             <span>최저 {n(market.low)}</span>
             <span>평균 {n(market.avg)}</span>
             <span>고급 {n(market.high)}</span>
@@ -865,7 +867,7 @@ function SiteCostCard({ verify, c, update, showToast }) {
               {row.on ? <Check className="h-3 w-3 shrink-0" strokeWidth={3} /> : <Plus className="h-3 w-3 shrink-0" strokeWidth={3} />}
               <span className="min-w-0">{row.label}</span>
             </span>
-            <span className={cx('mt-0.5 block text-[10px] font-semibold', row.on ? 'text-emerald-700' : 'text-ink-4')}>
+            <span className={cx('mt-0.5 block text-[11px] font-semibold', row.on ? 'text-emerald-700' : 'text-ink-4')}>
               {row.on ? `+${n(row.amount)}만 · 들어가 있음` : `뺌 · 눌러서 넣기 (+${n(row.amount)}만)`}
             </span>
           </button>
@@ -873,7 +875,7 @@ function SiteCostCard({ verify, c, update, showToast }) {
       </div>
       <p className="mt-1.5 rounded-xl bg-slate-50 px-3 py-2 text-2xs font-bold leading-4 text-ink-2">
         {verify.includedTotal > 0
-          ? `부대비용 ${n(verify.includedTotal)}만이 견적에 포함되어 있습니다 · 금액은 3. 답사에서 직접 고칠 수 있습니다`
+          ? `부대비용 ${n(verify.includedTotal)}만이 견적에 포함되어 있습니다 · 금액은 3단계 답사에서 직접 고칠 수 있습니다`
           : '이 현장은 부대비용 없이 계산했습니다 · 필요한 항목을 누르면 견적에 더해집니다'}
       </p>
     </Card>
@@ -949,7 +951,7 @@ function SubsidyCard({ c, update, showToast, onOpenDoc }) {
                   </p>
                   <p className="mt-0.5 text-2xs leading-4 text-ink-3">{d.hint}</p>
                 </div>
-                <span className={cx('shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-extrabold', d.owner === '우리' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-ink-2')}>
+                <span className={cx('shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-extrabold', d.owner === '우리' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-ink-2')}>
                   {d.owner}
                 </span>
               </div>

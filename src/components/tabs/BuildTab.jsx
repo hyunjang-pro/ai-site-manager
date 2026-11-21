@@ -170,7 +170,6 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
   const setGate = (patch) => update({ gates: { ...c.gates, ...patch } });
   const setLiftGate = (patch) => update({ gates: { ...c.gates, lift: { ...(c.gates?.lift || {}), ...patch } } });
 
-  const progress = gates.filter((g) => g.done).length;
   const nextIdx = gates.findIndex((g) => !g.done);
   const statusFor = (gate, idx) => {
     if (gate.done) return <Pill tone="ok">완료</Pill>;
@@ -213,6 +212,8 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
     }
     return base;
   }, [c, calc, gates, aiPlan]);
+  // 타임라인은 3묶음(사전 준비·시공 당일·완료)이라 '0/4 완료'로 보이면 목록과 숫자가 안 맞는다
+  const phaseDone = timeline.filter((p) => p.done).length;
   const endDate = startDate ? addDaysISO(startDate, workDays - 1) : '';
 
   const buyAllOrder = () => {
@@ -321,7 +322,9 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
       {/* 2. 공종별 타임라인 */}
       <Card className="p-4">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-sm font-extrabold text-brand">2</span>
+            <div className="min-w-0">
             <p className="text-base font-extrabold text-ink">시공 타임라인</p>
             <p className="mt-0.5 text-xs font-semibold text-ink-3">
               {trade === 'waste'
@@ -330,10 +333,13 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
                 ? '전날 인원·숙련 확정 → 당일 집결·작업 → 완료 확인·정산'
                 : 'D-2 사전 준비 → 시공 당일 → 완료·잔금 순서입니다.'}
             </p>
+            </div>
           </div>
-          <Pill tone={progress === gates.length ? 'ok' : 'info'}>{progress}/{gates.length} 완료</Pill>
+          <Pill tone={phaseDone === timeline.length ? 'ok' : 'info'}>
+            {phaseDone}/{timeline.length} 단계 완료
+          </Pill>
         </div>
-        <ProgressTrack value={progress} max={gates.length} className="mt-3" tone={progress === gates.length ? 'good' : 'brand'} />
+        <ProgressTrack value={phaseDone} max={timeline.length} className="mt-3" tone={phaseDone === timeline.length ? 'good' : 'brand'} />
         <div className="mt-3 space-y-2.5">
           {timeline.map((ph, i) => (
             <div key={ph.label} className="flex gap-2.5">

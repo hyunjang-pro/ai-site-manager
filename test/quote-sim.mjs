@@ -36,7 +36,8 @@ const CASES = [
   ['상가 폐업 집기 정리', ['waste'], [40, 150], [], ALL_SITE],
   ['카페 15평 원상복구 철거', ['demolition'], [350, 650], ['protectLevel', 'adminDeposit'], ['afterCare']],
   ['음식점 25평 철거 주방 후드 덕트 포함', ['demolition', 'combined'], [550, 1100], [], ['afterCare']],
-  ['사무실 30평 칸막이 철거', ['demolition'], [350, 800], [], ['afterCare']],
+  // 관리사무소 신고·보양이 원가에 실제로 반영되면서 상단이 800→830으로 올라갔다 (예전엔 화면에만 '포함')
+  ['사무실 30평 칸막이 철거', ['demolition'], [350, 830], [], ['afterCare']],
   ['주택 구옥 20평 전체 철거', ['demolition'], [400, 900], [], ['adminDeposit']],
   ['외부 데크·창고 철거', ['demolition'], [80, 250], [], ['protectLevel', 'adminDeposit', 'afterCare']],
   ['안방 화장실 1칸 올수리', ['bathroom'], [400, 750], ['afterCare'], []],

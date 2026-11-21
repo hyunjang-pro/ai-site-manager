@@ -138,7 +138,8 @@ export function allocateClientLines(trade, calc, c) {
   const order = raw.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
   for (let k = 0; k < rest; k += 1) amounts[order[k % order.length].i] += 1;
 
-  const trucks = Math.max(1, Math.round(Number(c?.waste?.trucks) || 1));
+  // 폐기물 차량 대수는 실제로 계상한 대수를 쓴다 (c.waste.trucks가 비어 있어도 1대처럼 보이지 않게)
+  const trucks = Math.max(1, Number(calc?.wasteTrucks) || Math.round(Number(c?.waste?.trucks) || 1));
   const distanceKm = Math.max(0, Number(crew.distanceKm) || 0);
   const descOf = (key) => {
     if (key === 'labor') return crewDays ? `기공·보조 인력 품삯 (연인원 ${crewDays}명·일)` : '기공·보조 인력 품삯';
@@ -595,9 +596,12 @@ export function isSoomgoCase(c) {
 
 // 현장이 업장(상가·식당·카페·사무실·간판 등)이면 '사장님', 집·빌라·아파트 같은 주거 현장이면 '고객님'.
 export function clientHonorific(c, calc) {
-  const text = [c?.title, c?.location, c?.rawInput, c?.notes, c?.tradeName, calc?.targetSummary, calc?.clientSummary]
-    .filter(Boolean)
-    .join(' ');
+  // 앱이 붙인 공종 이름('상가·주택 철거')까지 보고 '사장님'을 고르면 아파트 철거에도 사장님이 된다.
+  // 손님이 실제로 적어 준 말(요청문·메모·제목)만 본다.
+  const text = [c?.title, c?.location, c?.rawInput, c?.notes, c?.tradeName].filter(Boolean).join(' ');
+  const home = /아파트|오피스텔|빌라|원룸|투룸|기숙사|주택|단독|전원|농가|한옥|주거/i;
+  const shopHouse = /상가주택|상가\s*건물|1층\s*상가|근린상가/i;
+  if (home.test(text) && !shopHouse.test(text)) return '고객님';
   const business = /상가|상점|점포|매장|가게|식당|음식점|분식|치킨|주점|호프|카페|커피|베이커리|제과|사무실|사무소|학원|병원|의원|약국|공장|창고|물류|간판|숍|상회|편의점|마트|미용실|네일|헤어|은행|관공서|교회|성당|빌딩/i;
   return business.test(text) ? '사장님' : '고객님';
 }

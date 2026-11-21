@@ -134,10 +134,10 @@ export default function HomeScreen({ cases, onOpen, onUpdate, onNew, onDelete, s
                 stageFilter === s.id ? 'bg-white/25 ring-1 ring-white/40' : 'active:bg-white/15'
               )}
             >
-              <span className="block text-[10px] font-bold text-blue-200">{s.label}</span>
+              <span className="block text-[11px] font-bold text-blue-200">{s.label}</span>
               <span className="num mt-0.5 block text-lg font-black leading-6 text-white">
                 {counts[s.id] || 0}
-                <span className="ml-0.5 text-[10px] font-bold text-blue-300">건</span>
+                <span className="ml-0.5 text-[11px] font-bold text-blue-300">건</span>
               </span>
             </button>
           ))}
@@ -157,7 +157,7 @@ export default function HomeScreen({ cases, onOpen, onUpdate, onNew, onDelete, s
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 text-[15px] font-extrabold text-ink">
               관공서 일감
-              <span className="rounded-md bg-rose-50 px-1.5 py-0.5 text-[10px] font-extrabold text-rose-600">
+              <span className="rounded-md bg-rose-50 px-1.5 py-0.5 text-[11px] font-extrabold text-rose-600">
                 {bids.soon > 0 ? `D-5 안에 ${bids.soon}건` : '매일 갱신'}
               </span>
             </span>
@@ -336,7 +336,7 @@ export default function HomeScreen({ cases, onOpen, onUpdate, onNew, onDelete, s
       )}
 
       {/* 새 현장 */}
-      <div className="bottom-bar fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/70 bg-white/92 px-4 pt-2.5 backdrop-blur no-print">
+      <div className="bottom-bar fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/70 bg-white px-4 pt-2.5 shadow-[0_-6px_18px_rgba(15,23,42,0.06)] no-print">
         <div className="mx-auto max-w-3xl">
           <BigButton className="w-full" onClick={onNew}>
             <Plus className="h-5 w-5" strokeWidth={2.6} /> 새 현장 만들기
@@ -450,7 +450,7 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
                   )}
                 >
                   {s.label}
-                  <span className={cx('block text-[10px] font-bold', c.collection === s.id ? 'text-white/80' : 'text-ink-3')}>
+                  <span className={cx('block text-[11px] font-bold', c.collection === s.id ? 'text-white/80' : 'text-ink-3')}>
                     {Math.round(amountOf(s.id)).toLocaleString('ko-KR')}만원
                   </span>
                 </button>
