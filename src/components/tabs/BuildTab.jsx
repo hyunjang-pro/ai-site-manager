@@ -591,7 +591,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
         num="5"
         title="일차별 투입 인원 · 차량 · 현장 브리핑"
         subtitle="1일차·2일차를 눌러 그날 누구를 몇 명, 차를 몇 대 보낼지 확인하세요."
-        status={<Pill tone="info">{dayPlan ? `${dayPlan.day}일차 ${dayPlan.dateLabel}` : '날짜 미정'}</Pill>}
+        status={<Pill tone="info">{dayPlan ? `${dayPlan.day}일차${dayPlan.iso ? ` ${dayPlan.dateLabel}` : ''}` : '날짜 미정'}</Pill>}
       >
         <div className="space-y-2.5">
           {/* 일차 선택 — 공사기간만큼 1일차·2일차… */}
@@ -612,7 +612,9 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
                   )}
                 >
                   <span className="block whitespace-nowrap text-sm font-extrabold">{p.day}일차</span>
-                  <span className={cx('block whitespace-nowrap text-2xs font-bold', on ? 'text-brand' : 'text-ink-3')}>{p.dateLabel}</span>
+                  {p.iso ? (
+                    <span className={cx('block whitespace-nowrap text-2xs font-bold', on ? 'text-brand' : 'text-ink-3')}>{p.dateLabel}</span>
+                  ) : null}
                 </button>
               );
             })}
