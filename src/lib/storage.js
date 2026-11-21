@@ -45,6 +45,8 @@ function baseCase(overrides = {}) {
     wasteVehicle: '',
     asbestos: { builtYear: '', usage: 'unknown', ceiling: 'unknown', roof: 'unknown', insulation: 'no', areaSqm: '' },
     lifting: { floor: '', elevator: 'unknown', ladderAllowed: 'unknown', carryDistance: '', mode: '' },
+    demolition: { mode: '', items: [], access: '', exterior: false }, // 소형·부분 철거(개수 단위)
+    fullInterior: false, // 집 전체·올수리 — 기본 포함 공정 보정
     survey: {},
     surveyAmounts: {},
     tradeName: '',
@@ -277,7 +279,7 @@ function sanitizeStoredCase(c, rates) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
   const base = baseCase({ trade: TRADES[c.trade] ? c.trade : 'demolition' });
   const merged = { ...base, ...c };
-  ['waste', 'asbestos', 'lifting', 'design', 'customPlan', 'tileWork', 'plaster', 'dispatch', 'gates', 'subsidyApplicant', 'negotiation', 'paymentPlan'].forEach((k) => {
+  ['waste', 'asbestos', 'lifting', 'design', 'customPlan', 'tileWork', 'plaster', 'dispatch', 'gates', 'subsidyApplicant', 'negotiation', 'paymentPlan', 'demolition'].forEach((k) => {
     if (!merged[k] || typeof merged[k] !== 'object' || Array.isArray(merged[k])) merged[k] = base[k];
   });
   ['survey', 'surveyAmounts', 'orderChecks', 'subsidyCheck', 'evidence', 'preview'].forEach((k) => {

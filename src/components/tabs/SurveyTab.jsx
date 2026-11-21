@@ -3,6 +3,7 @@ import { AlertTriangle, Camera, Check, Copy, Loader2, Trash2, Wand2 } from 'luci
 import { SURVEY_GROUPS, TRADES, hasScope, scopeList } from '../../lib/constants.js';
 import { toPyung } from '../../lib/pricing.js';
 import { ratesOf } from '../../lib/rates.js';
+import { resolveSurvey, autoIncidentals } from '../../lib/site.js';
 import { computeWaste, WASTE_SCOPES, vehicleRealCost } from '../../lib/waste.js';
 import { assessAsbestos, ASBESTOS_CLAUSE } from '../../lib/asbestos.js';
 import { parseAdjustment, parseAdjustments, PROCESS_KEYWORDS, PROCESS_TO_SURVEY, surveyDrafts } from '../../lib/parse.js';
@@ -722,7 +723,11 @@ function MissingLines({ c, update, calc }) {
     rows.push({ id: 'residential', label: '거주 중 시공', detail: '가구 이동·먼지막이·매일 청소', amount: 12 });
   }
 
-  const isOn = (row) => !!c.survey?.[row.id];
+  // 자동 포함(현장 조건) + 사용자가 직접 켜고 끈 값을 합쳐서 보여준다 — 2단계 금액과 같은 기준
+  const resolved = resolveSurvey(c);
+  const autoFlags = autoIncidentals(c);
+  const isOn = (row) => !!resolved[row.id];
+  const isAuto = (row) => c.survey?.[row.id] === undefined && !!autoFlags[row.id];
   const amountOf = (row) => {
     const raw = c.surveyAmounts ? c.surveyAmounts[row.id] : undefined;
     if (raw === null || raw === undefined || raw === '') return row.amount;
@@ -744,8 +749,8 @@ function MissingLines({ c, update, calc }) {
 
   return (
     <Fold
-      label="빠뜨리기 쉬운 비용"
-      hint="현장에서 본 것만 누르세요 — 금액은 옆 칸에서 고칠 수 있습니다"
+      label="현장 부대비용"
+      hint="현장 조건에 맞는 항목은 자동으로 들어가 있습니다 — 필요 없는 것만 눌러서 빼세요"
       badge={
         <Pill tone={checkedRows.length ? 'warn' : 'plain'}>
           {checkedRows.length}/{rows.length} · {total.toLocaleString('ko-KR')}만
@@ -768,7 +773,12 @@ function MissingLines({ c, update, calc }) {
                     {on ? <Check className="h-3.5 w-3.5" strokeWidth={3.5} /> : null}
                   </span>
                   <span className="min-w-0">
-                    <span className={cx('block text-sm font-bold leading-5', on ? 'text-brand-strong' : 'text-ink-2')}>{r.label}</span>
+                    <span className={cx('block text-sm font-bold leading-5', on ? 'text-brand-strong' : 'text-ink-2')}>
+                      {r.label}
+                      {isAuto(r) ? (
+                        <span className="ml-1 rounded bg-white px-1 py-0.5 text-[10px] font-extrabold text-ink-3 ring-1 ring-slate-200">자동</span>
+                      ) : null}
+                    </span>
                     <span className="mt-0.5 block text-xs leading-4 text-ink-3">{r.detail}</span>
                   </span>
                 </button>

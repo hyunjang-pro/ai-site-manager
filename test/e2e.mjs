@@ -13,6 +13,8 @@ import { kstToday, addDaysISO, korDateLabel, korMonthDay } from '../src/lib/date
 import { pickTextModel, pickImageModel, scrubSecret, GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE } from '../src/lib/gemini.js';
 import { perPyeong, DEFAULT_RATES, RATE_FIELDS } from '../src/lib/rates.js';
 import { computeEstimate } from '../src/lib/pricing.js';
+import { composeCase } from '../src/lib/storage.js';
+import { siteCostRows } from '../src/lib/site.js';
 import { hasInteriorStyle } from '../src/lib/constants.js';
 import { surveyGuideFor } from '../src/lib/surveyGuide.js';
 import { buildOrderGroups } from '../src/lib/orders.js';
@@ -360,6 +362,33 @@ async function main() {
     record('제목: 공종 바꾸면 제목도 바뀜', autoCaseTitle({ trade: 'combined', region: '안동', sizeValue: '20', sizeUnit: '평' }, 'demolition') === '안동 20평 철거', autoCaseTitle({ trade: 'combined', region: '안동', sizeValue: '20', sizeUnit: '평' }, 'demolition'));
   });
 
+  await step('단위: 소형·부분 철거·폐기물은 평수 전체 단가를 쓰지 않음', async () => {
+    const price = (text) => {
+      const r = classifyRequest(text);
+      const c = composeCase({ trade: r.trade === 'unclassified' ? 'custom' : r.trade, patch: r.patch });
+      const calc = computeEstimate(c);
+      return { trade: r.trade, price: Math.round(calc.clientPrice), site: siteCostRows(c).filter((x) => x.on).map((x) => x.id), calc };
+    };
+    const sign = price('숨고 간판 두개 철거');
+    record('소형: 간판 2개 철거 = 철거(부분)', sign.trade === 'demolition' && sign.price >= 35 && sign.price <= 70, `${sign.trade} ${sign.price}만`);
+    record('소형: 간판에 보양·관리소·양중·준공청소 안 붙음', sign.site.length === 0, sign.site.join(',') || '없음');
+    const sky = price('상가 1층 간판 2개 철거 스카이차 필요');
+    record('소형: 스카이차 간판 = 80~160만', sky.price >= 80 && sky.price <= 160, `${sky.price}만`);
+    const sink = price('싱크대 철거 및 수거');
+    record('소형: 싱크대 철거(교체 아님) = 15~40만', sink.trade === 'demolition' && sink.price >= 15 && sink.price <= 40, `${sink.trade} ${sink.price}만`);
+    const half = price('원룸 생활폐기물 반차');
+    record('폐기물: 반차 = 15~30만', half.trade === 'waste' && half.price >= 15 && half.price <= 30, `${half.price}만`);
+    const ton1 = price('폐기물 1톤 트럭 한차');
+    record('폐기물: 1톤 한차 = 30~60만', ton1.price >= 30 && ton1.price <= 60, `${ton1.price}만`);
+    const apt = price('15평 아파트 전체 인테리어');
+    record('전체: 15평 올수리 = 1,300만 이상', apt.price >= 1300, `${apt.price}만`);
+    record('전체: 아파트 올수리에 보양·관리소·준공청소 자동 포함', ['protectLevel', 'adminDeposit', 'afterCare'].every((id) => apt.site.includes(id)), apt.site.join(','));
+    const house = price('주택 구옥 20평 전체 철거');
+    record('전체: 단독주택 철거엔 관리사무소 신고 없음', !house.site.includes('adminDeposit'), house.site.join(',') || '없음');
+    const demo = price('카페 15평 원상복구 철거');
+    record('철거: 카페 철거엔 준공 청소 안 붙음', !demo.site.includes('afterCare'), demo.site.join(',') || '없음');
+  });
+
   await step('단위: 답사 가이드는 AI가 있으면 AI, 없으면 공종 폴백', async () => {
     const local = surveyGuideFor({ trade: 'demolition' }, { trade: 'demolition' });
     // 사다리차를 세울 수 없는 현장(이 케이스)에서는 첫 줄이 '천장 위 숨은 물량'으로 시작한다
@@ -683,6 +712,31 @@ async function main() {
     record('가견적 호가: 앱 계산가로 원복', (await input.inputValue()) === String(appPrice), await input.inputValue());
   });
 
+  await step('2단계 — 현장 부대비용 자동 반영·1탭 빼기', async () => {
+    await goTab(2);
+    const t = await mainText();
+    record('부대비용: 빠진 비용 경고·일괄 버튼 없음', !t.includes('빠진 비용') && !t.includes('한 번에 넣기'));
+    const chips = page.getByTestId('site-cost');
+    const count = await chips.count();
+    record('부대비용: 칩 4개(보양·관리소·양중·준공청소)', count === 4, `${count}개`);
+    const onCount = await page.locator('[data-testid="site-cost"][data-state="on"]').count();
+    record('부대비용: 필요한 항목은 이미 포함됨', onCount >= 1, `${onCount}/${count}`);
+    const totalText = async () => (await page.locator('text=/부대비용 [\\d,]+만이 견적에 포함/').first().innerText().catch(() => '')) || '';
+    const before = await totalText();
+    const onChip = page.locator('[data-testid="site-cost"][data-state="on"]').first();
+    const label = await onChip.innerText();
+    await onChip.click();
+    await page.waitForTimeout(350);
+    const after = await totalText();
+    record('부대비용: 1탭으로 빼면 포함 금액이 줄어듦', before !== after && after.length > 0, `${before} → ${after}`);
+    await page.locator('[data-testid="site-cost"][data-state="off"]').first().click();
+    await page.waitForTimeout(350);
+    const restored = await totalText();
+    record('부대비용: 다시 눌러 되돌리면 원금액', restored === before, `${restored} vs ${before}`);
+    await shotAt('33-site-cost.png', '부대비용', -200);
+    await goTab(2);
+  });
+
   await step('단계 이동 시 맨 위로', async () => {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(200);
@@ -696,18 +750,23 @@ async function main() {
   await step('3단계 답사 · 빠뜨리기 쉬운 비용 0원', async () => {
     await goTab(3);
     const t = await mainText();
-    record('답사: 메모·현장 점검·빠뜨리기', t.includes('답사 메모·사진') && t.includes('현장 점검') && t.includes('빠뜨리기 쉬운 비용'));
+    record('답사: 메모·현장 점검·부대비용', t.includes('답사 메모·사진') && t.includes('현장 점검') && t.includes('현장 부대비용'));
     const row = page.getByRole('button', { name: /거주 중 시공/ });
     await row.first().click();
     await page.waitForTimeout(250);
     const amount = page.getByLabel('거주 중 시공 금액(만원)');
     record('빠뜨리기: 체크 시 금액 입력칸', (await amount.count()) === 1);
+    const totalOf = async () => {
+      const txt = (await page.locator('text=/\\d+\\/\\d+ · /').first().innerText().catch(() => '')) || '';
+      const m = txt.replace(/\s/g, '').match(/·([\d,]+)만/);
+      return { txt, num: m ? Number(m[1].replace(/,/g, '')) : NaN };
+    };
+    const before = await totalOf();
     await amount.fill('0');
     await page.waitForTimeout(250);
     record('빠뜨리기: 0원 입력 유지', (await amount.inputValue()) === '0');
-    const bit = await mainText();
-    const pill = (await page.locator('text=/\\d+\\/\\d+ · /').first().innerText().catch(() => '')) || '';
-    record('빠뜨리기: 12만 → 0원이면 합계에서 빠짐', pill.replace(/\s/g, '').endsWith('8만'), pill);
+    const after = await totalOf();
+    record('빠뜨리기: 12만 → 0원이면 합계에서 12만 빠짐', before.num - after.num === 12, `${before.txt} → ${after.txt}`);
     await amount.fill('12');
     await page.waitForTimeout(250);
     await shotAt('32-survey.png', '답사 메모·사진', -100);

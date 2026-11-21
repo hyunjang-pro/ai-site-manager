@@ -78,6 +78,7 @@ export const DEFAULT_RATES = {
     half: 35,
     day: 55,
     small: 12, // 소형 사다리차 1회 (4층 규모, 실견적 A)
+    skyHalf: 45, // 고소작업차(스카이) 반나절 — 간판·외부 작업
   },
   elevator: 5.5, // 엘리베이터 사용료(기본)
   site: {
@@ -156,6 +157,7 @@ export const RATE_FIELDS = [
       { path: ['ladder', 'half'], label: '사다리차 반나절', unit: '만원' },
       { path: ['ladder', 'day'], label: '사다리차 하루', unit: '만원' },
       { path: ['ladder', 'small'], label: '사다리차 소형', unit: '만원/회' },
+      { path: ['ladder', 'skyHalf'], label: '고소작업차(스카이) 반나절', unit: '만원' },
       { path: ['elevator'], label: '엘리베이터 사용료', unit: '만원' },
       { path: ['site', 'protect'], label: '보양(1곳)', unit: '만원' },
       { path: ['site', 'adminReport'], label: '관리사무소 신고', unit: '만원' },

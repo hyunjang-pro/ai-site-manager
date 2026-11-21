@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { AlertTriangle, Camera, Check, Copy, Info, Landmark, ShieldCheck, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, Camera, Check, Copy, Info, Landmark, Plus, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { TRADES, hasInteriorStyle } from '../../lib/constants.js';
 import { DESIGN_PRESETS } from '../../lib/design.js';
 import { BRAND_PRICES, combinedBrandPrices, combinedScopeSpecs, materialSetFor, materialSetsFor } from '../../lib/materials.js';
@@ -303,6 +303,8 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           </div>
         </Details>
       </Card>
+
+      <SiteCostCard verify={verify} c={c} update={update} showToast={showToast} />
 
       {/* 2. 스타일·자재 — 마감 공종만 */}
       {showStyleCard ? (
@@ -642,8 +644,6 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
   );
 }
 
-const MISSING_TO_SURVEY = { protect: 'protectLevel', admin: 'adminDeposit', lift: 'materialLift', clean: 'afterCare', waste: 'wasteIncluded' };
-
 const n = (v) => Math.round(Number(v) || 0).toLocaleString('ko-KR');
 
 function VerifyCard({ verify, calc, c, update, showToast, completedCases = [] }) {
@@ -651,16 +651,6 @@ function VerifyCard({ verify, calc, c, update, showToast, completedCases = [] })
   const { aiOn, busy, retry } = useExpertAudit(c, calc, update);
   const market = audit.market;
   const tone = market.verdict.tone === 'ok' ? 'good' : market.verdict.tone === 'bad' ? 'bad' : market.verdict.tone === 'info' ? 'info' : 'warn';
-  const missingNow = verify.missing.filter((m) => !m.ok);
-  const fillMissing = () => {
-    const next = { ...(c?.survey || {}) };
-    missingNow.forEach((m) => {
-      const sid = MISSING_TO_SURVEY[m.id];
-      if (sid) next[sid] = true;
-    });
-    if (update) update({ survey: next });
-    if (showToast) showToast(`빠진 비용 ${missingNow.length}가지를 견적에 넣었습니다`);
-  };
   const marker = Math.max(0, Math.min(100, market.posPct));
   const diff = market.ours - market.avg;
 
@@ -774,40 +764,6 @@ function VerifyCard({ verify, calc, c, update, showToast, completedCases = [] })
           </ul>
         </div>
 
-        <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p className="text-sm font-extrabold text-ink">빠진 비용 체크</p>
-            {missingNow.length ? <Pill tone="bad">{missingNow.length}가지 빠짐</Pill> : <Pill tone="ok">모두 반영</Pill>}
-          </div>
-          {/* 다 반영됐으면 목록을 접어 스크롤을 줄인다 (3단계 '빠뜨리기 쉬운 비용'과 중복 방지) */}
-          {missingNow.length ? (
-            <div className="grid grid-cols-2 gap-1.5">
-              {verify.missing.map((m) => (
-                <div
-                  key={m.id}
-                  className={cx('rounded-xl px-2.5 py-2', m.ok ? 'bg-emerald-50' : 'bg-rose-50 ring-1 ring-rose-200')}
-                  title={m.why}
-                >
-                  <p className={cx('flex items-center gap-1 text-[11px] font-extrabold leading-4', m.ok ? 'text-emerald-700' : 'text-rose-700')}>
-                    {m.ok ? <Check className="h-3 w-3" strokeWidth={3} /> : <AlertTriangle className="h-3 w-3" strokeWidth={3} />}
-                    {m.label}
-                  </p>
-                  <p className="text-[10px] font-semibold text-ink-3">{m.ok ? '반영됨' : `빠짐 · ${m.cost}`}</p>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {missingNow.length ? (
-            <BigButton className="mt-2 w-full" onClick={fillMissing}>
-              <Wand2 className="h-5 w-5" /> 빠진 비용 한 번에 넣기 ({missingNow.length}가지)
-            </BigButton>
-          ) : (
-            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-2xs font-bold leading-4 text-emerald-800">
-              보양·폐기물·양중·관리실 신고·준공 청소까지 견적에 들어가 있습니다. 현장에서 달라진 것만 3. 답사에 적으세요.
-            </p>
-          )}
-        </div>
-
         <div className="mt-2 flex items-center justify-between gap-2">
           <p className="text-2xs font-semibold text-ink-3">
             {audit.source === 'ai' ? (
@@ -829,6 +785,70 @@ function VerifyCard({ verify, calc, c, update, showToast, completedCases = [] })
           근거: 2026 하반기 대한건설협회 노임(철거공 261,108원·타일공 294,379원) · 2026.1.1 건설폐기물 중간처리단가(혼합 72,721원/톤·폐보드 192,887원/톤) · 우리 실견적 419건 DB
         </p>
       </div>
+    </Card>
+  );
+}
+
+// 현장 부대비용 — 조건에 맞는 항목은 이미 견적에 들어가 있고, 필요 없는 것만 눌러서 뺀다.
+// (예전의 "빠진 비용 ⚠️ 4가지" 경고 + 일괄 넣기 버튼을 대체)
+function SiteCostCard({ verify, c, update, showToast }) {
+  const rows = verify.siteCosts || [];
+  if (!rows.length) return null;
+  const included = rows.filter((r) => r.on);
+  const toggle = (row) => {
+    if (!update) return;
+    const next = { ...(c?.survey || {}) };
+    next[row.id] = !row.on;
+    const patch = { survey: next };
+    // 처음 켤 때는 지금 보이는 금액을 저장해 둔다 — 그 뒤로는 3. 답사에서 직접 고칠 수 있다
+    if (!row.on) patch.surveyAmounts = { ...(c?.surveyAmounts || {}), [row.id]: row.amount };
+    update(patch);
+    if (showToast) {
+      showToast(
+        row.on
+          ? `${row.label} 뺐습니다 — 견적에서 ${row.amount}만원이 빠졌습니다`
+          : `${row.label} 넣었습니다 — 견적에 ${row.amount}만원 들어갔습니다`
+      );
+    }
+  };
+  return (
+    <Card className="p-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-extrabold text-ink">현장 부대비용</p>
+        <Pill tone={included.length === rows.length ? 'ok' : 'plain'}>
+          {included.length}/{rows.length} 포함
+        </Pill>
+      </div>
+      <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+        보양·관리소 신고·양중·준공 청소는 현장 조건에 맞으면 처음부터 견적에 들어가 있습니다. 우리 현장에 필요 없는 것만 눌러서 빼세요.
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        {rows.map((row) => (
+          <button
+            type="button"
+            key={row.id}
+            data-testid="site-cost"
+            data-state={row.on ? 'on' : 'off'}
+            onClick={() => toggle(row)}
+            title={row.why}
+            className={cx(
+              'rounded-xl px-2.5 py-2 text-left transition',
+              row.on ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'bg-slate-50 ring-1 ring-slate-200'
+            )}
+          >
+            <span className={cx('flex items-center gap-1 text-[11px] font-extrabold leading-4', row.on ? 'text-emerald-800' : 'text-ink-3')}>
+              {row.on ? <Check className="h-3 w-3 shrink-0" strokeWidth={3} /> : <Plus className="h-3 w-3 shrink-0" strokeWidth={3} />}
+              <span className="min-w-0">{row.label}</span>
+            </span>
+            <span className={cx('mt-0.5 block text-[10px] font-semibold', row.on ? 'text-emerald-700' : 'text-ink-4')}>
+              {row.on ? `+${n(row.amount)}만 · 들어가 있음` : `뺌 · 눌러서 넣기 (+${n(row.amount)}만)`}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 rounded-xl bg-slate-50 px-3 py-2 text-2xs font-bold leading-4 text-ink-2">
+        부대비용 {n(verify.includedTotal)}만이 견적에 포함되어 있습니다 · 금액은 3. 답사에서 직접 고칠 수 있습니다
+      </p>
     </Card>
   );
 }

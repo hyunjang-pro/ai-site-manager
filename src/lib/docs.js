@@ -11,6 +11,7 @@ import { combinedScopeSpecs } from './materials.js';
 import { combinedTitle } from './classify.js';
 import { hasScope, hasInteriorStyle, scopeList, workTypeLabel } from './constants.js';
 import { getSupplier } from './supplier.js';
+import { resolveSurvey } from './site.js';
 
 // 사진 OCR·메모에서 온 날것 글자를 발주·배차 문자에 넣지 않는다.
 function shortMemo(text, max = 44) {
@@ -598,7 +599,7 @@ export function sugoQuoteMessage(c, calc) {
     has((i) => i.category === '자재') ? '자재·부자재' : '',
     has((i) => i.category === '노무') ? '기공·보조 인력' : '',
     Number(calc?.lifting?.cost) > 0 ? '자재 양중·운반' : '',
-    has((i) => i.id === 'clean') || c?.survey?.afterCare ? '준공 정리·청소' : '',
+    has((i) => i.id === 'clean') || resolveSurvey(c).afterCare ? '준공 정리·청소' : '',
   ]
     .filter(Boolean)
     .join(' · ') || '자재·인력 포함';
@@ -633,9 +634,12 @@ export function estimateSms(c, calc, completedCases = [], useStrength = true) {
   const info = TRADES[calc?.trade] || TRADES.unclassified;
   const label = tradeLabelOf(c, calc);
   const price = Math.round(calc?.finalPrice || 0);
+  const place = c?.location || c?.title || '현장';
+  const skipLabel =
+    place.includes(label) || (calc?.trade === 'demolition' && /철거/.test(place)) || (calc?.trade === 'waste' && /폐기물/.test(place));
   const lines = [
     `[${label} 견적 안내]`,
-    `안녕하세요 사장님, ${c?.location || c?.title || '현장'} ${label} 견적 보내드립니다.`,
+    `안녕하세요 사장님, ${place}${skipLabel ? '' : ` ${label}`} 견적 보내드립니다.`,
     `· 금액: ${wonFull(price)} (${c?.includeVat ? '부가세 포함' : '부가세 별도'})`,
     `· 범위: ${calc?.targetSummary || label}`,
     `· 기간: 협의 후 확정 / 계약금 ${calc?.plan?.deposit ?? 30}% · 잔금 ${calc?.plan?.balance ?? 30}%`,

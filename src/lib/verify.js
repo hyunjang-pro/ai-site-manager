@@ -1,16 +1,9 @@
 // 견적 3자 검증 — "내가 낸 견적이 전문가·시세 입장에서 괜찮은가?"
-// 1) 보수적 원가(예비비 포함) 대비 마진  2) 빠진 비용 체크  3) 권장가와의 차이
+// 1) 보수적 원가(예비비 포함) 대비 마진  2) 부대비용 포함 상태  3) 권장가와의 차이
 import { TRADES } from './constants.js';
+import { siteCostRows } from './site.js';
 
 const n = (v) => Math.round(Number(v) || 0).toLocaleString('ko-KR');
-
-const MISSING_CHECKS = [
-  { id: 'protect', label: '보양(엘베·복도·현관)', ids: ['protect', 'protectLevel'], survey: 'protectLevel', cost: '8만/곳', why: '공용부 파손 배상은 전액 우리 부담입니다' },
-  { id: 'waste', label: '폐기물 반출', ids: ['waste', 'waste_actual', 'waste_disposal'], category: '폐기물', cost: '30만~/대', why: '철거재를 남기면 손님이 직접 처리해야 합니다' },
-  { id: 'lift', label: '양중·운반(층수·엘베)', ids: ['lift', 'materialLift', 'ladderSmall'], cost: '12~35만', why: '엘베 없으면 인건비가 하루 더 듭니다' },
-  { id: 'admin', label: '관리사무소 신고·동의서', ids: ['deposit'], survey: 'adminDeposit', cost: '8만', why: '신고 없이 착공하면 중단될 수 있습니다' },
-  { id: 'clean', label: '준공 청소', ids: ['clean'], survey: 'afterCare', cost: '45만', why: '준공 검수에서 가장 많이 지적되는 항목입니다' },
-];
 
 export function verifyEstimate(c, calc) {
   const price = Number(calc.clientPrice) || 0;
@@ -20,8 +13,6 @@ export function verifyEstimate(c, calc) {
   const suggested = Number(calc.suggestedPrice) || 0;
   const gap = price - suggested;
   const info = TRADES[calc.trade] || TRADES.unclassified;
-  const ids = new Set((calc.items || []).map((i) => i.id));
-  const categories = new Set((calc.items || []).map((i) => i.category));
 
   let verdict;
   if (calc.isBelowBreakEven || bufferedProfit <= 0) {
@@ -54,18 +45,10 @@ export function verifyEstimate(c, calc) {
     };
   }
 
-  const relevant = MISSING_CHECKS.filter((chk) => {
-    if (chk.id === 'clean' && calc.trade === 'waste') return false;
-    if (chk.id === 'protect' && calc.trade === 'labor') return false;
-    return true;
-  });
-
-  const missing = relevant.map((chk) => {
-    const ok = chk.ids.some((id) => ids.has(id)) || (chk.category && categories.has(chk.category)) || (chk.survey && c?.survey?.[chk.survey]);
-    return { ...chk, ok };
-  });
-
-  const missingCost = missing.filter((m) => !m.ok).length;
+  // 현장 조건에 맞는 부대비용은 처음부터 견적에 들어간다 — 경고가 아니라 '포함/뺌' 상태로 보여준다.
+  const siteCosts = siteCostRows(c);
+  const offRows = siteCosts.filter((r) => !r.on);
+  const includedTotal = siteCosts.filter((r) => r.on).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
   const rows = [
     { label: '계약가(공급가)', value: `${n(price)}만`, tone: 'plain' },
@@ -78,16 +61,18 @@ export function verifyEstimate(c, calc) {
   return {
     verdict,
     rows,
-    missing,
-    missingCost,
+    siteCosts,
+    // 예전 화면·테스트와의 호환 — 이제 '빠짐'이 아니라 '현장에 필요해 뺀 항목'이다
+    missing: siteCosts.map((r) => ({ ...r, ok: r.on, why: r.why })),
+    missingCost: offRows.length,
+    includedTotal,
     margin,
     bufferedProfit,
     gap,
     targetMargin: calc.marginTarget,
     tradeLabel: info.short,
-    advice:
-      missingCost > 0
-        ? `빠진 비용 ${missingCost}가지가 있습니다. 먼저 '빠진 비용 한 번에 넣기'로 채운 뒤 다시 검증하세요.`
-        : '빠진 비용은 없습니다. 예비비를 포함한 보수적 원가로도 여유가 있는지 마지막으로 확인하세요.',
+    advice: offRows.length
+      ? `${siteCosts.filter((r) => r.on).length}개 부대비용은 이미 견적에 포함되어 있습니다. 필요 없는 항목만 눌러 빼세요.`
+      : '현장 조건에 맞는 부대비용이 모두 견적에 들어가 있습니다. 현장에서 달라진 것만 3. 답사에 적으세요.',
   };
 }

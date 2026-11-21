@@ -4,6 +4,7 @@ import { won } from '../../lib/pricing.js';
 import { BigButton, Card, Details, Field, Metric, Money, Pill, SectionCard, SmallButton, TextInput, Toggle, WarningBox, cx } from '../ui.jsx';
 import { copyText } from '../../lib/clipboard.js';
 import { ratesOf } from '../../lib/rates.js';
+import { resolveSurvey } from '../../lib/site.js';
 import { estimateWorkDays } from '../../lib/schedule.js';
 import AfterPreview, { PREVIEW_TRADES } from '../AfterPreview.jsx';
 import SignalBanner from '../SignalBanner.jsx';
@@ -101,11 +102,11 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
       id: 'clean',
       label: '준공 청소 빼기',
       saving: itemAmount('clean'),
-      on: !c.survey?.afterCare,
+      on: !resolveSurvey(c).afterCare,
       onLabel: '뺌',
       offLabel: '포함',
       show: itemAmount('clean') > 0,
-      action: () => update({ survey: { ...(c.survey || {}), afterCare: !c.survey?.afterCare } }),
+      action: () => update({ survey: { ...(c.survey || {}), afterCare: !resolveSurvey(c).afterCare } }),
     },
     {
       id: 'grade',
