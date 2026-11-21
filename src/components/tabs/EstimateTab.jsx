@@ -113,15 +113,15 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
         <div className="grid grid-cols-3 gap-1.5">
           <div className="rounded-xl bg-white/10 px-1.5 py-2 text-center">
             <p className="text-[10px] font-bold text-blue-200">보수적 원가</p>
-            <p className="num text-base font-black leading-5 text-white">{Math.round(calc.costWithBuffer).toLocaleString('ko-KR')}<span className="ml-0.5 text-[10px] font-bold text-blue-200">만</span></p>
+            <p className="num whitespace-nowrap text-[15px] font-black leading-5 text-white">{Math.round(calc.costWithBuffer).toLocaleString('ko-KR')}<span className="ml-0.5 text-[10px] font-bold text-blue-200">만</span></p>
           </div>
           <div className="rounded-xl bg-white/10 px-1.5 py-2 text-center">
             <p className="text-[10px] font-bold text-blue-200">보수적 남는 돈</p>
-            <p className={cx('num text-base font-black leading-5', calc.netProfitBuffered > 0 ? 'text-emerald-300' : 'text-rose-300')}>{calc.netProfitBuffered > 0 ? '+' : ''}{Math.round(calc.netProfitBuffered).toLocaleString('ko-KR')}<span className="ml-0.5 text-[10px] font-bold text-blue-200">만</span></p>
+            <p className={cx('num whitespace-nowrap text-[15px] font-black leading-5', calc.netProfitBuffered > 0 ? 'text-emerald-300' : 'text-rose-300')}>{calc.netProfitBuffered > 0 ? '+' : ''}{Math.round(calc.netProfitBuffered).toLocaleString('ko-KR')}<span className="ml-0.5 text-[10px] font-bold text-blue-200">만</span></p>
           </div>
           <div className="rounded-xl bg-white/10 px-1.5 py-2 text-center">
             <p className="text-[10px] font-bold text-blue-200">남는 비율</p>
-            <p className="num text-base font-black leading-5 text-white">{calc.marginBuffered}%</p>
+            <p className="num whitespace-nowrap text-[15px] font-black leading-5 text-white">{calc.marginBuffered}%</p>
           </div>
         </div>
         <p className="mt-1.5 text-[11px] font-semibold leading-4 text-blue-200">
