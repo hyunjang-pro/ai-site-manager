@@ -338,6 +338,11 @@ export function classifyRequest(rawText = '') {
     sizeValue = '0.5';
     sizeUnit = '톤';
   }
+  // 규모를 안 적은 폐기물 현장도 차량 톤수를 규모로 보여 준다 ('톤'만 남지 않게)
+  if (trade === 'waste' && (!sizeValue || sizeValue === '0')) {
+    sizeValue = String({ half: 0.5, ton1: 1, ton25: 2.5 }[wasteVehicleId] || 1);
+    sizeUnit = '톤';
+  }
   const wasteVehicleLabel = { half: '반차(0.5톤)', ton1: '1톤 1차', ton25: '2.5톤' }[wasteVehicleId] || '';
 
   const rows = [
