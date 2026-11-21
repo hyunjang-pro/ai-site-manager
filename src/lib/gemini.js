@@ -339,6 +339,45 @@ export function pickTextModel(ids = []) {
   return tied.sort((a, b) => a.localeCompare(b))[0];
 }
 
+// 연결 테스트(ping)에 가장 빨리 답하는 모델 순서 — lite가 먼저, 그다음 flash. pro·이미지·임베딩은 뺀다.
+const PING_MODEL_PREFERENCE = [
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash-lite-latest',
+  'gemini-2.0-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-flash-latest',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash',
+];
+
+function pingScore(id) {
+  const s = String(id || '');
+  let score = Math.min(modelVersion(s), 2.5) * 100;
+  if (/-lite/i.test(s)) score += 40;
+  if (supportsThinkingBudget(s)) score += 15; // 사고를 끌 수 있는 2.5 flash·lite가 가장 빠르다
+  if (/preview|exp/i.test(s)) score -= 20;
+  if (/-thinking/i.test(s)) score -= 30;
+  return score;
+}
+
+export function pickPingModels(ids = []) {
+  const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+  const usable = list.filter(
+    (id) =>
+      /^gemini/i.test(id) &&
+      /flash/i.test(id) &&
+      !/-pro/i.test(id) &&
+      !/image|embedding|embed|aqa|tts|audio|live|veo|imagen|robotics|computer-use/i.test(id)
+  );
+  const first = PING_MODEL_PREFERENCE.filter((name) => usable.includes(name));
+  const rest = usable
+    .filter((id) => !first.includes(id))
+    .sort((a, b) => pingScore(b) - pingScore(a) || a.localeCompare(b));
+  return [...first, ...rest];
+}
+
 // 404면 'image'가 들어간 gemini 이미지 모델 중 최신을 고른다. (imagen은 :predict라 제외)
 function imageModelScore(id) {
   const s = String(id || '');
@@ -408,26 +447,56 @@ function photoParts(photos = []) {
 // 400·403·시간초과처럼 모델을 바꿔도 같은 오류만 바로 알린다.
 const MAX_TEXT_ATTEMPTS = 5;
 
-export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature = 0.2, ping = false }) {
+// 2.5 계열 flash·lite만 thinkingConfig를 받는다. 2.0·1.5·3 계열에 넣으면 400이 나고,
+// 2.5-pro는 thinking을 0으로 끌 수 없다(400). → 모델 이름을 보고 조건부로만 넣는다.
+export function supportsThinkingBudget(model) {
+  const m = String(model || '').toLowerCase();
+  return m.includes('2.5') && !/-pro/.test(m);
+}
+
+// 요청 본문.
+// thinkingBudget 기본값 0(끔) — 2.5-flash는 기본 thinking이 켜져 있어, 짧은 JSON 추출에도
+// 사고 토큰을 먼저 쓰느라 스마트폰 LTE에서 15~20초를 잡아먹고 '연결 실패(timeout)'로 보였다(IMG_1590).
+// 견적·답사 분석도 답이 JSON 한 덩어리라 사고 과정 없이 충분하고, 늦으면 아예 결과가 없다.
+// 판단이 무거운 호출에서 사고가 필요하면 호출부에서 thinkingBudget: 1024 처럼 넘기면 된다.
+// thinkingBudget: null 은 필드를 아예 넣지 않는다(모델이 거부할 때 재시도용).
+function generateBody({ parts, temperature = 0.2, ping = false, model = '', thinkingBudget = 0 }) {
+  const generationConfig = { temperature, responseMimeType: 'application/json' };
+  if (ping) generationConfig.maxOutputTokens = 32; // {"ok":true} 한 줄 받을 여유
+  if (thinkingBudget !== null && supportsThinkingBudget(model)) {
+    generationConfig.thinkingConfig = { thinkingBudget: Math.max(0, Number(thinkingBudget) || 0) };
+  }
+  return { contents: [{ role: 'user', parts }], generationConfig };
+}
+
+export async function callGemini({
+  apiKey,
+  parts,
+  timeoutMs = 25000,
+  temperature = 0.2,
+  ping = false,
+  models = null,
+  version = '',
+  thinkingBudget = 0,
+}) {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('no_key');
-  const body = {
-    contents: [{ role: 'user', parts }],
-    // ping(연결 테스트)은 답을 8토큰만 받아 가장 빠르게 확인한다
-    generationConfig: { temperature, responseMimeType: 'application/json', ...(ping ? { maxOutputTokens: 8 } : {}) },
-  };
   const started = Date.now();
 
   const cache = readModelCache(key);
-  let usedVersion = cache.version;
+  let usedVersion = String(version || cache.version || '');
   const pending = [];
-  for (const m of [cache.text, ...TEXT_MODEL_CANDIDATES]) {
+  for (const m of [...(Array.isArray(models) ? models : []), cache.text, ...TEXT_MODEL_CANDIDATES]) {
     const name = String(m || '').trim();
     if (name && !pending.includes(name)) pending.push(name);
   }
   const tried = [];
+  const attempts = []; // 모델별 실제 소요시간 — 연결 테스트가 '어디까지 갔는지' 보여주는 데 쓴다.
   let discovered = false;
   let attempt = null;
+
+  // ping은 한 모델에서 오래 매달리지 않는다 — 전체 시간 안에서 다음 모델을 찌른다.
+  const attemptTimeout = ping ? Math.max(4000, Math.min(timeoutMs, 10000)) : timeoutMs;
 
   // 후보 중 '지금 쿨다운이 풀린' 모델을 먼저 고른다(같으면 원래 순서).
   const takeNext = () => {
@@ -449,9 +518,24 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
     const model = takeNext();
     if (!model) break;
     tried.push(model);
-    attempt = await postGenerate(key, model, body, timeoutMs, usedVersion);
+    const t0 = Date.now();
+    const body = generateBody({ parts, temperature, ping, model, thinkingBudget });
+    attempt = await postGenerate(key, model, body, attemptTimeout, usedVersion);
+    // 이 모델·버전이 thinkingConfig를 400으로 거부하면 필드 없이 한 번만 더 보낸다(안전장치).
+    if (!attempt.ok && attempt.status === 400 && body.generationConfig.thinkingConfig) {
+      attempt = await postGenerate(
+        key,
+        model,
+        generateBody({ parts, temperature, ping, model, thinkingBudget: null }),
+        attemptTimeout,
+        usedVersion
+      );
+    }
+    const ms = Date.now() - t0;
+    attempts.push({ model, ms, ok: !!attempt.ok, reason: attempt.ok ? '' : attempt.reason, status: Number(attempt.status) || 0 });
     if (attempt.ok) {
       clearCooling(key, model);
+      attempt.ms = ms;
       break;
     }
 
@@ -484,19 +568,27 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
 
     if (attempt.reason === 'timeout') {
       // 느린 모델 하나 때문에 전체가 죽지 않게 — 아직 시간이 남았으면 다음 가벼운 모델로 한 번 더 찔러 본다.
-      if (Date.now() - started < 40000 && tried.length < 3) continue;
+      const spent = Date.now() - started;
+      const room = ping ? timeoutMs - spent > 2000 : spent < 40000;
+      if (room && tried.length < 3) continue;
       break;
     }
     break; // 400·403·키 오류는 모델을 바꿔도 같다
   }
 
-  if (!attempt || !attempt.ok) throw geminiError(attempt || { reason: 'failed' });
+  if (!attempt || !attempt.ok) {
+    const err = geminiError(attempt || { reason: 'failed' });
+    err.attempts = attempts; // 연결 테스트가 시도한 모델·소요시간을 그대로 보여준다
+    throw err;
+  }
   rememberModel(key, 'text', attempt.model, usedVersion);
   const raw = (attempt.data?.candidates?.[0]?.content?.parts || [])
     .map((p) => p?.text || '')
     .filter(Boolean)
     .join('\n');
-  return { raw, json: parseGeminiJson(raw), model: attempt.model };
+  // ping은 '연결됐는지'만 본다 — 토큰이 잘려 빈 답이 와도 연결 자체는 성공이다.
+  if (ping && !raw.trim()) return { raw: '', json: null, model: attempt.model, ms: attempt.ms || 0, attempts };
+  return { raw, json: parseGeminiJson(raw), model: attempt.model, ms: attempt.ms || 0, attempts };
 }
 
 
@@ -826,29 +918,111 @@ function geminiHint(e) {
   if (status === 403) return '이 키에 Gemini API 사용 권한이 없습니다. Google AI Studio에서 API 사용 설정을 확인하세요.';
   if (status === 429) return '무료 사용량 한도를 넘었습니다. 다른 모델로 자동 전환해 봤지만 모두 한도였습니다. 잠시 후 다시 시도하세요.';
   if (status === 503 || status === 502 || status === 504) return '구글이 잠깐 과부하 상태입니다. 다른 모델로 자동 전환해 봤지만 모두 막혔습니다. 1~2분 뒤 다시 눌러 주세요.';
-  if (reason === 'timeout') return '키는 받았지만 모델이 제한 시간(15초) 안에 답하지 않았습니다(모델 지연). 와이파이·LTE를 바꾸거나 1~2분 뒤 다시 눌러 주세요.';
+  if (reason === 'timeout') return '모델이 제한 시간 안에 답하지 않았습니다. 와이파이·LTE를 바꾸거나 1~2분 뒤 다시 눌러 주세요.';
   if (/failed to fetch|network|load failed|networkerror/i.test(reason)) {
     return '인터넷이 끊겼거나 이 네트워크가 구글 주소를 막고 있습니다. 다른 와이파이·LTE에서 다시 눌러 주세요.';
   }
   return '';
 }
 
-// 연결 테스트 — 짧은 ping(maxOutputTokens 8)으로 가벼운 모델부터 확인하고, 실제로 어떤 모델에 붙었는지(model)까지 돌려준다.
-// 한 모델이 느리다고 바로 'timeout'으로 끝내지 않고 다음 모델도 한 번씩 찔러 보고(제보 #22510, IMG_1589),
-// 실패하면 네트워크 차단 / 모델 지연 / 키 오류를 구분해 안내한다.
-export async function testGeminiKey(apiKey, { timeoutMs = 15000 } = {}) {
+// 연결 테스트 — 두 단계로 나눠서 '키가 틀렸는지 / 구글까지 길이 막혔는지 / 답만 느린지'를 갈라낸다(IMG_1590).
+//  1) GET /models 목록 조회(보통 0.3~1초): 키 인증 + 이 키로 실제 쓸 수 있는 모델 확인
+//     → 여기서 막히면 키·권한·네트워크 문제다.
+//  2) 목록에서 가장 빠른 lite/flash 모델에 짧은 ping(maxOutputTokens 32) → 여기서만 늦으면 '모델 지연'이다.
+const PING_PROMPT = 'JSON만 답해. {"ok":true}';
+
+function secs(ms) {
+  return `${(Math.max(0, Number(ms) || 0) / 1000).toFixed(1)}초`;
+}
+
+function attemptSummary(attempts = []) {
+  if (!Array.isArray(attempts) || !attempts.length) return '시도 없음';
+  return attempts.map((a) => `${a.model} ${secs(a.ms)}${a.ok ? '' : `(${a.reason || '실패'})`}`).join(' → ');
+}
+
+export async function testGeminiKey(apiKey, { timeoutMs = 20000, listTimeoutMs = 8000 } = {}) {
   const key = String(apiKey || '').trim();
-  if (!key) return { ok: false, reason: 'no_key', hint: '' };
+  if (!key) return { ok: false, reason: 'no_key', hint: '', detail: '' };
+
+  const listStart = Date.now();
+  let listed = null;
   try {
-    const { model } = await callGemini({
+    listed = await listGeminiModels(key, { timeoutMs: listTimeoutMs });
+  } catch (e) {
+    const msg = String(e?.message || '');
+    const listMs = Date.now() - listStart;
+    if (/^models_http_/.test(msg)) {
+      const status = Number(msg.replace(/[^0-9]/g, '')) || 0;
+      return {
+        ok: false,
+        reason: `gemini_http_${status}`,
+        status,
+        detail: `모델 목록 ${secs(listMs)} — 키 확인 실패`,
+        hint:
+          status === 403
+            ? '이 키에 Gemini API 사용 권한이 없습니다. Google AI Studio에서 API 사용 설정을 확인하세요.'
+            : '키가 올바르지 않거나 Gemini API에서 쓸 수 없는 키입니다. Google AI Studio에서 키를 다시 복사해 보세요.',
+      };
+    }
+    if (e?.name === 'AbortError' || /abort|timeout/i.test(msg)) {
+      return {
+        ok: false,
+        reason: 'timeout',
+        detail: `모델 목록 ${secs(listMs)} — 응답 없음`,
+        hint: `키 문제가 아닐 수 있습니다 — 모델 목록 조회가 ${secs(listTimeoutMs)} 안에도 오지 않았습니다. 이 네트워크에서 구글 연결이 막혔거나 매우 느린 상태입니다. 다른 와이파이·LTE에서 다시 눌러 주세요.`,
+      };
+    }
+    if (/failed to fetch|network|load failed|networkerror/i.test(msg)) {
+      return {
+        ok: false,
+        reason: 'network',
+        detail: `모델 목록 ${secs(listMs)} — 연결 실패`,
+        hint: '인터넷이 끊겼거나 이 네트워크가 구글 주소를 막고 있습니다. 다른 와이파이·LTE에서 다시 눌러 주세요.',
+      };
+    }
+    // models_empty 처럼 목록만 비어 오는 경우는 답변 생성이 될 수도 있으니 아래 ping으로 이어 간다.
+  }
+
+  const listMs = Date.now() - listStart;
+  const usable = listed ? listed.models.filter((m) => m.methods.includes('generateContent')).map((m) => m.id) : [];
+  const order = pickPingModels(usable);
+  const listNote = listed
+    ? `모델 목록 ${secs(listMs)}(${usable.length}개 사용 가능)`
+    : `모델 목록 ${secs(listMs)}(목록 비어 있음)`;
+
+  try {
+    const res = await callGemini({
       apiKey: key,
-      parts: [{ text: 'JSON만 답해. {"ok":true}' }],
+      parts: [{ text: PING_PROMPT }],
       timeoutMs,
       ping: true,
+      models: order.length ? order : null, // 목록이 비면 기존 후보 순서(2.5-flash → …)로 시도
+      version: listed?.version || '',
     });
-    return { ok: true, model: model || 'gemini' };
+    const attempts = Array.isArray(res.attempts) ? res.attempts : [];
+    return {
+      ok: true,
+      model: res.model || 'gemini',
+      ms: res.ms || 0,
+      listMs,
+      attempts,
+      detail: `${listNote} · 답변 ${secs(res.ms || 0)}${attempts.length > 1 ? ` (${attemptSummary(attempts)})` : ''}`,
+    };
   } catch (e) {
-    return { ok: false, reason: e?.message || 'failed', status: e?.status || 0, detail: e?.detail || '', hint: geminiHint(e) };
+    const attempts = Array.isArray(e?.attempts) ? e.attempts : [];
+    const reason = e?.message || 'failed';
+    const timedOut = reason === 'timeout' || attempts.some((a) => a.reason === 'timeout');
+    return {
+      ok: false,
+      reason,
+      status: e?.status || 0,
+      attempts,
+      detail: `${listNote} · 답변 ${attemptSummary(attempts)}`,
+      hint:
+        listed && timedOut
+          ? '키와 구글 연결은 정상입니다 — 모델 목록이 방금 확인됐습니다. 답변 생성만 제한 시간 안에 오지 않았습니다(LTE가 느리거나 그 모델이 붐비는 상태). 1~2분 뒤 또는 와이파이에서 다시 눌러 주세요.'
+          : geminiHint(e),
+    };
   }
 }
 

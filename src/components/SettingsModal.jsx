@@ -24,11 +24,16 @@ const GROUP_ICON = {
 export default function SettingsModal({ open, onClose, state, setState, showToast }) {
   const [region, setRegion] = useState(state.settings.region || '안동');
   const [apiKey, setApiKey] = useState(state.settings.apiKey || getGeminiKey() || '');
-  const [aiTest, setAiTest] = useState(null); // null | 'busy' | {ok, msg, hint}
+  const [aiTest, setAiTest] = useState(null); // null | 'busy' | {ok, msg, hint, detail}
   const runAiTest = async () => {
     setAiTest('busy');
     const res = await testGeminiKey(apiKey);
-    setAiTest(res.ok ? { ok: true, msg: `연결됨 · ${res.model}` } : { ok: false, msg: `실패 (${res.reason})`, hint: res.hint || '' });
+    // detail: 모델 목록·답변에 걸린 초와 시도한 모델 — '왜 늦는지'를 사장님이 바로 보게 한다.
+    setAiTest(
+      res.ok
+        ? { ok: true, msg: `연결됨 · ${res.model}`, detail: res.detail || '' }
+        : { ok: false, msg: `실패 (${res.reason})`, hint: res.hint || '', detail: res.detail || '' }
+    );
   };
   // 부모님 폰에 1탭 전달 — 지금 키·업체 정보·단가표를 링크(#share=)에 담는다.
   // 공개 저장소 코드에 키를 넣지 않고, 링크는 PIN(3855) 기반으로만 풀린다.
@@ -152,6 +157,7 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
               {aiTest.msg}
             </p>
             {!aiTest.ok && aiTest.hint ? <p className="mt-0.5 text-2xs font-semibold leading-4 text-rose-700/80">{aiTest.hint}</p> : null}
+            {aiTest.detail ? <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">{aiTest.detail}</p> : null}
           </div>
         ) : null}
         <p className="mt-1.5 text-2xs font-semibold leading-4 text-ink-3">

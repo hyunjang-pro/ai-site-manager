@@ -10,7 +10,16 @@ import { classifyRequest, summarizeRequest } from '../src/lib/classify.js';
 import { surveyWasteDrafts, firstCallQuestions, parseAdjustments } from '../src/lib/parse.js';
 import { wasteVehicle } from '../src/lib/waste.js';
 import { kstToday, addDaysISO, korDateLabel, korMonthDay } from '../src/lib/date.js';
-import { pickTextModel, pickImageModel, scrubSecret, GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE } from '../src/lib/gemini.js';
+import {
+  pickTextModel,
+  pickImageModel,
+  pickPingModels,
+  supportsThinkingBudget,
+  testGeminiKey,
+  scrubSecret,
+  GEMINI_MODEL_STORAGE,
+  GEMINI_COOLDOWN_STORAGE,
+} from '../src/lib/gemini.js';
 import { perPyeong, DEFAULT_RATES, RATE_FIELDS } from '../src/lib/rates.js';
 import { computeEstimate } from '../src/lib/pricing.js';
 import { composeCase } from '../src/lib/storage.js';
@@ -483,6 +492,55 @@ async function main() {
     record('모델: 이미지 모델은 텍스트에서 제외', pickTextModel(['gemini-2.5-flash-image', 'gemini-2.0-flash']) === 'gemini-2.0-flash', pickTextModel(['gemini-2.5-flash-image', 'gemini-2.0-flash']));
     record('모델: 이미지 모델 선택', pickImageModel(['gemini-3.0-flash-image', 'gemini-2.0-flash']) === 'gemini-3.0-flash-image', pickImageModel(['gemini-3.0-flash-image', 'gemini-2.0-flash']));
     record('모델: 이미지 모델 없으면 빈 값', pickImageModel(['gemini-2.5-flash', 'imagen-4.0-generate-001']) === '', pickImageModel(['gemini-2.5-flash', 'imagen-4.0-generate-001']));
+    // IMG_1590: 연결 테스트 ping은 가장 빨리 답하는 모델부터
+    const pingOrder = pickPingModels(['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-image']);
+    record('ping: lite를 먼저 고름', pingOrder[0] === 'gemini-2.5-flash-lite', pingOrder.join(' → '));
+    record('ping: pro·이미지 모델은 뺌', !pingOrder.some((id) => /pro|image/.test(id)), pingOrder.join(' → '));
+    // thinkingConfig는 2.5 flash·lite만 받는다(2.0·3·2.5-pro에 넣으면 400)
+    record(
+      '사고 끄기: 2.5 flash·lite만',
+      supportsThinkingBudget('gemini-2.5-flash') &&
+        supportsThinkingBudget('gemini-2.5-flash-lite') &&
+        supportsThinkingBudget('gemini-2.5-flash-latest') &&
+        !supportsThinkingBudget('gemini-2.5-pro') &&
+        !supportsThinkingBudget('gemini-2.0-flash') &&
+        !supportsThinkingBudget('gemini-3-flash'),
+      ['2.5-flash', '2.5-pro', '2.0-flash', '3-flash'].map((m) => `${m}:${supportsThinkingBudget('gemini-' + m)}`).join(' ')
+    );
+  });
+
+  // IMG_1590: 목록 조회는 되는데 답변만 안 오는 경우 — 원인을 '키'가 아니라 '모델 지연'으로 갈라 안내하는지
+  await step('단위: 연결 테스트 — 목록은 되고 답만 늦을 때', async () => {
+    const realFetch = globalThis.fetch;
+    const hits = [];
+    globalThis.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (/\/models\?/.test(u)) {
+        hits.push('LIST');
+        return new Response(
+          JSON.stringify({ models: [{ name: 'models/gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      hits.push('GEN');
+      // generateContent는 끝내 응답하지 않는다 → AbortError = timeout
+      return new Promise((resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => {
+          const e = new Error('The operation was aborted');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      });
+    };
+    try {
+      const res = await testGeminiKey('AIzaUNIT', { timeoutMs: 600, listTimeoutMs: 300 });
+      record('연결 테스트: 목록을 먼저 조회', hits[0] === 'LIST', hits.join(' → '));
+      record('연결 테스트: 답만 늦으면 timeout으로 실패', res.ok === false && res.reason === 'timeout', `${res.reason} / ${res.detail}`);
+      record('연결 테스트: 키 문제가 아니라고 안내', /키와 구글 연결은 정상/.test(res.hint || ''), res.hint || '');
+      record('연결 테스트: 시도한 모델·소요시간 공개', /모델 목록/.test(res.detail || '') && /gemini-2\.5-flash-lite/.test(res.detail || ''), res.detail || '');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   // 만원/㎡ → 평당(3.305785㎡) 암산 없이
@@ -1502,6 +1560,130 @@ async function main() {
     const saidAgain = await page.locator('[role=dialog]').innerText();
     record('503: 재시도도 연결됨', saidAgain.includes('연결됨'), saidAgain.match(/연결됨[^\n]*/)?.[0] || '');
     await shot('49b-gemini-503-fallback.png');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  // IMG_1590: 아이폰 LTE에서 '실패 (timeout)' — 목록(키)부터 확인하고, 2.5 계열 ping에는
+  // thinkingConfig(thinkingBudget 0)를 넣어 사고 시간을 없애는지. 400이 나면 빼고 재시도하는지.
+  await step('Gemini — 연결 테스트: 목록 먼저 · 사고 끄기 · 400 재시도', async () => {
+    const seen = { order: [], bodies: [] };
+    await context.route('https://generativelanguage.googleapis.com/**', async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (req.method() === 'GET' && /\/models(\?|$)/.test(url)) {
+        seen.order.push('LIST');
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            models: [
+              { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
+              { name: 'models/gemini-2.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+              { name: 'models/gemini-2.0-flash', supportedGenerationMethods: ['generateContent'] },
+            ],
+          }),
+        });
+      }
+      const name = decodeURIComponent((url.match(/\/models\/([^:]+):generateContent/) || [])[1] || '');
+      let body = {};
+      try {
+        body = JSON.parse(req.postData() || '{}');
+      } catch (e) {}
+      seen.order.push(name);
+      seen.bodies.push({ model: name, cfg: body.generationConfig || {} });
+      // 구글처럼 thinkingConfig를 400으로 거부한다
+      if (body?.generationConfig?.thinkingConfig) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 400,
+              message: `Field 'generation_config.thinking_config' is not supported for model '${name}'.`,
+              status: 'INVALID_ARGUMENT',
+            },
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+      });
+    });
+    await page.evaluate(
+      ([a, b]) => {
+        sessionStorage.removeItem(a);
+        sessionStorage.removeItem(b);
+      },
+      [GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE]
+    );
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    await openSettings();
+    await page.getByLabel('Gemini API 키').fill('AIzaTESTKEY123');
+    await page.getByRole('button', { name: '연결 테스트' }).click();
+    await page.getByText('연결됨', { exact: false }).waitFor({ timeout: 20000 });
+    const said = await page.locator('[role=dialog]').innerText();
+    record('연결 테스트: 목록 조회를 먼저 함', seen.order[0] === 'LIST', seen.order.join(' → '));
+    record('연결 테스트: 빠른 lite 모델로 답 확인', seen.bodies[0]?.model === 'gemini-2.5-flash-lite', String(seen.bodies[0]?.model));
+    record('연결 테스트: 2.5 ping에 thinkingBudget 0', seen.bodies[0]?.cfg?.thinkingConfig?.thinkingBudget === 0, JSON.stringify(seen.bodies[0]?.cfg || {}));
+    record(
+      '연결 테스트: 400이면 thinking 없이 같은 모델 재시도',
+      seen.bodies[1]?.model === 'gemini-2.5-flash-lite' && !seen.bodies[1]?.cfg?.thinkingConfig,
+      JSON.stringify(seen.bodies[1]?.cfg || {})
+    );
+    record('연결 테스트: 400 뒤에도 연결됨', said.includes('연결됨 · gemini-2.5-flash-lite'), said.match(/연결됨[^\n]*/)?.[0] || '');
+    record('연결 테스트: 목록·답변 소요시간 표시', said.includes('모델 목록') && said.includes('답변'), said.match(/모델 목록[^\n]*/)?.[0] || '');
+    record('연결 테스트: 실패 문구 없음', !said.includes('실패 ('), said.match(/실패[^\n]*/)?.[0] || '없음');
+    await shot('49c-gemini-ping-thinking.png');
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+  });
+
+  // 2.0 계열만 있는 키 — thinkingConfig를 보내면 400이므로 처음부터 필드를 빼고 보내는지
+  await step('Gemini — 2.0 모델엔 thinking 필드를 안 보냄', async () => {
+    const seen20 = [];
+    await context.route('https://generativelanguage.googleapis.com/**', async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (req.method() === 'GET' && /\/models(\?|$)/.test(url)) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ models: [{ name: 'models/gemini-2.0-flash', supportedGenerationMethods: ['generateContent'] }] }),
+        });
+      }
+      let body = {};
+      try {
+        body = JSON.parse(req.postData() || '{}');
+      } catch (e) {}
+      seen20.push(body.generationConfig || {});
+      if (body?.generationConfig?.thinkingConfig) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 400, message: "Field 'generation_config.thinking_config' is not supported for model 'gemini-2.0-flash'.", status: 'INVALID_ARGUMENT' } }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+      });
+    });
+    await page.evaluate((k) => sessionStorage.removeItem(k), GEMINI_MODEL_STORAGE);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    await openSettings();
+    await page.getByLabel('Gemini API 키').fill('AIzaTESTKEY123');
+    await page.getByRole('button', { name: '연결 테스트' }).click();
+    await page.getByText('연결됨', { exact: false }).waitFor({ timeout: 20000 });
+    const said20 = await page.locator('[role=dialog]').innerText();
+    record('2.0: 첫 요청에 thinking 필드 없음', seen20.length > 0 && !seen20[0]?.thinkingConfig, JSON.stringify(seen20[0] || {}));
+    record('2.0: ping 출력 상한 32', seen20[0]?.maxOutputTokens === 32, String(seen20[0]?.maxOutputTokens));
+    record('2.0: 연결됨 표시', said20.includes('연결됨 · gemini-2.0-flash'), said20.match(/연결됨[^\n]*/)?.[0] || '');
     await page.getByLabel('닫기').first().click();
     await page.waitForTimeout(300);
   });
