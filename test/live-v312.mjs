@@ -1,0 +1,27 @@
+// 라이브 배포본 확인 — 새 기능이 실제 사이트에 올라갔는지
+import { chromium } from 'playwright';
+const URL = 'https://hyunjang-pro.github.io/ai-site-manager/';
+const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR' });
+const p = await ctx.newPage();
+p.setDefaultTimeout(25000);
+const res = await p.goto(URL, { waitUntil: 'networkidle' });
+console.log('status', res.status());
+await p.getByText('가족 전용').waitFor({ timeout: 20000 });
+for (const d of ['3', '8', '5', '5']) await p.getByLabel(`${d} 번`).click();
+await p.getByText('오늘 장부').waitFor({ timeout: 20000 });
+await p.waitForTimeout(1200);
+const firstCase = p.locator('main .card').filter({ hasText: '만원' }).first();
+await firstCase.click();
+await p.waitForTimeout(800);
+await p.locator('nav[aria-label="현장 단계"] button').nth(3).click();
+await p.waitForTimeout(800);
+const t = await p.locator('main').innerText();
+console.log('① 최종 금액 정하기:', t.includes('최종 금액 정하기'));
+console.log('② 남는 돈:', t.includes('이 금액에서 남는 돈'));
+console.log('③ 깎자고:', t.includes('손님이 깎자고 할 때'));
+console.log('④ 완공 사진:', t.includes('손님께 보여줄 완공 사진'));
+console.log('무료 3단계:', t.includes('돈 안 드는 방법') && t.includes('설명 복사하기'));
+console.log('낯선 말 없음:', !t.includes('프롬프트'));
+await p.screenshot({ path: 'screenshots/live-v312-top.png' });
+await browser.close();
