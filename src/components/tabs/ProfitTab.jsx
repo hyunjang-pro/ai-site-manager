@@ -21,6 +21,8 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   const workDays = Math.max(1, parseInt(c.workDays, 10) || estimateWorkDays(c, calc, design?.days || 0));
   const dailyProfit = Math.round(calc.netProfitBuffered / workDays);
   const defenseGap = Math.max(0, defense - cost);
+  // 화면에 보이는 두 숫자(가견적 → 최종)의 실제 차이 — 배지·신호등 문구를 이 값으로 통일한다
+  const finalDelta = Math.round(Number(calc.clientPrice)) - Math.round(Number(calc.baseClientPrice));
 
   const initial = Number(c.negotiation?.proposal) || listPrice;
   const [proposal, setProposal] = useState(initial);
@@ -29,6 +31,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   const {
     draft: calledDraft,
     commit: commitCalled,
+    settle: settleCalled,
     reset: resetCalled,
     appPrice,
     noCalled,
@@ -217,9 +220,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
               aria-label="내가 부른 금액(만원)"
               value={calledDraft}
               onChange={(e) => commitCalled(e.target.value)}
-              onBlur={() => {
-                if (String(calledDraft).trim() === '') restoreAppPrice();
-              }}
+              onBlur={() => settleCalled()}
               className="num w-full min-w-0 border-b-2 border-slate-200 bg-transparent pb-1 text-right text-[34px] font-black leading-none tracking-tight text-ink outline-none placeholder:text-slate-300 focus:border-brand"
               placeholder={String(appPrice)}
             />
@@ -325,28 +326,30 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
 
       <SignalBanner signal={aiSignalOf(c.aiSurveySignal) || aiSignalOf(c.aiAnalysis) || finalSignal(calc, c)} caption="답사 후 원가·리스크와 고객 희망가를 함께 본 판정입니다." />
 
-      {/* 가견적 → 최종 비교 */}
+      {/* 가견적 → 최종 비교 — 배지는 화면에 보이는 두 숫자의 차이와 반드시 같게 */}
       <Card className={cx('p-4', calc.adjustmentTotal !== 0 && 'ring-1 ring-brand/25')}>
         <div className="flex items-start justify-between gap-2">
           <p className="text-base font-extrabold text-ink">가견적 → 최종 견적</p>
-          <Pill tone={calc.adjustmentTotal === 0 ? 'plain' : calc.adjustmentTotal > 0 ? 'warn' : 'ok'}>
-            {calc.adjustmentTotal === 0 ? '변동 없음' : `${calc.adjustmentTotal > 0 ? '+' : ''}${calc.adjustmentTotal}만`}
+          <Pill tone={finalDelta === 0 ? 'plain' : finalDelta > 0 ? 'warn' : 'ok'} data-testid="glance-badge">
+            {finalDelta === 0 ? '변동 없음' : `${finalDelta > 0 ? '+' : ''}${finalDelta}만`}
           </Pill>
         </div>
         <div className="mt-2 flex items-center gap-2 rounded-2xl bg-slate-50 px-3 py-3">
           <div className="min-w-0 flex-1 text-center">
             <p className="text-2xs font-bold text-ink-3">가견적 (답사 전)</p>
-            <p className="num mt-0.5 whitespace-nowrap text-lg font-black text-ink">{pers(calc.baseClientPrice)}<span className="ml-0.5 text-2xs font-bold text-ink-3">만</span></p>
+            <p className="num mt-0.5 whitespace-nowrap text-lg font-black text-ink" data-testid="glance-base">{pers(calc.baseClientPrice)}<span className="ml-0.5 text-2xs font-bold text-ink-3">만</span></p>
           </div>
           <ArrowRight className="h-5 w-5 shrink-0 text-slate-400" />
           <div className="min-w-0 flex-1 text-center">
             <p className="text-2xs font-bold text-brand">최종 견적</p>
-            <p className="num mt-0.5 whitespace-nowrap text-[clamp(18px,6vw,24px)] font-black text-brand-strong">{pers(calc.clientPrice)}<span className="ml-0.5 text-2xs font-bold text-ink-3">만</span></p>
+            <p className="num mt-0.5 whitespace-nowrap text-[clamp(18px,6vw,24px)] font-black text-brand-strong" data-testid="glance-final">{pers(calc.clientPrice)}<span className="ml-0.5 text-2xs font-bold text-ink-3">만</span></p>
           </div>
         </div>
         {calc.hasCalledPrice ? (
           <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-2xs font-bold leading-4 text-brand-strong">
-            최종 금액은 <b>내가 부른 금액 {pers(calc.calledPrice)}만원</b>입니다. 앱 계산가는 {pers(calc.appClientPrice)}만원이고, 아래 답사 변동은 참고 내역입니다.
+            최종 금액은 <b>내가 부른 금액 {pers(calc.calledPrice)}만원</b>입니다. 앱 계산가는 {pers(calc.appClientPrice)}만원
+            {calc.adjustmentTotal ? ` (답사 반영 ${calc.adjustmentTotal > 0 ? '+' : ''}${calc.adjustmentTotal}만)` : ''}이고, 위 배지는
+            가견적 대비 실제 차이입니다.
           </p>
         ) : null}
         {(calc.changeLogs || []).length ? (
@@ -498,7 +501,8 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
                   <Field label={`${p.label} %`}>
                     <TextInput
                       inputMode="numeric"
-                      value={c.paymentPlan?.[p.key] ?? 0}
+                      value={c.paymentPlan?.[p.key] ?? ''}
+                      placeholder="0"
                       onChange={(e) =>
                         update({ paymentPlan: { ...(c.paymentPlan || {}), [p.key]: e.target.value.replace(/[^\d.]/g, '') } })
                       }

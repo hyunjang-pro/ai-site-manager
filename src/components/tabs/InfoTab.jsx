@@ -557,7 +557,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
               <Field label="일수" hint="하루면 1">
                 <TextInput
                   inputMode="numeric"
-                  value={c.laborDays || 1}
+                  value={c.laborDays ?? ''}
                   onChange={(e) => update({ laborDays: e.target.value })}
                   placeholder="1"
                   aria-label="일수"

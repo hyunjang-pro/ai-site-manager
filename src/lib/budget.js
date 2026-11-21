@@ -64,7 +64,16 @@ export function finalSignal(calc, c) {
   const risks = [];
   const logs = Array.isArray(c?.changeLogs) ? c.changeLogs : [];
   const up = logs.filter((l) => l.type !== 'decrease').reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  if (up > 0) risks.push(`답사 후 +${up}만 올랐습니다`);
+  // 내가 부른 금액을 직접 정했으면 '답사 후 +85만' 대신 가견적→최종의 실제 차이를 보여준다
+  // (가견적 707만 → 내가 부른 606만인데 '+85만 올랐습니다'가 같이 뜨던 모순, 제보 #22499)
+  const calledDelta = Math.round(Number(calc?.clientPrice)) - Math.round(Number(calc?.baseClientPrice));
+  if (calc?.hasCalledPrice) {
+    if (calledDelta !== 0) {
+      risks.push(`내가 부른 금액으로 가견적 대비 ${calledDelta > 0 ? '+' : ''}${calledDelta}만 조정`);
+    }
+  } else if (up > 0) {
+    risks.push(`답사 후 +${up}만 올랐습니다`);
+  }
   if (c?.lifting?.elevator === 'no') risks.push('엘리베이터 없음(양중비·인력 위험)');
   if (c?.survey?.wasteMixed) risks.push('혼합 폐기물(처리비 3~6배)');
   if (c?.survey?.existingLeak) risks.push('누수 흔적(하자 배상 위험)');

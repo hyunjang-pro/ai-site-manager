@@ -734,6 +734,12 @@ function MissingLines({ c, update, calc }) {
     const n = Number(raw);
     return Number.isFinite(n) && n >= 0 ? n : row.amount;
   };
+  // 입력칸에 보이는 값 — 사용자가 다 지운 순간('')은 빈칸으로 둔다 (기본 금액이 되살아나지 않게)
+  const amountText = (row) => {
+    const raw = c.surveyAmounts ? c.surveyAmounts[row.id] : undefined;
+    if (raw === null || raw === undefined) return row.amount;
+    return raw;
+  };
   const toggle = (row) => {
     const next = { ...(c.survey || {}), [row.id]: !isOn(row) };
     const patch = { survey: next };
@@ -787,7 +793,7 @@ function MissingLines({ c, update, calc }) {
                     <input
                       className="field-input h-10 w-16 min-h-0 px-1 text-center text-sm"
                       inputMode="numeric"
-                      value={amountOf(r)}
+                      value={amountText(r)}
                       aria-label={`${r.label} 금액(만원)`}
                       onChange={(e) => setAmount(r, e.target.value)}
                     />
@@ -1055,9 +1061,10 @@ function CustomChecklist({ c, update, showToast }) {
                     <input
                       className="field-input h-10 w-16 min-h-0 px-1 text-center text-sm"
                       inputMode="numeric"
-                      value={c.surveyAmounts?.[key] ?? it.amount ?? 0}
+                      value={c.surveyAmounts?.[key] ?? it.amount ?? ''}
+                      placeholder="0"
                       aria-label={`${it.label} 금액(만원)`}
-                      onChange={(e) => update({ surveyAmounts: { ...(c.surveyAmounts || {}), [key]: e.target.value === '' ? '' : Number(e.target.value) } })}
+                      onChange={(e) => update({ surveyAmounts: { ...(c.surveyAmounts || {}), [key]: e.target.value.replace(/[^\d.]/g, '') } })}
                     />
                     <span className="text-sm font-bold text-ink-3">만</span>
                   </span>

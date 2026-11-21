@@ -19,6 +19,8 @@ import { hasInteriorStyle } from '../src/lib/constants.js';
 import { surveyGuideFor } from '../src/lib/surveyGuide.js';
 import { buildOrderGroups } from '../src/lib/orders.js';
 import { buildQuote, constructionNoticeText } from '../src/lib/docs.js';
+import { clientQuoteMessage, clientHonorific, isSoomgoCase, tentativePriceNotice } from '../src/lib/docs.js';
+import { buildSharePayload, decodeShare, encodeShare } from '../src/lib/share.js';
 import { buildTimeline, evidenceFor } from '../src/lib/gates.js';
 import { translateDesign } from '../src/lib/design.js';
 import { autoCaseTitle } from '../src/lib/classify.js';
@@ -681,35 +683,154 @@ async function main() {
     await shotAt('31-estimate.png', '1차 가견적', -120);
   });
 
-  await step('2단계 — 내가 부를 가견적·숨고 멘트', async () => {
+  await step('2단계 — 내가 부를 가견적·견적 멘트', async () => {
     await goTab(2);
     const input = page.getByLabel('내가 부를 가견적(만원)');
     record('가견적 호가: 상단 입력칸', (await input.count()) === 1);
     const appPrice = Number((await input.inputValue()) || 0);
     record('가견적 호가: 기본값 = 앱 계산가', appPrice > 0, String(appPrice));
+
+    // IMG_1585: 마지막 숫자를 지우면 원래 숫자(641)가 되살아나던 버그
+    await input.fill('');
+    await page.waitForTimeout(300);
+    const cleared = await input.inputValue();
+    record('가견적 호가: 다 지우면 빈칸 유지', cleared === '', `"${cleared}"`);
+    record('가견적 호가: 빈칸이어도 화면이 깨지지 않음', !(await page.locator('main').innerText()).includes('NaN'));
+    await input.fill('500');
+    await page.waitForTimeout(350);
+    record('가견적 호가: 빈칸 뒤 새 숫자 500 반영', (await input.inputValue()) === '500' && (await page.getByTestId('sugo-msg').innerText()).includes('500'), await input.inputValue());
+    // 빈칸으로 칸을 떠나면 앱 계산가가 다시 보인다 (저장값은 비운 채)
+    await input.fill('');
+    await page.waitForTimeout(200);
+    await page.getByText('내가 부를 가견적', { exact: true }).first().click();
+    await page.waitForTimeout(350);
+    record('가견적 호가: 빈칸으로 나가면 앱 계산가 복귀', (await input.inputValue()) === String(appPrice), await input.inputValue());
+
     const before = await page.getByTestId('sugo-msg').innerText();
     record(
-      '숨고 멘트: 업체·금액·범위·실측 유도',
+      '견적 멘트: 업체·금액·범위·실측 유도',
       before.includes('견적 금액') && before.includes(appPrice.toLocaleString('ko-KR')) && before.includes('실측') && before.includes('안녕하세요')
     );
-    record('숨고 멘트: 내부 원가·순익 없음', !['원가', '순익', '마진', '알선료', '예비비', '남는'].some((w) => before.includes(w)));
+    record('견적 멘트: 내부 원가·순익 없음', !['원가', '순익', '마진', '알선료', '예비비', '남는'].some((w) => before.includes(w)));
+    // #22480: 숨고 스샷이 없는 일반 문의면 숨고라고 부르지 않고 고객님/사장님으로 부른다
+    const cardTxt = await page.getByTestId('quote-msg-card').innerText();
+    record('견적 멘트: 숨고 아님 → 카드 제목 고객용', cardTxt.includes('고객 견적 발송 멘트') && !cardTxt.includes('숨고 견적 발송 멘트'), cardTxt.split('\n')[0]);
+    record('견적 멘트: 숨고 단어 없음', !before.includes('숨고'), before.split('\n').find((l) => l.includes('숨고')) || '없음');
+    record('견적 멘트: 주거 현장 호칭 고객님', before.includes('고객님,') && !before.includes('사장님,'));
+    // 사진이 없으면 '사진 없이 주신 정보만으로 낸 가견적'까지 짚는다
+    record(
+      '견적 멘트: 사진 없이 낸 가견적 → 비용 변동 안내',
+      before.includes('아직 현장 사진 없이 주신 정보만으로 낸 가견적') && before.includes('줄어들 수도') && before.includes('늘어날 수도')
+    );
 
     const heroBefore = await page.locator('main').innerText();
     const called = appPrice - 30;
     await input.fill(String(called));
     await page.waitForTimeout(450);
     const after = await page.getByTestId('sugo-msg').innerText();
-    record('숨고 멘트: 금액 즉시 변경', after.includes(called.toLocaleString('ko-KR')) && !after.includes(` ${appPrice.toLocaleString('ko-KR')}만원`), `${called}만`);
+    record('견적 멘트: 금액 즉시 변경', after.includes(called.toLocaleString('ko-KR')) && !after.includes(` ${appPrice.toLocaleString('ko-KR')}만원`), `${called}만`);
     const heroAfter = await page.locator('main').innerText();
     record('가견적 호가: 순익·신호등 연동', heroBefore !== heroAfter && heroAfter.includes('보수적 남는 돈'));
 
-    await page.getByRole('button', { name: /숨고 멘트 복사/ }).click();
+    // 적자까지 떨어뜨려도 '남는 비율' 카드가 넘치지 않는다 (IMG_1585 −7383% 잘림)
+    await input.fill('6');
+    await page.waitForTimeout(400);
+    const fit = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="hero-margin"]');
+      if (!card) return null;
+      const num = card.querySelector('.num span') || card.querySelector('.num');
+      const cr = card.getBoundingClientRect();
+      const nr = num.getBoundingClientRect();
+      return { text: num.textContent, inside: nr.right <= cr.right + 0.5 && nr.left >= cr.left - 0.5, cardW: Math.round(cr.width), numW: Math.round(nr.width) };
+    });
+    record('가견적 호가: 극단 음수(−7,000%대)도 카드 안에 들어감', !!fit && fit.inside, fit ? `${fit.text} ${fit.numW}/${fit.cardW}px` : '카드 없음');
+    const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    record('가견적 호가: 극단 음수에도 가로 스크롤 0', pageOverflow <= 1, `overflow=${pageOverflow}`);
+
+    await input.fill(String(called));
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: /견적 멘트 복사/ }).click();
     await page.waitForTimeout(350);
-    record('숨고 멘트: 1탭 복사', (await page.getByText('숨고 견적 멘트를 복사했습니다').count()) >= 1);
+    record('견적 멘트: 1탭 복사', (await page.getByText('견적 멘트를 복사했습니다').count()) >= 1);
 
     await page.getByRole('button', { name: '앱 계산가로', exact: true }).click();
     await page.waitForTimeout(350);
     record('가견적 호가: 앱 계산가로 원복', (await input.inputValue()) === String(appPrice), await input.inputValue());
+  });
+
+  // #22480: 숨고 스샷·요청서로 온 현장은 숨고 멘트, 업장 직접 문의는 사장님 호칭
+  await step('단위: 견적 멘트 — 숨고/일반·사진 유무 분기', async () => {
+    const mk = (patch) =>
+      composeCase({
+        trade: 'bathroom',
+        patch: { sizeValue: '1', sizeUnit: '칸', location: '구미시 형곡동 아파트 8층', notes: '600각 포세린', workDays: '3', ...patch },
+      });
+    const msgOf = (c) => clientQuoteMessage(c, computeEstimate(c));
+
+    const soomgo = mk({ rawInput: '숨고 요청서 · 견적 보낸 고수 8명 · 채팅하기' });
+    record('멘트 단위: 숨고 스샷 출처 감지', isSoomgoCase(soomgo) === true);
+    record('멘트 단위: 숨고면 숨고 고객님 멘트', msgOf(soomgo).includes('고객님,') && msgOf(soomgo).includes('요청서에 적어 주신'));
+    record('멘트 단위: 숨고 detected via ocrRaw', isSoomgoCase(mk({ ocrRaw: '숨고 요청 상세 경북 안동시 15평' })) === true);
+    record('멘트 단위: 숨고 아닌 카톡은 숨고 아님', isSoomgoCase(mk({ notes: '카톡으로 문의 — 욕실 전체 교체' })) === false);
+
+    const shop = mk({ title: '안동 풍산읍 15평 상가 원상복구 철거', location: '안동시 풍산읍 상가 2층', notes: '천장 텍스 철거' });
+    record('멘트 단위: 상가 현장 호칭 사장님', clientHonorific(shop, computeEstimate(shop)) === '사장님');
+    record('멘트 단위: 일반 상가 멘트에 숨고 없음', !msgOf(shop).includes('숨고') && msgOf(shop).includes('사장님,') && msgOf(shop).includes('문의해 주신'));
+    const house = mk({ title: '포항 두호동 24평 빌라 도배', location: '포항시 북구 두호동 빌라 3층' });
+    record('멘트 단위: 주거 현장 호칭 고객님', clientHonorific(house, computeEstimate(house)) === '고객님');
+
+    record('멘트 단위: 사진 없음 문구', tentativePriceNotice({ photos: [] }).includes('아직 현장 사진 없이'));
+    record('멘트 단위: 사진 있으면 내용+사진 기준', tentativePriceNotice({ photos: [{ dataUrl: 'data:image/png;base64,AA' }] }).includes('주신 내용과 사진 기준'));
+    record('멘트 단위: 사진 있어도 비용 증감 안내', msgOf(mk({ photos: [{ dataUrl: 'data:image/png;base64,AA' }] })).includes('늘어날 수도'));
+  });
+
+  // 앱 전체 숫자 입력칸 전수 — 마지막 숫자를 지우면 원래 값이 되살아나던 버그(IMG_1585)가 남아 있지 않은지
+  await step('숫자 입력칸 전수 — 다 지우면 빈칸 유지', async () => {
+    const scan = async (tag) => {
+      const bad = [];
+      const checked = [];
+      for (let n = 1; n <= 6; n += 1) {
+        await goTab(n);
+        const sel = 'main input[inputmode="numeric"], main input[inputmode="decimal"]';
+        const total = await page.locator(sel).count();
+        for (let i = 0; i < total; i += 1) {
+          const el = page.locator(sel).nth(i);
+          let label = `${tag} tab${n}#${i}`;
+          try {
+            if (!(await el.isVisible())) continue;
+            label = `${tag} ${n}단계 《${(await el.getAttribute('aria-label')) || `#${i}`}》`;
+            const original = await el.inputValue();
+            if (original === '') continue;
+            await el.click();
+            await el.fill('');
+            await page.waitForTimeout(110);
+            const after = await el.inputValue();
+            checked.push(label);
+            if (after !== '') bad.push(`${label} "${original}"→"${after}"`);
+            await el.fill(original);
+            await page.waitForTimeout(110);
+          } catch (e) {
+            bad.push(`${label} 검사 실패: ${e.message.split('\n')[0].slice(0, 60)}`);
+          }
+        }
+      }
+      return { bad, checked };
+    };
+
+    const bath = await scan('욕실');
+    record(`숫자칸 전수(욕실): ${bath.checked.length}개 모두 빈칸 유지`, bath.bad.length === 0, bath.bad.slice(0, 4).join(' | ') || `${bath.checked.length}개 확인`);
+
+    await goHome();
+    await page.getByText('안동 풍산읍 15평 상가 원상복구 철거').first().click();
+    await page.getByLabel('받은 내용').waitFor();
+    const demo = await scan('철거');
+    record(`숫자칸 전수(철거): ${demo.checked.length}개 모두 빈칸 유지`, demo.bad.length === 0, demo.bad.slice(0, 4).join(' | ') || `${demo.checked.length}개 확인`);
+    record('숫자칸 전수: 두 현장 합쳐 20칸 이상', bath.checked.length + demo.checked.length >= 20, `${bath.checked.length + demo.checked.length}칸`);
+
+    // 다음 단계들은 욕실 현장으로 이어진다
+    await goHome();
+    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').first().click();
+    await page.getByLabel('받은 내용').waitFor();
   });
 
   await step('2단계 — 현장 부대비용 자동 반영·1탭 빼기', async () => {
@@ -1931,6 +2052,139 @@ async function main() {
       record(`360: '${last}' 실패`, false, e.message.split('\n').slice(0, 6).join(' / ').slice(0, 400));
     }
     await ctx.close();
+  });
+
+  // #22480: 숨고 스샷·요청서로 만든 현장은 숨고 멘트, 일반 상가 현장은 사장님 호칭
+  await step('견적 멘트 — 숨고 요청서 현장 vs 일반 상가 현장', async () => {
+    await goHome();
+    // (1) 숨고 요청서 글자로 만든 현장
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    await page.getByLabel('현장 요청 내용').fill('숨고 요청서 · 경북 안동시 15평 상가 철거 · 견적 보낸 고수 8명 · 채팅하기');
+    await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
+    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByLabel('받은 내용').waitFor();
+    await goTab(2);
+    const smCard = await page.getByTestId('quote-msg-card').innerText();
+    const smMsg = await page.getByTestId('sugo-msg').innerText();
+    record('숨고 현장: 카드 제목 = 숨고 견적 발송 멘트', smCard.includes('숨고 견적 발송 멘트'), smCard.split('\n')[0]);
+    record('숨고 현장: 멘트에 요청서·일정·변동 안내', smMsg.includes('요청서에 적어 주신') && smMsg.includes('가견적') && smMsg.includes('늘어날 수도'));
+    record('숨고 현장: 복사 버튼도 숨고 멘트', (await page.getByRole('button', { name: /숨고 멘트 복사/ }).count()) === 1);
+    await shotAt('48a-quote-msg-soomgo.png', '내가 부를 가견적', -80);
+
+    // (2) 일반 상가 현장 — 숨고 단어 없이 사장님 호칭
+    await goHome();
+    await page.getByText('안동 풍산읍 15평 상가 원상복구 철거').first().click();
+    await page.getByLabel('받은 내용').waitFor();
+    await goTab(2);
+    const shopCard = await page.getByTestId('quote-msg-card').innerText();
+    const shopMsg = await page.getByTestId('sugo-msg').innerText();
+    record('일반 상가: 카드 제목 = 고객 견적 발송 멘트', shopCard.includes('고객 견적 발송 멘트') && !shopCard.includes('숨고 견적 발송 멘트'), shopCard.split('\n')[0]);
+    record('일반 상가: 숨고 단어 없음', !shopMsg.includes('숨고'), shopMsg.split('\n').find((l) => l.includes('숨고')) || '없음');
+    record('일반 상가: 호칭 사장님', shopMsg.includes('사장님,') && !shopMsg.includes('고객님,'));
+    record('일반 상가: 문의해 주신 표현', shopMsg.includes('문의해 주신'));
+  });
+
+  // #22499: 내가 부른 금액을 정하면 '답사 후 +85만'이 아니라 가견적→최종 실제 차이를 보여준다
+  await step('4단계 — 가견적·내가 부른 금액 차이와 배지·신호등 일치', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR' });
+    await ctx.route('https://generativelanguage.googleapis.com/**', geminiMock);
+    await ctx.route('https://api.open-meteo.com/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"daily":{"time":[],"weather_code":[],"temperature_2m_max":[],"temperature_2m_min":[],"precipitation_probability_max":[]}}' }));
+    const p = await ctx.newPage();
+    p.setDefaultTimeout(20000);
+    try {
+      await p.goto('http://127.0.0.1:4173/', { waitUntil: 'networkidle' });
+      for (const d of ['3', '8', '5', '5']) await p.getByLabel(`${d} 번`).click();
+      await p.getByText('오늘 장부').waitFor({ timeout: 12000 });
+      await p.waitForTimeout(700);
+      // 답사 변동 +85만이 있는 현장으로 만든다
+      await p.evaluate(() => {
+        const st = JSON.parse(localStorage.getItem('aiSiteManager.v1'));
+        const c = st.cases.find((x) => x.id === 'case-bathroom') || st.cases[0];
+        c.changeLogs = [{ id: 'cl-e2e', item: '폐기물 1대 추가 반출', reason: '답사에서 짐이 많음', amount: 85, days: 0, type: 'increase', agreed: true, at: '2026-11-20' }];
+        c.calledPrice = '';
+        localStorage.setItem('aiSiteManager.v1', JSON.stringify(st));
+      });
+      await p.reload({ waitUntil: 'networkidle' });
+      await p.getByText('오늘 장부').waitFor({ timeout: 12000 });
+      await p.getByText('구미 형곡동 32평 아파트 욕실 1칸').first().click();
+      await p.getByLabel('받은 내용').waitFor();
+      await p.locator('nav[aria-label="현장 단계"] button').nth(3).click();
+      await p.waitForTimeout(500);
+      const numOf = async (id) => Number((await p.getByTestId(id).innerText()).replace(/[^\d]/g, ''));
+      const base0 = await numOf('glance-base');
+      const final0 = await numOf('glance-final');
+      const badge0 = (await p.getByTestId('glance-badge').innerText()).trim();
+      record('4단계: 내가 부른 금액 전 — 배지 = 답사 변동', badge0 === `+${final0 - base0}만`, `${base0} → ${final0} · 배지 ${badge0}`);
+
+      const called = base0 - 101;
+      await p.getByLabel('내가 부른 금액(만원)').fill(String(called));
+      await p.waitForTimeout(600);
+      const base1 = await numOf('glance-base');
+      const final1 = await numOf('glance-final');
+      const badge1 = (await p.getByTestId('glance-badge').innerText()).trim();
+      const mainTxt = await p.locator('main').innerText();
+      record('4단계: 최종 견적 = 내가 부른 금액', final1 === called, `${base1} → ${final1} (내가 부른 ${called})`);
+      record('4단계: 배지 = 화면 두 숫자의 실제 차이', badge1 === `${final1 - base1}만`, `${final1 - base1}만 vs 배지 ${badge1}`);
+      record('4단계: 배지 −101만 표기', badge1 === '-101만', badge1);
+      record('4단계: 답사 후 +85만 모순 없음', !mainTxt.includes('답사 후 +85만'));
+      record('4단계: 신호등은 내가 부른 금액 기준 조정', mainTxt.includes('내가 부른 금액으로 가견적 대비 -101만 조정'), mainTxt.split('·').find((x) => x.includes('가견적 대비'))?.trim() || '없음');
+      await p.screenshot({ path: path.join(SHOTS, '48b-called-vs-glance.png') });
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  // #22510: 부모님 폰에 키·설정을 링크 한 번으로 — #share= → PIN 풀면 자동 적용
+  await step('가족 폰 세팅 링크(#share) — 잠금 해제 순간 자동 적용', async () => {
+    const payload = buildSharePayload(
+      { region: '포항', businessName: '가족철거', agencyFeeRate: 10, rates: { buffer: 8 } },
+      { name: '가족철거', owner: '홍아빠', phone: '010-1111-2222', address: '경북 포항시', bizNo: '123-45-67890', account: '농협 111-222-333' },
+      'AIzaSHAREKEY1234567890'
+    );
+    const code = encodeShare(payload);
+    record('세팅 링크: 인코딩 왕복', decodeShare(code)?.k === 'AIzaSHAREKEY1234567890' && decodeShare(code)?.s?.region === '포항');
+
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR' });
+    const p = await ctx.newPage();
+    p.setDefaultTimeout(20000);
+    try {
+      await p.goto(`http://127.0.0.1:4173/#share=${code}`, { waitUntil: 'networkidle' });
+      await p.getByText('가족 전용').waitFor({ timeout: 12000 });
+      const beforeKey = await p.evaluate(() => localStorage.getItem('aiSiteManager.geminiKey'));
+      record('세팅 링크: 잠금 전에는 키가 적용되지 않음', !beforeKey, String(beforeKey));
+      for (const d of ['3', '8', '5', '5']) await p.getByLabel(`${d} 번`).click();
+      await p.getByText('오늘 장부').waitFor({ timeout: 12000 });
+      await p.getByText('가족 설정(AI 키 포함)이 적용되었습니다').waitFor({ timeout: 8000 });
+      record('세팅 링크: 적용 토스트', true);
+      await p.waitForTimeout(700);
+      const after = await p.evaluate(() => {
+        const st = JSON.parse(localStorage.getItem('aiSiteManager.v1') || '{}');
+        return {
+          key: localStorage.getItem('aiSiteManager.geminiKey'),
+          apiKey: st?.settings?.apiKey,
+          region: st?.settings?.region,
+          businessName: st?.settings?.businessName,
+          hash: window.location.hash,
+          supplier: localStorage.getItem('aiSiteManager.supplier'),
+        };
+      });
+      record('세팅 링크: Gemini 키 저장', after.key === 'AIzaSHAREKEY1234567890', String(after.key));
+      record('세팅 링크: 설정에 키·업체명 반영', after.apiKey === 'AIzaSHAREKEY1234567890' && after.businessName === '가족철거', `${after.apiKey} / ${after.businessName}`);
+      record('세팅 링크: 지역도 함께 적용', after.region === '포항', String(after.region));
+      record('세팅 링크: 주소창 해시 정리', after.hash === '', `hash="${after.hash}"`);
+      record('세팅 링크: 업체 정보(연락처) 적용', String(after.supplier || '').includes('010-1111-2222'), String(after.supplier || '').slice(0, 60));
+      await p.getByLabel('설정').click();
+      await p.getByText('AI 정밀 분석 (무료 Gemini API 키)').waitFor();
+      await p.waitForTimeout(300);
+      const shareBtn = await p.getByLabel('가족 폰에 세팅 링크 복사').count();
+      record('세팅 링크: 설정에 「가족 폰에 세팅 링크 복사」 버튼', shareBtn >= 1, String(shareBtn));
+      record('세팅 링크: 설정에 적용된 키 보임', (await p.getByLabel('Gemini API 키').inputValue()) === 'AIzaSHAREKEY1234567890');
+      await p.screenshot({ path: path.join(SHOTS, '48c-family-share.png') });
+    } finally {
+      await ctx.close();
+    }
   });
 
   await step('모바일 마무리', async () => {

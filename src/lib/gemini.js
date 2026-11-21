@@ -408,13 +408,15 @@ function photoParts(photos = []) {
 // 400·403·시간초과처럼 모델을 바꿔도 같은 오류만 바로 알린다.
 const MAX_TEXT_ATTEMPTS = 5;
 
-export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature = 0.2 }) {
+export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature = 0.2, ping = false }) {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('no_key');
   const body = {
     contents: [{ role: 'user', parts }],
-    generationConfig: { temperature, responseMimeType: 'application/json' },
+    // ping(연결 테스트)은 답을 8토큰만 받아 가장 빠르게 확인한다
+    generationConfig: { temperature, responseMimeType: 'application/json', ...(ping ? { maxOutputTokens: 8 } : {}) },
   };
+  const started = Date.now();
 
   const cache = readModelCache(key);
   let usedVersion = cache.version;
@@ -480,7 +482,12 @@ export async function callGemini({ apiKey, parts, timeoutMs = 25000, temperature
       continue;
     }
 
-    break; // 400·403·키 오류·시간초과는 모델을 바꿔도 같다
+    if (attempt.reason === 'timeout') {
+      // 느린 모델 하나 때문에 전체가 죽지 않게 — 아직 시간이 남았으면 다음 가벼운 모델로 한 번 더 찔러 본다.
+      if (Date.now() - started < 40000 && tried.length < 3) continue;
+      break;
+    }
+    break; // 400·403·키 오류는 모델을 바꿔도 같다
   }
 
   if (!attempt || !attempt.ok) throw geminiError(attempt || { reason: 'failed' });
@@ -819,19 +826,25 @@ function geminiHint(e) {
   if (status === 403) return '이 키에 Gemini API 사용 권한이 없습니다. Google AI Studio에서 API 사용 설정을 확인하세요.';
   if (status === 429) return '무료 사용량 한도를 넘었습니다. 다른 모델로 자동 전환해 봤지만 모두 한도였습니다. 잠시 후 다시 시도하세요.';
   if (status === 503 || status === 502 || status === 504) return '구글이 잠깐 과부하 상태입니다. 다른 모델로 자동 전환해 봤지만 모두 막혔습니다. 1~2분 뒤 다시 눌러 주세요.';
-  if (reason === 'timeout') return '응답이 없습니다. 인터넷 연결을 확인하고 다시 눌러 주세요.';
+  if (reason === 'timeout') return '키는 받았지만 모델이 제한 시간(15초) 안에 답하지 않았습니다(모델 지연). 와이파이·LTE를 바꾸거나 1~2분 뒤 다시 눌러 주세요.';
+  if (/failed to fetch|network|load failed|networkerror/i.test(reason)) {
+    return '인터넷이 끊겼거나 이 네트워크가 구글 주소를 막고 있습니다. 다른 와이파이·LTE에서 다시 눌러 주세요.';
+  }
   return '';
 }
 
-// 연결 테스트 — 실제로 어떤 모델에 붙었는지(model)까지 돌려준다.
-export async function testGeminiKey(apiKey) {
+// 연결 테스트 — 짧은 ping(maxOutputTokens 8)으로 가벼운 모델부터 확인하고, 실제로 어떤 모델에 붙었는지(model)까지 돌려준다.
+// 한 모델이 느리다고 바로 'timeout'으로 끝내지 않고 다음 모델도 한 번씩 찔러 보고(제보 #22510, IMG_1589),
+// 실패하면 네트워크 차단 / 모델 지연 / 키 오류를 구분해 안내한다.
+export async function testGeminiKey(apiKey, { timeoutMs = 15000 } = {}) {
   const key = String(apiKey || '').trim();
-  if (!key) return { ok: false, reason: 'no_key' };
+  if (!key) return { ok: false, reason: 'no_key', hint: '' };
   try {
     const { model } = await callGemini({
       apiKey: key,
       parts: [{ text: 'JSON만 답해. {"ok":true}' }],
-      timeoutMs: 15000,
+      timeoutMs,
+      ping: true,
     });
     return { ok: true, model: model || 'gemini' };
   } catch (e) {

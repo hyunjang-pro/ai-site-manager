@@ -584,10 +584,40 @@ export function strengthLines(c, calc, completedCases = []) {
   return lines;
 }
 
-// 숨고·카톡 '견적 보내기'에 그대로 붙여넣는 멘트 — 금액은 내가 부른 금액 기준, 내부 원가·순익은 절대 넣지 않는다.
-export function sugoQuoteMessage(c, calc) {
+// 숨고에서 온 요청인지 — 스샷 글자(ocrRaw)·원문·메모에 숨고 흔적이 실제로 있을 때만 숨고용 문구를 쓴다.
+// 카톡·전화·직접 입력으로 온 일반 문의는 숨고라고 부르면 안 된다(사용자 제보 #22480).
+export function isSoomgoCase(c) {
+  const text = [c?.rawInput, c?.ocrRaw, c?.notes, c?.supplement, c?.title, c?.location]
+    .filter(Boolean)
+    .join(' ');
+  return /숨고|순고|soomgo|SUMGGO|요청서|견적\s*보낸\s*고수|고수\s*\d+\s*명|채팅\s*하기/i.test(text);
+}
+
+// 현장이 업장(상가·식당·카페·사무실·간판 등)이면 '사장님', 집·빌라·아파트 같은 주거 현장이면 '고객님'.
+export function clientHonorific(c, calc) {
+  const text = [c?.title, c?.location, c?.rawInput, c?.notes, c?.tradeName, calc?.targetSummary, calc?.clientSummary]
+    .filter(Boolean)
+    .join(' ');
+  const business = /상가|상점|점포|매장|가게|식당|음식점|분식|치킨|주점|호프|카페|커피|베이커리|제과|사무실|사무소|학원|병원|의원|약국|공장|창고|물류|간판|숍|상회|편의점|마트|미용실|네일|헤어|은행|관공서|교회|성당|빌딩/i;
+  return business.test(text) ? '사장님' : '고객님';
+}
+
+// 가견적 변동 안내 — 사진을 받았는지에 따라 한 문장을 바꿔 넣는다.
+export function tentativePriceNotice(c) {
+  const hasPhoto = Array.isArray(c?.photos) && c.photos.length > 0;
+  return hasPhoto
+    ? '주신 내용과 사진 기준으로 낸 가견적이라, 실제 현장 확인(답사) 뒤 작업 조건에 따라 비용이 줄어들 수도, 늘어날 수도 있습니다.'
+    : '아직 현장 사진 없이 주신 정보만으로 낸 가견적이라, 실제 현장 확인(답사) 뒤 작업 조건에 따라 비용이 줄어들 수도, 늘어날 수도 있습니다.';
+}
+
+// 견적 보내기 멘트 — 숨고 요청서면 숨고 문구, 일반 문의면 고객님/사장님 호칭.
+// 금액은 내가 부른 금액 기준, 내부 원가·순익은 절대 넣지 않는다.
+export function clientQuoteMessage(c, calc) {
   const sup = getSupplier();
   const biz = sup.name || c?.businessName || '철거·인테리어 전문';
+  const soomgo = isSoomgoCase(c);
+  // 숨고 채팅은 항상 ‘고객님’, 직접 문의는 업장이면 ‘사장님’·주거면 ‘고객님’
+  const who = soomgo ? '고객님' : clientHonorific(c, calc);
   const label = tradeLabelOf(c, calc);
   const size = sizeText(c);
   const place = String(c?.location || c?.region || '').trim();
@@ -613,7 +643,7 @@ export function sugoQuoteMessage(c, calc) {
   const days = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
   const lines = [
     `안녕하세요, ${biz}입니다.`,
-    `${place ? `${place} ` : ''}${size} ${label} 요청 주신 내용으로 견적 드립니다.`,
+    `${who}, ${place ? `${place} ` : ''}${size} ${label} ${soomgo ? '요청서에 적어 주신' : '문의해 주신'} 내용으로 견적 드립니다.`,
     '',
     `· 견적 금액: ${won(price)} (${c?.includeVat ? '부가세 포함' : '부가세 별도'})`,
     `· 공사 범위: ${calc?.clientSummary || calc?.targetSummary || label}`,
@@ -622,7 +652,7 @@ export function sugoQuoteMessage(c, calc) {
   if (excluded.length) lines.push(`· 별도: ${excluded.join(' / ')}`);
   lines.push(`· 공사 기간: ${days}일 내외 (실측 후 확정)`);
   lines.push('');
-  lines.push('가견적이라 현장 상태(철거 범위·자재 수급)에 따라 조금 달라질 수 있습니다.');
+  lines.push(tentativePriceNotice(c));
   lines.push('실측 가능하신 시간 알려주시면 정확한 금액으로 다시 보내드리겠습니다.');
   lines.push('추가 작업은 사진·사유·금액·일정을 문자로 합의한 뒤 진행합니다.');
   if (trade === 'bathroom' || trade === 'tilewaterproof') lines.push('방수는 담수 48시간 확인 후 타일 시공합니다.');
@@ -639,7 +669,7 @@ export function estimateSms(c, calc, completedCases = [], useStrength = true) {
     place.includes(label) || (calc?.trade === 'demolition' && /철거/.test(place)) || (calc?.trade === 'waste' && /폐기물/.test(place));
   const lines = [
     `[${label} 견적 안내]`,
-    `안녕하세요 사장님, ${place}${skipLabel ? '' : ` ${label}`} 견적 보내드립니다.`,
+    `안녕하세요 ${clientHonorific(c, calc)}, ${place}${skipLabel ? '' : ` ${label}`} 견적 보내드립니다.`,
     `· 금액: ${wonFull(price)} (${c?.includeVat ? '부가세 포함' : '부가세 별도'})`,
     `· 범위: ${calc?.targetSummary || label}`,
     `· 기간: 협의 후 확정 / 계약금 ${calc?.plan?.deposit ?? 30}% · 잔금 ${calc?.plan?.balance ?? 30}%`,

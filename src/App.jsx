@@ -11,6 +11,9 @@ import { Toast, cx } from './components/ui.jsx';
 import { loadState, saveState, newCase, composeCase } from './lib/storage.js';
 import { BIDS, bidStats, bidToCase } from './lib/bids.js';
 import { setGeminiKey } from './lib/gemini.js';
+import { DEFAULT_RATES, mergeRates } from './lib/rates.js';
+import { saveSupplier } from './lib/supplier.js';
+import { clearShareHash, decodeShare, readShareHash, readStashedShare, stashShare } from './lib/share.js';
 
 export default function App() {
   const [state, setState] = useState(() => loadState());
@@ -22,7 +25,18 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newCaseOpen, setNewCaseOpen] = useState(false);
   const [savedAt, setSavedAt] = useState('');
+  // 부모님·가족 폰에 보낸 #share= 링크 — 잠금을 풀 때 자동 적용한다
+  const [pendingShare, setPendingShare] = useState(() => readShareHash() || readStashedShare());
   const bidInfo = useMemo(() => bidStats(BIDS), []);
+
+  // 주소창의 #share= 를 읽어 두고(아직 잠겨 있으면 풀릴 때까지 보관) 해시는 지운다
+  useEffect(() => {
+    const code = readShareHash();
+    if (!code) return;
+    stashShare(code);
+    setPendingShare(code);
+    clearShareHash();
+  }, []);
 
   // 설정에 저장된 키를 이 기기의 AI 키 저장소로 한 번 옮긴다.
   useEffect(() => {
@@ -50,6 +64,35 @@ export default function App() {
     () => state.cases.find((c) => c.id === activeId) || state.cases[0],
     [state.cases, activeId]
   );
+
+  // 잠금 해제 순간, 가족이 보낸 설정 링크(키·업체 정보·단가표)를 이 기기에 반영한다
+  useEffect(() => {
+    if (!unlocked || !pendingShare) return;
+    const data = decodeShare(pendingShare);
+    stashShare('');
+    setPendingShare('');
+    if (!data) {
+      showToast('가족 설정 링크를 읽지 못했습니다 — 링크를 다시 받아 주세요');
+      return;
+    }
+    const key = String(data.k || '').trim();
+    if (key) setGeminiKey(key);
+    const s = data.s || {};
+    setState((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        ...(s.region ? { region: s.region } : {}),
+        ...(s.businessName ? { businessName: s.businessName } : {}),
+        ...(s.agencyFeeRate !== undefined ? { agencyFeeRate: s.agencyFeeRate } : {}),
+        ...(s.rates ? { rates: mergeRates(DEFAULT_RATES, s.rates) } : {}),
+        ...(key ? { apiKey: key, useAi: true } : {}),
+      },
+    }));
+    if (s.supplier && s.supplier.name) saveSupplier(s.supplier);
+    showToast('가족 설정(AI 키 포함)이 적용되었습니다');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlocked, pendingShare]);
 
   const updateCase = useCallback((id, patch) => {
     setState((prev) => ({

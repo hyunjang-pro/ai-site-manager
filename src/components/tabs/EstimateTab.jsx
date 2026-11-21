@@ -10,7 +10,7 @@ import { expertAudit } from '../../lib/expertAudit.js';
 import { useExpertAudit } from '../../lib/useExpertAudit.js';
 import { verifyEstimate } from '../../lib/verify.js';
 import { subsidyInfo, SUBSIDY_CHECKS, SUBSIDY_DOCS, SUBSIDY_AGENCY, subsidyLimitText } from '../../lib/subsidy.js';
-import { subsidyNotice, subsidyAgencyNotice, sugoQuoteMessage } from '../../lib/docs.js';
+import { subsidyNotice, subsidyAgencyNotice, clientQuoteMessage, isSoomgoCase, clientHonorific } from '../../lib/docs.js';
 import { useCalledPrice } from '../../lib/useCalledPrice.js';
 import { fileToThumb } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
@@ -37,11 +37,33 @@ import WasteVehicleSwitch from '../WasteVehicleSwitch.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import { quoteSignal, parseBudget, aiSignalOf } from '../../lib/budget.js';
 
+// 히어로 3열 카드용 숫자 — 카드 폭(1/3)이 좁아 -7383% 같은 긴 값이 오른쪽으로 잘리던 문제.
+// 글자 수에 따라 크기를 줄이고, 넘치는 경우에도 카드 안에서 잘리도록(truncate) 둔다.
+function StatNumber({ text, unit, tone = 'text-white' }) {
+  const len = String(text).length;
+  const size = len >= 9 ? 'text-[10px]' : len >= 7 ? 'text-[11.5px]' : len >= 6 ? 'text-[13px]' : 'text-[15px]';
+  return (
+    <p className={`num flex min-w-0 items-baseline justify-center leading-5 font-black ${tone}`}>
+      <span className={`truncate ${size}`} title={`${text}${unit || ''}`}>
+        {text}
+      </span>
+      {unit ? <span className="ml-0.5 shrink-0 text-[10px] font-bold text-blue-200">{unit}</span> : null}
+    </p>
+  );
+}
+
 // 2단계 — 가견적: 1차 금액 · (마감 공종만) 스타일·자재 · 3자 시세 검증 · 답사 가이드.
 export default function EstimateTab({ c, update, calc, design, showToast, completedCases = [], onGoDoc, onGoSurvey }) {
   const verify = useMemo(() => verifyEstimate(c, calc), [c, calc]);
   const called = useCalledPrice(c, calc, update);
-  const sugoMsg = useMemo(() => sugoQuoteMessage(c, calc), [c, calc]);
+  const sugoMsg = useMemo(() => clientQuoteMessage(c, calc), [c, calc]);
+  // 숨고 스샷·요청서로 온 현장만 숨고 멘트, 카톡·전화·직접 입력은 고객(사장님/고객님) 멘트
+  const isSoomgo = isSoomgoCase(c);
+  const honorific = clientHonorific(c, calc);
+  const msgTitle = isSoomgo ? '숨고 견적 발송 멘트' : '고객 견적 발송 멘트';
+  const msgHint = isSoomgo
+    ? '숨고에서 견적 보낼 때 그대로 붙여넣으세요. 금액을 바꾸면 멘트 안 숫자도 즉시 바뀝니다.'
+    : `카톡·문자로 ${honorific}에게 보낼 때 그대로 붙여넣으세요. 금액을 바꾸면 멘트 안 숫자도 즉시 바뀝니다.`;
   const ref = useMemo(() => similarCases(c, calc, completedCases), [c, calc, completedCases]);
   const hasSurvey = Math.abs(calc.adjustmentTotal) > 0 || (c.changeLogs || []).length > 0;
   const info = TRADES[c.trade] || TRADES.unclassified;
@@ -122,17 +144,21 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
         }
       >
         <div className="grid grid-cols-3 gap-1.5">
-          <div className="rounded-xl bg-white/10 px-1.5 py-2 text-center">
+          <div className="min-w-0 overflow-hidden rounded-xl bg-white/10 px-1.5 py-2 text-center">
             <p className="text-[10px] font-bold text-blue-200">보수적 원가</p>
-            <p className="num whitespace-nowrap text-[15px] font-black leading-5 text-white">{Math.round(calc.costWithBuffer).toLocaleString('ko-KR')}<span className="ml-0.5 text-[10px] font-bold text-blue-200">만</span></p>
+            <StatNumber text={Math.round(calc.costWithBuffer).toLocaleString('ko-KR')} unit="만" />
           </div>
-          <div className="rounded-xl bg-white/10 px-1.5 py-2 text-center">
+          <div className="min-w-0 overflow-hidden rounded-xl bg-white/10 px-1.5 py-2 text-center">
             <p className="text-[10px] font-bold text-blue-200">보수적 남는 돈</p>
-            <p className={cx('num whitespace-nowrap text-[15px] font-black leading-5', calc.netProfitBuffered > 0 ? 'text-emerald-300' : 'text-rose-300')}>{calc.netProfitBuffered > 0 ? '+' : ''}{Math.round(calc.netProfitBuffered).toLocaleString('ko-KR')}<span className="ml-0.5 text-[10px] font-bold text-blue-200">만</span></p>
+            <StatNumber
+              text={`${calc.netProfitBuffered > 0 ? '+' : ''}${Math.round(calc.netProfitBuffered).toLocaleString('ko-KR')}`}
+              unit="만"
+              tone={calc.netProfitBuffered > 0 ? 'text-emerald-300' : 'text-rose-300'}
+            />
           </div>
-          <div className="rounded-xl bg-white/10 px-1.5 py-2 text-center">
+          <div className="min-w-0 overflow-hidden rounded-xl bg-white/10 px-1.5 py-2 text-center" data-testid="hero-margin">
             <p className="text-[10px] font-bold text-blue-200">남는 비율</p>
-            <p className="num whitespace-nowrap text-[15px] font-black leading-5 text-white">{calc.marginBuffered}%</p>
+            <StatNumber text={`${calc.marginBuffered}%`} />
           </div>
         </div>
         <p className="mt-1.5 text-[11px] font-semibold leading-4 text-blue-200">
@@ -144,7 +170,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
       <Card className="p-3.5">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-extrabold text-ink">내가 부를 가견적</p>
-          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-2xs font-extrabold text-brand">숨고·카톡에 보낼 금액</span>
+          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-2xs font-extrabold text-brand">{isSoomgo ? '숨고·카톡에 보낼 금액' : '카톡·문자로 보낼 금액'}</span>
         </div>
         <div className="mt-1.5 flex items-end gap-2">
           <input
@@ -152,9 +178,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
             aria-label="내가 부를 가견적(만원)"
             value={called.draft}
             onChange={(e) => called.commit(e.target.value)}
-            onBlur={() => {
-              if (String(called.draft).trim() === '') called.reset();
-            }}
+            onBlur={() => called.settle()}
             className="num w-full min-w-0 border-b-2 border-slate-200 bg-transparent pb-1 text-right text-[30px] font-black leading-none tracking-tight text-ink outline-none placeholder:text-slate-300 focus:border-brand"
             placeholder={String(called.appPrice)}
           />
@@ -190,14 +214,12 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
         </p>
       </Card>
 
-      {/* 숨고 견적 발송 멘트 — 그대로 붙여넣기 */}
-      <Card className="p-3.5">
+      {/* 견적 발송 멘트 — 숨고 요청서면 숨고용, 일반 문의면 고객님/사장님 호칭으로 */}
+      <Card className="p-3.5" data-testid="quote-msg-card">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-sm font-extrabold text-ink">숨고 견적 발송 멘트</p>
-            <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
-              숨고에서 견적 보낼 때 그대로 붙여넣으세요. 금액을 바꾸면 멘트 안 숫자도 즉시 바뀝니다.
-            </p>
+            <p className="text-sm font-extrabold text-ink">{msgTitle}</p>
+            <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">{msgHint}</p>
           </div>
           <Copy className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
         </div>
@@ -207,8 +229,11 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
         >
           {sugoMsg}
         </pre>
-        <BigButton className="mt-2 w-full" onClick={() => copyText(sugoMsg, showToast, '숨고 견적 멘트를 복사했습니다')}>
-          <Copy className="h-5 w-5" /> 숨고 멘트 복사
+        <BigButton
+          className="mt-2 w-full"
+          onClick={() => copyText(sugoMsg, showToast, isSoomgo ? '숨고 견적 멘트를 복사했습니다' : '견적 멘트를 복사했습니다')}
+        >
+          <Copy className="h-5 w-5" /> {isSoomgo ? '숨고 멘트 복사' : '견적 멘트 복사'}
         </BigButton>
         <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">손님에게 보이는 멘트입니다 — 원가·남는 돈·알선료는 넣지 않습니다.</p>
       </Card>

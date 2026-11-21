@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { ArrowUpFromLine, ExternalLink, HardHat, Loader2, MapPin, Truck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowUpFromLine, Copy, ExternalLink, HardHat, Loader2, MapPin, Truck } from 'lucide-react';
 import { BUFFER_OPTIONS, REGIONS } from '../lib/constants.js';
 import { DEFAULT_RATES, RATE_FIELDS, cloneRates, getRate, mergeRates, normalizeRates, perPyeong, rateRaw, setRate } from '../lib/rates.js';
 import { resetState } from '../lib/storage.js';
 import { GEMINI_KEY_URL, getGeminiKey, setGeminiKey, testGeminiKey } from '../lib/gemini.js';
 import { getSupplier, saveSupplier } from '../lib/supplier.js';
+import { buildSharePayload, buildShareUrl, encodeShare } from '../lib/share.js';
+import { copyText } from '../lib/clipboard.js';
 import { BigButton, Details, Field, IconTile, Modal, Segmented, Select, SmallButton, TextInput, cx } from './ui.jsx';
 
 const GROUP_ICON = {
@@ -28,6 +30,22 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
     const res = await testGeminiKey(apiKey);
     setAiTest(res.ok ? { ok: true, msg: `연결됨 · ${res.model}` } : { ok: false, msg: `실패 (${res.reason})`, hint: res.hint || '' });
   };
+  // 부모님 폰에 1탭 전달 — 지금 키·업체 정보·단가표를 링크(#share=)에 담는다.
+  // 공개 저장소 코드에 키를 넣지 않고, 링크는 PIN(3855) 기반으로만 풀린다.
+  const copyShareLink = () => {
+    const payload = buildSharePayload(
+      {
+        ...state.settings,
+        region,
+        businessName: String(supplier.name || state.settings.businessName || '').trim(),
+        agencyFeeRate: Number(agencyFeeRate) || 10,
+        rates: normalizeRates(rates),
+      },
+      supplier,
+      apiKey.trim()
+    );
+    copyText(buildShareUrl(encodeShare(payload)), showToast, '가족 폰에 보낼 세팅 링크를 복사했습니다 — 그 폰에서 열고 3855를 누르면 됩니다');
+  };
   const [agencyFeeRate, setAgencyFeeRate] = useState(state.settings.agencyFeeRate ?? 10);
   // 상호는 '우리 업체 정보' 한 곳에서만 받는다(예전에 따로 있던 '상호(사업장 이름)' 칸은 통합).
   // 예전에 그 칸에 직접 적어 둔 이름이 있으면 업체 상호로 옮겨 온다(기본값 '경북 철거·인테리어'는 제외).
@@ -38,6 +56,19 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
     return { ...saved, name: saved.name || carried };
   });
   const [rates, setRates] = useState(() => mergeRates(DEFAULT_RATES, state.settings.rates || {}));
+
+  // 다른 경로(가족 세팅 링크 #share 등)로 설정이 바뀐 뒤 열면 지금 저장된 값으로 다시 채운다.
+  useEffect(() => {
+    if (!open) return;
+    setApiKey(state.settings.apiKey || getGeminiKey() || '');
+    setRegion(state.settings.region || '안동');
+    setAgencyFeeRate(state.settings.agencyFeeRate ?? 10);
+    setRates(mergeRates(DEFAULT_RATES, state.settings.rates || {}));
+    const saved = getSupplier();
+    if (saved.name) setSupplier(saved);
+    setAiTest(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const save = () => {
     const businessName = String(supplier.name || '').trim();
@@ -126,6 +157,17 @@ export default function SettingsModal({ open, onClose, state, setState, showToas
         <p className="mt-1.5 text-2xs font-semibold leading-4 text-ink-3">
           키는 이 기기 브라우저(localStorage)에만 저장됩니다. 코드·서버로 보내지 않습니다.
         </p>
+
+        {/* 부모님 폰에 세팅 통째로 보내기 — 키를 부모님이 직접 칠 필요 없게 */}
+        <div className="mt-2 rounded-xl bg-white/85 p-2.5 ring-1 ring-brand/25">
+          <p className="text-2xs font-extrabold text-ink-2">부모님·가족 폰에 그대로 켜기</p>
+          <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+            지금 AI 키·업체 정보·단가표를 링크 하나에 담습니다. 그 링크를 열고 가족 비밀번호 3855를 누르면 자동으로 적용됩니다. 링크는 가족에게만 보내세요.
+          </p>
+          <SmallButton variant="white" className="mt-1.5 w-full" onClick={copyShareLink} aria-label="가족 폰에 세팅 링크 복사">
+            <Copy className="h-4 w-4" /> 가족 폰에 세팅 링크 복사
+          </SmallButton>
+        </div>
       </div>
 
       <Field label="기본 지역" hint="새 현장을 만들 때 이 지역으로 시작합니다.">

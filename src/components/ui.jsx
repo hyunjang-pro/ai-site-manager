@@ -148,7 +148,7 @@ const TONES = {
 
 const TONE_ICON = { ok: CheckCircle2, warn: AlertTriangle, bad: AlertTriangle, lock: Lock, info: Info };
 
-export function Pill({ tone = 'plain', children, className = '', icon = true, dot = false }) {
+export function Pill({ tone = 'plain', children, className = '', icon = true, dot = false, ...rest }) {
   const Icon = TONE_ICON[tone];
   return (
     <span
@@ -157,6 +157,7 @@ export function Pill({ tone = 'plain', children, className = '', icon = true, do
         TONES[tone] || TONES.plain,
         className
       )}
+      {...rest}
     >
       {dot ? <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current opacity-70" /> : null}
       {!dot && icon && Icon ? <Icon aria-hidden className="h-3.5 w-3.5" strokeWidth={2.4} /> : null}
