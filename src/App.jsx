@@ -115,9 +115,10 @@ export default function App() {
       const merged = composeCase({ trade, patch, settings: state.settings });
       setState((prev) => ({ ...prev, cases: [merged, ...prev.cases] }));
       setActiveId(merged.id);
-      setTab(1);
+      // 손님이 기다리는 건 견적 금액 — 만들자마자 2. 가견적으로 바로 넘어간다
+      setTab(2);
       setScreen('case');
-      showToast('현장을 만들고 자동으로 채웠습니다 — 1단계에서 고쳐도 됩니다');
+      showToast('현장을 만들었습니다 — 가견적부터 바로 보세요');
     },
     [state.settings, showToast]
   );

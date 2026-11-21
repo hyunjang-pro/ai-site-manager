@@ -280,7 +280,15 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
       )}
 
       {activeView === 'quote' && PREVIEW_TRADES.includes(calc.trade) ? (
-        <AfterPreview c={c} update={update} calc={calc} design={design} showToast={showToast} title="AI 완공 예상 (손님께 함께 보여주기)" />
+        <AfterPreview
+          c={c}
+          update={update}
+          calc={calc}
+          design={design}
+          showToast={showToast}
+          title="공사 전 · 공사 후 (손님께 함께 보여주기)"
+          mode="doc"
+        />
       ) : null}
 
       {/* 상황별 문자 */}

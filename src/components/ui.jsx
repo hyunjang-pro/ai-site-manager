@@ -508,7 +508,7 @@ export function Modal({ open, onClose, title, children, footer, subtitle, onBack
             <X className="h-5 w-5" strokeWidth={2.6} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-8 pt-4">{children}</div>
+        <div id="modal-body" className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 pb-8 pt-4">{children}</div>
         {footer ? (
           <div className="modal-bottom shrink-0 border-t border-slate-100 bg-white px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">{footer}</div>
         ) : null}

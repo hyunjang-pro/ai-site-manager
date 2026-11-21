@@ -451,16 +451,20 @@ export function dispatchMessage(c, calc) {
 
   const closing =
     calc?.trade === 'waste'
-      ? '· 마치면 수거 전·후 사진과 계량증명서 사진을 남겨주세요.'
-      : '· 마치면 작업 전·후 사진을 같은 자리에서 남겨주세요.';
+      ? '마치면 수거 전·후 사진과 계량증명서 사진도 꼭 남겨주세요.'
+      : '마치면 작업 전·후 사진을 같은 자리에서 남겨주세요.';
 
   return [
-    `[출근 안내] ${dateText} ${time} / ${place}`,
+    '내일 작업 안내드립니다.',
+    '',
+    `· 날짜·시간: ${start ? `${dateText} ${time}` : '날짜 미정 (정해지면 다시 보냅니다)'}`,
+    `· 현장: ${place} (${floorText} · ${eveText})`,
     `· 작업: ${label} — ${workLine}`,
     `· 내용: ${detail}`,
     `· 인원: ${people}`,
-    `· 현장: ${floorText} · ${eveText}`,
     `· 준비물: ${prep}`,
+    '',
+    '못 오시거나 늦으실 것 같으면 전날 미리 연락 주세요.',
     closing,
   ].join('\n');
 }
@@ -573,14 +577,14 @@ export function constructionNoticeText(c, calc) {
 // 인력사무소 직영 강점 + 보관함의 유사 완료 사례 1줄 (손님 문자에 선택적으로)
 export function strengthLines(c, calc, completedCases = []) {
   const lines = [];
-  lines.push('저희는 인력사무소를 직접 운영해 중간 하청 없이 합리적인 금액으로 꼼꼼히 시공합니다.');
+  lines.push('저희가 인력사무소를 직접 하고 있어서, 중간 하청 없이 그만큼 금액을 맞춰 드리고 꼼꼼하게 해드립니다.');
   const sameTrade = (completedCases || []).filter((x) => x.trade === calc?.trade);
   const pick = sameTrade[0];
   if (pick) {
     const where = (pick.region || '') + (pick.title ? ` ${pick.title}` : '');
-    lines.push(`최근에도 ${where.trim()} 현장을 같은 방식으로 완료했습니다.`);
+    lines.push(`최근에도 ${where.trim()} 현장을 같은 방식으로 끝냈습니다.`);
   } else {
-    lines.push('철거부터 마감까지 같은 팀이 책임지고, 일정과 금액을 문자로 남겨 두고 진행합니다.');
+    lines.push('철거부터 마감까지 같은 팀이 끝까지 맡고, 일정과 금액은 문자로 남겨 두고 진행합니다.');
   }
   return lines;
 }
@@ -618,11 +622,13 @@ export function tentativePriceNotice(c) {
 // 금액은 내가 부른 금액 기준, 내부 원가·순익은 절대 넣지 않는다.
 export function clientQuoteMessage(c, calc) {
   const sup = getSupplier();
-  const biz = sup.name || c?.businessName || '철거·인테리어 전문';
+  const biz = sup.name || c?.businessName || '철거·인테리어';
   const soomgo = isSoomgoCase(c);
   // 숨고 채팅은 항상 ‘고객님’, 직접 문의는 업장이면 ‘사장님’·주거면 ‘고객님’
   const who = soomgo ? '고객님' : clientHonorific(c, calc);
-  const label = tradeLabelOf(c, calc);
+  // 손님 문자에는 분류명('상가·주택 철거')보다 짧은 말('철거')이 자연스럽다
+  const fullLabel = tradeLabelOf(c, calc);
+  const label = fullLabel === '상가·주택 철거' ? '철거' : fullLabel;
   const size = sizeText(c);
   const place = String(c?.location || c?.region || '').trim();
   const price = Math.round(Number(calc?.finalPrice) || 0);
@@ -633,7 +639,7 @@ export function clientQuoteMessage(c, calc) {
     has((i) => i.category === '자재') ? '자재·부자재' : '',
     has((i) => i.category === '노무') ? '기공·보조 인력' : '',
     Number(calc?.lifting?.cost) > 0 ? '자재 양중·운반' : '',
-    has((i) => i.id === 'clean') || resolveSurvey(c).afterCare ? '준공 정리·청소' : '',
+    has((i) => i.id === 'clean') || resolveSurvey(c).afterCare ? '마무리 청소' : '',
   ]
     .filter(Boolean)
     .join(' · ') || '자재·인력 포함';
@@ -641,25 +647,25 @@ export function clientQuoteMessage(c, calc) {
   // 별도(제외) 항목은 고객이 읽기 짧게 — 손님이 뺀 공종 + 이 공종에서 실제로 붙는 것만
   const excluded = [];
   if ((c?.excludedScopes || []).some((x) => x === 'window')) excluded.push('창호');
-  if (['demolition', 'combined', 'bathroom', 'tilewaterproof'].includes(trade)) excluded.push('석면 발견 시 조사·처리');
-  if (trade === 'demolition') excluded.push('가전·가구 등 생활폐기물');
+  if (['demolition', 'combined', 'bathroom', 'tilewaterproof'].includes(trade)) excluded.push('혹시 석면이 나오면 별도 처리');
+  if (trade === 'demolition') excluded.push('가전·가구 같은 생활폐기물');
   excluded.splice(2);
   const days = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
   const lines = [
-    `안녕하세요, ${biz}입니다.`,
-    `${who}, ${place ? `${place} ` : ''}${size} ${label} ${soomgo ? '요청서에 적어 주신' : '문의해 주신'} 내용으로 견적 드립니다.`,
+    `안녕하세요! ${biz}입니다.`,
+    `${who}, ${place ? `${place} ` : ''}${size} ${label} ${soomgo ? '요청서에 적어 주신' : '문의해 주신'} 내용으로 가견적 먼저 말씀드릴게요.`,
     '',
     `· 견적 금액: ${won(price)} (${c?.includeVat ? '부가세 포함' : '부가세 별도'})`,
     `· 공사 범위: ${calc?.clientSummary || calc?.targetSummary || label}`,
     `· 포함: ${include}`,
   ];
-  if (excluded.length) lines.push(`· 별도: ${excluded.join(' / ')}`);
-  lines.push(`· 공사 기간: ${days}일 내외 (실측 후 확정)`);
+  if (excluded.length) lines.push(`· 빼고 드린 것: ${excluded.join(' / ')}`);
+  lines.push(`· 공사 기간: ${days}일 정도 (현장 보고 확정)`);
   lines.push('');
   lines.push(tentativePriceNotice(c));
-  lines.push('실측 가능하신 시간 알려주시면 정확한 금액으로 다시 보내드리겠습니다.');
-  lines.push('추가 작업은 사진·사유·금액·일정을 문자로 합의한 뒤 진행합니다.');
-  if (trade === 'bathroom' || trade === 'tilewaterproof') lines.push('방수는 담수 48시간 확인 후 타일 시공합니다.');
+  lines.push('편하신 시간 알려주시면 현장 한번 가서 실측하고 정확한 금액 다시 말씀드릴게요!');
+  lines.push('현장에서 추가 작업이 필요할 때는 먼저 말씀드리고 상의한 뒤 진행합니다.');
+  if (trade === 'bathroom' || trade === 'tilewaterproof') lines.push('방수는 물 채워서 누수 확인까지 꼼꼼히 체크하고 타일 시공합니다.');
   return lines.join('\n');
 }
 
@@ -669,17 +675,21 @@ export function estimateSms(c, calc, completedCases = [], useStrength = true) {
   const label = tradeLabelOf(c, calc);
   const price = Math.round(calc?.finalPrice || 0);
   const place = c?.location || c?.title || '현장';
+  const who = clientHonorific(c, calc);
+  const sup = getSupplier();
+  const biz = sup.name || c?.businessName || '철거·인테리어';
   const skipLabel =
     place.includes(label) || (calc?.trade === 'demolition' && /철거/.test(place)) || (calc?.trade === 'waste' && /폐기물/.test(place));
   const lines = [
-    `[${label} 견적 안내]`,
-    `안녕하세요 ${clientHonorific(c, calc)}, ${place}${skipLabel ? '' : ` ${label}`} 견적 보내드립니다.`,
+    `[${label} 견적]`,
+    `${who}, 안녕하세요! ${biz}입니다.`,
+    `${place}${skipLabel ? '' : ` ${label}`} 견적 문자로 보내드려요.`,
     `· 금액: ${wonFull(price)} (${c?.includeVat ? '부가세 포함' : '부가세 별도'})`,
     `· 범위: ${calc?.targetSummary || label}`,
     `· 기간: 협의 후 확정 / 계약금 ${calc?.plan?.deposit ?? 30}% · 잔금 ${calc?.plan?.balance ?? 30}%`,
   ];
   if (useStrength) lines.push('', ...strengthLines(c, calc, completedCases));
-  lines.push('', '궁금하신 점은 언제든 연락 주세요. 감사합니다.');
+  lines.push('', '궁금하신 점은 편하게 연락 주세요. 잘 챙겨서 해드리겠습니다.');
   const footer = supplierFooter(c);
   if (footer) lines.push(`· ${footer}`);
   return lines.join('\n');
@@ -768,15 +778,18 @@ export function orderMessage(c, calc, design) {
 
 export function changeMessage(c, log) {
   const amount = Number(log?.amount) || 0;
+  const sup = getSupplier();
+  const biz = sup.name || c?.businessName || '';
   return [
-    `사장입니다. ${c?.location || c?.title || '현장'} 관련 안내드립니다.`,
-    `${log?.item || '해당 부분'}은(는) 당초 견적 범위에 없는 추가 작업입니다.`,
-    `· 작업 내용: ${log?.item || '추가 작업'}`,
-    `· 사유: ${log?.reason || '현장 조건에 따른 추가'}`,
-    `· 금액: ${amount.toLocaleString('ko-KR')}만원 (${(amount * 10000).toLocaleString('ko-KR')}원)`,
-    `· 일정: ${Number(log?.days) || 0}일 추가`,
+    `${biz ? `안녕하세요, ${biz}입니다. ` : '안녕하세요. '}${c?.location || c?.title || '현장'} 작업하다가 미리 말씀드릴 게 있어서 문자드려요.`,
     '',
-    `진행해도 될지 회신 부탁드립니다. 회신 주시면 바로 진행하겠습니다.`,
+    `· 추가로 할 일: ${log?.item || '추가 작업'}`,
+    `· 왜 필요한지: ${log?.reason || '현장 상태 때문'}`,
+    `· 금액: ${amount.toLocaleString('ko-KR')}만원 (${(amount * 10000).toLocaleString('ko-KR')}원)` ,
+    `· 기간: ${Number(log?.days) || 0}일 더`,
+    '',
+    '처음 견적에 없던 부분이라 진행해도 괜찮으신지 먼저 여쭤봅니다.',
+    '괜찮다고 회신 주시면 바로 진행할게요.',
     '',
     supplierFooter(c),
   ].join('\n');
@@ -786,21 +799,21 @@ export function neighborMessage(c) {
   const start = c?.dispatch?.date || '착공일';
   const sup = getSupplier();
   const who = sup.phone ? `${sup.phone}` : '아래 번호';
-  return `안녕하세요, ${c?.location || '○○호'} 공사를 맡은 ${sup.name || '현장 담당'}입니다. ${start}부터 공사하며, 소음이 큰 날은 철거일입니다. 불편하시면 ${who}로 연락 주세요. 최대한 조정하겠습니다.`;
+  return `안녕하세요, ${c?.location || '○○호'} 공사 맡은 ${sup.name || '현장 담당'}입니다. ${start}부터 공사 들어갑니다. 소음이 큰 날은 철거하는 날이라 미리 인사드려요. 불편하시면 ${who}로 연락 주세요. 최대한 조정하겠습니다.`;
 }
 
 export function waterproofNotice(c) {
   return [
-    `[담수시험 안내] ${c?.location || '현장'}`,
-    `오늘부터 48시간 담수시험을 진행합니다.`,
-    `· 아래층 천장 누수 여부 확인을 위해 방문 양해를 구합니다.`,
-    `· 담수 사진 3컷(수위선 표시 · 24시간 경과 · 배수 직전)을 남깁니다.`,
-    `· 시험 완료 후 타일 시공을 시작합니다.`,
+    `[방수 확인 안내] ${c?.location || '현장'}`,
+    '오늘부터 48시간 물을 채워서 누수 확인을 합니다.',
+    '아래층 천장에 물이 새는지 같이 봐 주시면 좋겠습니다.',
+    '사진은 수위선 · 24시간 뒤 · 물 빼기 직전 세 장 남깁니다.',
+    '확인 끝나면 바로 타일 시공 들어갑니다.',
   ].join('\n');
 }
 
 export function tileWalkNotice() {
-  return `[보행 금지 안내] 타일 시공 후 3일, 줄눈 시공 후 7일은 보행을 금지합니다. 보행 금지 기간 중 사용으로 발생한 파손은 하자 보수 대상이 아닙니다. 방수 하자보수 책임은 3년입니다.`;
+  return '[보행 금지 안내] 타일은 시공 후 3일, 줄눈은 7일 동안 밟지 않게 해주세요. 이 기간에 밟아서 생긴 파손은 하자 보수로 봐드리기 어렵습니다. 방수 하자 보수는 3년입니다.';
 }
 
 export function contentCertDraft(c, calc) {
@@ -830,7 +843,7 @@ export function subsidyNotice(c) {
   return [
     `[점포철거비 지원금 안내]`,
     ``,
-    `사장님, 폐업하실 때 점포 철거·원상복구 비용을 나라에서 돌려받으실 수 있습니다.`,
+    `사장님, 가게 정리하실 때 철거·원상복구 비용, 나라에서 일부 돌려받으실 수 있는 거 아세요?`,
     `· 받을 수 있는 금액: 평당 20만원, 최대 600만원 (부가세는 지원되지 않습니다)`,
     info.pyung
       ? `· 이 현장(전용면적 ${info.pyung}평) 예상 한도: 약 ${wonFull(info.limit)}`

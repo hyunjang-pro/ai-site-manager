@@ -12,6 +12,7 @@ import { finalSignal, aiSignalOf } from '../../lib/budget.js';
 import { clientHonorific } from '../../lib/docs.js';
 import { materialSetFor, materialSetsFor } from '../../lib/materials.js';
 import { hasInteriorStyle } from '../../lib/constants.js';
+import { changeLabel } from '../../lib/changelog.js';
 import { useCalledPrice } from '../../lib/useCalledPrice.js';
 
 export default function ProfitTab({ c, update, calc, design, showToast, onOpenSettings }) {
@@ -24,6 +25,10 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   const defenseGap = Math.max(0, defense - cost);
   // 화면에 보이는 두 숫자(가견적 → 최종)의 실제 차이 — 배지·신호등 문구를 이 값으로 통일한다
   const finalDelta = Math.round(Number(calc.clientPrice)) - Math.round(Number(calc.baseClientPrice));
+  // 변동 내역 — '앱 계산가'와 '손님과 합의한 금액'을 나눠서 보여준다 (숫자가 안 맞아 보이지 않게)
+  const logs = (calc.changeLogs || []).filter((l) => Number(l.amount) !== 0);
+  const appDelta = Math.round(Number(calc.appClientPrice)) - Math.round(Number(calc.baseClientPrice));
+  const calledAdjust = Math.round(Number(calc.clientPrice)) - Math.round(Number(calc.appClientPrice));
 
   const initial = Number(c.negotiation?.proposal) || listPrice;
   const [proposal, setProposal] = useState(initial);
@@ -212,14 +217,18 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
 
   return (
     <div className="space-y-4">
-      {/* 내가 부른 금액 — 4단계의 기준 금액. 바꾸면 순익·수금·홈 카드·견적서가 같이 바뀐다 */}
+      {/* ① 최종 금액 — 4단계의 기준 금액. 바꾸면 순익·수금·홈 카드·견적서가 같이 바뀐다 */}
       <Card className="overflow-hidden p-0 ring-2 ring-brand/30">
         <div className="flex items-center justify-between gap-2 bg-brand-soft px-4 pb-2 pt-3">
-          <p className="text-[13px] font-extrabold text-brand-strong">내가 부른 금액 (손님 합의가)</p>
+          <p className="flex items-center gap-1.5 text-[13px] font-extrabold text-brand-strong">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand text-2xs font-black text-white">1</span>
+            최종 금액 정하기
+          </p>
           <span className="rounded-lg bg-white px-1.5 py-0.5 text-2xs font-extrabold text-brand">이 금액으로 계산</span>
         </div>
         <div className="p-4">
-          <div className="flex items-end gap-2">
+          <p className="text-[13px] font-bold text-ink-2">손님에게 부를 금액</p>
+          <div className="mt-1 flex items-end gap-2">
             <input
               inputMode="numeric"
               aria-label="내가 부른 금액(만원)"
@@ -254,10 +263,14 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
             {' · '}비우면 앱 계산가로 계산합니다
           </p>
 
-          {/* 이 금액에서 손에 쥐는 돈 */}
+          {/* ② 이 금액에서 남는 돈 */}
+          <p className="mt-4 flex items-center gap-1.5 text-[13px] font-extrabold text-ink">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-ink text-2xs font-black text-white">2</span>
+            이 금액에서 남는 돈
+          </p>
           <div
             className={cx(
-              'mt-3 rounded-2xl p-3 ring-1',
+              'mt-1.5 rounded-2xl p-3 ring-1',
               calc.netProfitBuffered <= 0
                 ? 'bg-rose-50 ring-rose-200'
                 : effectiveCalled < defense
@@ -339,7 +352,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         </div>
       </Card>
 
-      <SignalBanner signal={aiSignalOf(c.aiSurveySignal) || aiSignalOf(c.aiAnalysis) || finalSignal(calc, c)} caption="답사 후 원가·리스크와 고객 희망가를 함께 본 판정입니다." />
+      <SignalBanner signal={aiSignalOf(c.aiSurveySignal) || aiSignalOf(c.aiAnalysis) || finalSignal(calc, c)} caption="이 금액으로 진행해도 되는지 앱이 판단했습니다." />
 
       {/* 가견적 → 최종 비교 — 배지는 화면에 보이는 두 숫자의 차이와 반드시 같게 */}
       <Card className={cx('p-4', calc.adjustmentTotal !== 0 && 'ring-1 ring-brand/25')}>
@@ -362,28 +375,84 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         </div>
         {calc.hasCalledPrice ? (
           <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-2xs font-bold leading-4 text-brand-strong">
-            최종 금액은 <b>내가 부른 금액 {pers(calc.calledPrice)}만원</b>입니다. 앱 계산가는 {pers(calc.appClientPrice)}만원
-            {calc.adjustmentTotal ? ` (답사 반영 ${calc.adjustmentTotal > 0 ? '+' : ''}${calc.adjustmentTotal}만)` : ''}이고, 위 배지는
-            가견적 대비 실제 차이입니다.
+            손님과 합의한 <b>{pers(calc.calledPrice)}만원</b>으로 계산합니다. 앱이 계산한 금액은 {pers(calc.appClientPrice)}만원이고,
+            위 배지는 처음 가견적 대비 실제 차이입니다.
           </p>
         ) : null}
-        {(calc.changeLogs || []).length ? (
-          <div className="mt-2 space-y-1">
-            {(calc.changeLogs || []).filter((l) => Number(l.amount) !== 0).map((l) => {
-              const up = l.type !== 'decrease';
-              return (
-                <div key={l.id} className="flex items-start justify-between gap-2 rounded-xl bg-white px-2.5 py-1.5 ring-1 ring-slate-200">
-                  <p className="min-w-0 flex-1 text-[12.5px] font-bold leading-5 text-ink-2">
-                    <span className={cx('mr-1 font-black', up ? 'text-rose-600' : 'text-emerald-600')}>{up ? '▲' : '▼'}</span>
-                    {l.item || l.reason}
+        {logs.length ? (
+          calc.hasCalledPrice ? (
+            // 내가 부른 금액을 썼을 때 — 앱 계산 변동은 접어 두고, 펼치면 두 단계를 함께 보여준다
+            <Details
+              className="mt-2"
+              label="앱 계산 변동 내역 보기"
+              right={
+                <span className="num text-xs font-extrabold text-ink-2">
+                  {appDelta > 0 ? '+' : ''}
+                  {appDelta}만
+                </span>
+              }
+            >
+              <div className="space-y-1">
+                <p className="text-2xs font-bold leading-4 text-ink-3">
+                  앱이 계산한 금액 기준입니다 — 가견적 {pers(calc.baseClientPrice)}만 → 앱 계산가 {pers(calc.appClientPrice)}만
+                </p>
+                {logs.map((l) => {
+                  const up = l.type !== 'decrease';
+                  return (
+                    <div key={l.id} className="flex items-start justify-between gap-2 rounded-xl bg-white px-2.5 py-1.5 ring-1 ring-slate-200">
+                      <p className="min-w-0 flex-1 text-[12.5px] font-bold leading-5 text-ink-2">
+                        <span className={cx('mr-1 font-black', up ? 'text-rose-600' : 'text-emerald-600')}>{up ? '▲' : '▼'}</span>
+                        {changeLabel(l)}
+                      </p>
+                      <span className={cx('num shrink-0 text-xs font-extrabold', up ? 'text-rose-600' : 'text-emerald-600')}>
+                        {up ? '+' : '-'}
+                        {Math.abs(Number(l.amount) || 0)}만
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="rounded-xl bg-white px-2.5 py-2 ring-1 ring-brand/30">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12.5px] font-bold text-ink-2">손님과 합의한 금액으로 조정</p>
+                    <span className="num shrink-0 text-xs font-extrabold text-brand-strong">
+                      {calledAdjust > 0 ? '+' : ''}
+                      {calledAdjust}만
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+                    앱 계산가 {pers(calc.appClientPrice)}만 → 최종 {pers(calc.clientPrice)}만
                   </p>
-                  <span className={cx('num shrink-0 text-xs font-extrabold', up ? 'text-rose-600' : 'text-emerald-600')}>
-                    {up ? '+' : '-'}{l.amount}만
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-1.5">
+                  <p className="text-2xs font-extrabold text-ink-2">
+                    처음 가견적 {pers(calc.baseClientPrice)}만 → 최종 {pers(calc.clientPrice)}만
+                  </p>
+                  <span className="num shrink-0 text-xs font-extrabold text-ink">
+                    {finalDelta > 0 ? '+' : ''}
+                    {finalDelta}만
                   </span>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            </Details>
+          ) : (
+            <div className="mt-2 space-y-1">
+              {logs.map((l) => {
+                const up = l.type !== 'decrease';
+                return (
+                  <div key={l.id} className="flex items-start justify-between gap-2 rounded-xl bg-white px-2.5 py-1.5 ring-1 ring-slate-200">
+                    <p className="min-w-0 flex-1 text-[12.5px] font-bold leading-5 text-ink-2">
+                      <span className={cx('mr-1 font-black', up ? 'text-rose-600' : 'text-emerald-600')}>{up ? '▲' : '▼'}</span>
+                      {changeLabel(l)}
+                    </p>
+                    <span className={cx('num shrink-0 text-xs font-extrabold', up ? 'text-rose-600' : 'text-emerald-600')}>
+                      {up ? '+' : '-'}
+                      {Math.abs(Number(l.amount) || 0)}만
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )
         ) : (
           <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-2xs font-semibold leading-4 text-ink-3">
             아직 답사 변동이 없습니다. 3단계 답사에서 달라진 점을 적으면 여기에 이유와 함께 쌓입니다.
@@ -391,13 +460,145 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         )}
       </Card>
 
-      {/* 원가·방어선 — 내가 부른 금액에서 무엇이 남는지의 근거 */}
-      <Card className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <p className="text-base font-extrabold text-ink">보수적 원가 {pers(cost)}만원은 이렇게 나옵니다</p>
-          <Pill tone="plain">원가 근거</Pill>
+      {/* 네고 시뮬레이터 */}
+      <SectionCard fold num="3" title="③ 손님이 깎자고 할 때" subtitle="숫자를 바꾸면 남는 돈이 바로 바뀝니다. 가격만 깎지 말고 범위·자재로 맞추세요.">
+        <div className="space-y-3">
+          <Field label="고객이 부른 금액 (만원)">
+            <TextInput
+              inputMode="numeric"
+              value={proposal}
+              onChange={(e) => setProposal(e.target.value)}
+              onBlur={() => update({ negotiation: { ...c.negotiation, proposal: Number(proposal) || 0 } })}
+            />
+          </Field>
+
+          <input
+            type="range"
+            min={sliderMin}
+            max={sliderMax}
+            step={1}
+            value={Number(proposal) || 0}
+            onChange={(e) => setProposal(Number(e.target.value))}
+            onMouseUp={() => update({ negotiation: { ...c.negotiation, proposal: Number(proposal) || 0 } })}
+            onTouchEnd={() => update({ negotiation: { ...c.negotiation, proposal: Number(proposal) || 0 } })}
+            className="h-3 w-full accent-slate-900"
+            aria-label="제안 금액"
+          />
+
+          <div className="flex flex-wrap gap-2">
+            {[5, 10, 20].map((d) => (
+              <SmallButton
+                key={d}
+                onClick={() => {
+                  const next = Math.max(0, listPrice - d);
+                  setProposal(next);
+                  update({ negotiation: { ...c.negotiation, proposal: next } });
+                }}
+              >
+                -{d}만
+              </SmallButton>
+            ))}
+            <SmallButton onClick={() => { setProposal(listPrice); update({ negotiation: { ...c.negotiation, proposal: listPrice } }); }}>
+              원래 값
+            </SmallButton>
+          </div>
+
+          <div
+            className={cx(
+              'rounded-2xl border p-4',
+              result.below ? 'border-rose-300 bg-rose-50' : result.thin ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'
+            )}
+          >
+            <p className="text-base font-bold text-slate-700">{pers(result.price)}만원에 하면</p>
+            <p className={cx('mt-1 text-3xl font-extrabold tabular-nums', result.below ? 'text-rose-700' : 'text-slate-900')}>
+              {result.net >= 0 ? '+' : ''}
+              {pers(result.net)}
+              <span className="ml-0.5 text-base font-bold text-ink-3">만원</span>
+            </p>
+            <p className="mt-1 text-base font-bold">
+              {result.below
+                ? `원가보다 ${pers(Math.abs(result.net))}만원 손해입니다. 이 가격엔 팔면 안 됩니다.`
+                : result.thin
+                ? `최소 방어선(${pers(defense)}만)보다 낮습니다. 하자 한 번이면 손해입니다.`
+                : `남는 비율 ${result.margin}% — 진행해도 됩니다.`}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setNegoOpen((v) => !v)}
+            className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 text-sm font-extrabold text-ink-2"
+            aria-expanded={negoOpen}
+          >
+            <span>{negoOpen ? '가격 깎자는 이야기 접기' : '손님이 가격 깎자고 할 때만 열어보기'}</span>
+            <span className="text-xs text-ink-3">{negoOpen ? '▴' : '▾'}</span>
+          </button>
+
+          {negoOpen ? (
+            <div className="space-y-3">
+              {alternatives.length ? (
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <p className="text-sm font-extrabold text-ink">가격을 맞추려면 이렇게 줄이세요</p>
+                  <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+                    이 공종에서 실제로 돈이 줄어드는 것만 골랐습니다. 누르면 원가·견적이 함께 바뀝니다.
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {alternatives.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={a.action}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl bg-white px-3 py-2.5 text-left ring-1 ring-slate-200 active:bg-slate-100"
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold text-ink">{a.label}</span>
+                          <span className="block text-2xs font-semibold leading-4 text-ink-3">{a.note}</span>
+                        </span>
+                        <span className="shrink-0 text-sm font-extrabold text-emerald-700">−{pers(a.saving)}만</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="rounded-2xl bg-slate-50 px-3 py-2.5 text-2xs font-semibold leading-4 text-ink-3">
+                  이 현장은 더 줄일 항목이 없습니다. 가격을 낮추면 그만큼 남는 돈이 줄어듭니다.
+                </p>
+              )}
+
+              {Number(proposal) !== listPrice ? (
+                <SmallButton
+                  variant="dark"
+                  className="w-full"
+                  onClick={() => {
+                    commitCalled(String(Math.max(0, Math.round(Number(proposal) || 0))));
+                    showToast(`${pers(Number(proposal))}만원으로 견적을 확정했습니다`);
+                  }}
+                >
+                  <Check className="h-4 w-4" /> 이 금액으로 견적 확정
+                </SmallButton>
+              ) : null}
+
+              <div className="rounded-2xl bg-slate-900 p-4 text-white">
+                <p className="text-sm font-bold text-slate-300">고객에게 이렇게 말하세요</p>
+                <p className="mt-1 text-base leading-7">{message}</p>
+                <SmallButton className="mt-3 w-full border-slate-700 bg-slate-800 text-white" onClick={() => copyText(message, showToast)}>
+                  <Copy className="h-4 w-4" /> 설득 멘트 복사
+                </SmallButton>
+              </div>
+            </div>
+          ) : null}
         </div>
-        <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
+      </SectionCard>
+
+      {/* 원가·방어선 — 내가 부른 금액에서 무엇이 남는지의 근거 (기본은 접어 둔다) */}
+      <SectionCard
+        fold
+        title={`보수적 원가 ${pers(cost)}만원은 이렇게 나옵니다`}
+        subtitle="원가·방어선 근거 — 필요할 때만 펼쳐 보세요"
+        status={<Pill tone="plain">원가 근거</Pill>}
+      >
+        <div className="space-y-3">
+        <p className="text-2xs font-semibold leading-4 text-ink-3">
           이 원가를 빼고 남는 돈이 위 ‘손에 쥐는 돈’입니다. 원가를 줄이면 같은 금액에서 더 남습니다.
         </p>
 
@@ -474,15 +675,16 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
           </p>
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-3 gap-1.5">
           <Metric label="보수적 원가" value={cost} />
           <Metric label="최소 방어선" value={defense} tone="warn" />
           <Metric label="내가 부른 금액" value={listPrice} />
         </div>
-      </Card>
+        </div>
+      </SectionCard>
 
-      {/* 원가·마진·수금 — 항상 펼쳐 둔다 */}
-      <SectionCard fold num="2" title="원가·마진·수금 조절" subtitle="여기 숫자를 바꾸면 3단계 입금 카드와 홈 장부 금액까지 함께 바뀝니다.">
+      {/* 원가·마진·수금 — 숫자를 직접 만질 때만 */}
+      <SectionCard fold title="원가·수금 세부 조절" subtitle="남는 비율·단가를 직접 바꿉니다. 안 바꿔도 됩니다.">
         <div className="space-y-3">
           <Field label={`남는 비율 ${c.marginRate}%`} hint="고객에게 받는 금액 = 원가 ÷ (1 − 남는 비율). 움직이면 ‘내가 부른 금액’을 지우고 이 비율로 다시 계산합니다.">
             <input
@@ -695,135 +897,6 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
         </Card>
       ) : null}
 
-      {/* 네고 시뮬레이터 */}
-      <SectionCard fold num="3" title="고객이 깎자고 할 때" subtitle="숫자를 바꾸면 남는 돈이 바로 바뀝니다. 가격만 깎지 말고 범위·자재로 맞추세요.">
-        <div className="space-y-3">
-          <Field label="고객이 부른 금액 (만원)">
-            <TextInput
-              inputMode="numeric"
-              value={proposal}
-              onChange={(e) => setProposal(e.target.value)}
-              onBlur={() => update({ negotiation: { ...c.negotiation, proposal: Number(proposal) || 0 } })}
-            />
-          </Field>
-
-          <input
-            type="range"
-            min={sliderMin}
-            max={sliderMax}
-            step={1}
-            value={Number(proposal) || 0}
-            onChange={(e) => setProposal(Number(e.target.value))}
-            onMouseUp={() => update({ negotiation: { ...c.negotiation, proposal: Number(proposal) || 0 } })}
-            onTouchEnd={() => update({ negotiation: { ...c.negotiation, proposal: Number(proposal) || 0 } })}
-            className="h-3 w-full accent-slate-900"
-            aria-label="제안 금액"
-          />
-
-          <div className="flex flex-wrap gap-2">
-            {[5, 10, 20].map((d) => (
-              <SmallButton
-                key={d}
-                onClick={() => {
-                  const next = Math.max(0, listPrice - d);
-                  setProposal(next);
-                  update({ negotiation: { ...c.negotiation, proposal: next } });
-                }}
-              >
-                -{d}만
-              </SmallButton>
-            ))}
-            <SmallButton onClick={() => { setProposal(listPrice); update({ negotiation: { ...c.negotiation, proposal: listPrice } }); }}>
-              원래 값
-            </SmallButton>
-          </div>
-
-          <div
-            className={cx(
-              'rounded-2xl border p-4',
-              result.below ? 'border-rose-300 bg-rose-50' : result.thin ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'
-            )}
-          >
-            <p className="text-base font-bold text-slate-700">{pers(result.price)}만원에 하면</p>
-            <p className={cx('mt-1 text-3xl font-extrabold tabular-nums', result.below ? 'text-rose-700' : 'text-slate-900')}>
-              {result.net >= 0 ? '+' : ''}
-              {pers(result.net)}
-              <span className="ml-0.5 text-base font-bold text-ink-3">만원</span>
-            </p>
-            <p className="mt-1 text-base font-bold">
-              {result.below
-                ? `원가보다 ${pers(Math.abs(result.net))}만원 손해입니다. 이 가격엔 팔면 안 됩니다.`
-                : result.thin
-                ? `최소 방어선(${pers(defense)}만)보다 낮습니다. 하자 한 번이면 손해입니다.`
-                : `남는 비율 ${result.margin}% — 진행해도 됩니다.`}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setNegoOpen((v) => !v)}
-            className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 text-sm font-extrabold text-ink-2"
-            aria-expanded={negoOpen}
-          >
-            <span>{negoOpen ? '가격 깎자는 이야기 접기' : '손님이 가격 깎자고 할 때만 열어보기'}</span>
-            <span className="text-xs text-ink-3">{negoOpen ? '▴' : '▾'}</span>
-          </button>
-
-          {negoOpen ? (
-            <div className="space-y-3">
-              {alternatives.length ? (
-                <div className="rounded-2xl bg-slate-50 p-3">
-                  <p className="text-sm font-extrabold text-ink">가격을 맞추려면 이렇게 줄이세요</p>
-                  <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
-                    이 공종에서 실제로 돈이 줄어드는 것만 골랐습니다. 누르면 원가·견적이 함께 바뀝니다.
-                  </p>
-                  <div className="mt-2 space-y-1.5">
-                    {alternatives.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={a.action}
-                        className="flex w-full items-center justify-between gap-2 rounded-xl bg-white px-3 py-2.5 text-left ring-1 ring-slate-200 active:bg-slate-100"
-                      >
-                        <span className="min-w-0">
-                          <span className="block text-sm font-bold text-ink">{a.label}</span>
-                          <span className="block text-2xs font-semibold leading-4 text-ink-3">{a.note}</span>
-                        </span>
-                        <span className="shrink-0 text-sm font-extrabold text-emerald-700">−{pers(a.saving)}만</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="rounded-2xl bg-slate-50 px-3 py-2.5 text-2xs font-semibold leading-4 text-ink-3">
-                  이 현장은 더 줄일 항목이 없습니다. 가격을 낮추면 그만큼 남는 돈이 줄어듭니다.
-                </p>
-              )}
-
-              {Number(proposal) !== listPrice ? (
-                <SmallButton
-                  variant="dark"
-                  className="w-full"
-                  onClick={() => {
-                    commitCalled(String(Math.max(0, Math.round(Number(proposal) || 0))));
-                    showToast(`${pers(Number(proposal))}만원으로 견적을 확정했습니다`);
-                  }}
-                >
-                  <Check className="h-4 w-4" /> 이 금액으로 견적 확정
-                </SmallButton>
-              ) : null}
-
-              <div className="rounded-2xl bg-slate-900 p-4 text-white">
-                <p className="text-sm font-bold text-slate-300">고객에게 이렇게 말하세요</p>
-                <p className="mt-1 text-base leading-7">{message}</p>
-                <SmallButton className="mt-3 w-full border-slate-700 bg-slate-800 text-white" onClick={() => copyText(message, showToast)}>
-                  <Copy className="h-4 w-4" /> 설득 멘트 복사
-                </SmallButton>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </SectionCard>
 
       {calc.trade === 'labor' ? (
         <button
@@ -840,7 +913,14 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
       ) : null}
 
       {PREVIEW_TRADES.includes(calc.trade) ? (
-        <AfterPreview c={c} update={update} calc={calc} design={design} showToast={showToast} title="AI 완공 예상 (손님 보여주기용)" />
+        <AfterPreview
+          c={c}
+          update={update}
+          calc={calc}
+          design={design}
+          showToast={showToast}
+          title="④ 손님께 보여줄 완공 사진"
+        />
       ) : null}
 
     </div>

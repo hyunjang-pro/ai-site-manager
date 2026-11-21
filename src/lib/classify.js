@@ -259,6 +259,8 @@ export function classifyRequest(rawText = '') {
   }
   const locMatch = text.match(/(?:경북|경상북도)\s*([가-힣]+시)(?:\s*([가-힣0-9]+(?:동|읍|면)))?/);
   const location = locMatch ? `경북 ${locMatch[1]}${locMatch[2] ? ` ${locMatch[2]}` : ''}` : '';
+  // 글에 적힌 연락처 — 숨고 요청서·카톡에 같이 오는 경우가 많다 (없으면 빈칸 = 사용자가 채운다)
+  const phoneMatch = text.match(/(01[016789])[-.\s]?(\d{3,4})[-.\s]?(\d{4})/);
 
   // 엘리베이터 — "엘리베이터로 운반/사용"은 있음, "엘리베이터 없음"만 없음으로 읽는다.
   // (문장 어딘가의 '불가·no'를 엘베로 오인하지 않게 엘베 단어 뒤 8자만 본다)
@@ -390,6 +392,7 @@ export function classifyRequest(rawText = '') {
   };
   if (region) patch.region = region;
   if (location) patch.location = location;
+  if (phoneMatch) patch.clientPhone = `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}`;
   if (trade === 'labor') patch.laborDays = dayMatch ? Math.max(1, parseInt(dayMatch[1], 10)) : 1;
   if (trade === 'waste') patch.wasteVehicle = wasteVehicleId || 'ton1';
   if (partial.on) {

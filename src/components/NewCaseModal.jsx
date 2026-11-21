@@ -24,6 +24,8 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
   const [sizeUnit, setSizeUnit] = useState('평');
   const [floor, setFloor] = useState('');
   const [elevator, setElevator] = useState('unknown');
+  // 고객 정보는 '알고 있는 것만' 적는 선택 입력 — 비워 두면 AI·자동 분류가 잡은 값을 그대로 쓴다.
+  const [customer, setCustomer] = useState({ name: '', phone: '', location: '', km: '' });
   const [error, setError] = useState('');
   const shotRef = useRef(null);
   const siteRef = useRef(null);
@@ -45,11 +47,20 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       setResult(null);
       setProgress(null);
       setError('');
+      setFloor('');
+      setElevator('unknown');
+      setCustomer({ name: '', phone: '', location: '', km: '' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const busy = progress !== null;
+
+  // 단계가 바뀌면 모달 안을 맨 위부터 — 확인 화면 첫 줄(금액·고객 정보)이 헤더에 가리지 않게
+  useEffect(() => {
+    const body = document.getElementById('modal-body');
+    if (body) body.scrollTop = 0;
+  }, [step]);
 
   // 스샷·현장 사진을 나눠 붙인다.
   //  · 스샷(screenshot) → 바로 글자를 읽어 요청 글·지역·평수·공종을 채운다.
@@ -119,6 +130,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       setSizeUnit(r.patch.sizeUnit || '평');
       setFloor(r.patch.lifting?.floor ? String(r.patch.lifting.floor) : '');
       setElevator(r.patch.lifting?.elevator || 'unknown');
+      fillCustomer(r.patch);
     } catch (e) {
       const msg = String(e?.message || '');
       setSceneNote(/[가-힣]/.test(msg) ? msg : '스샷 글자를 읽지 못했습니다. 요청 내용을 한 줄만 적어주시면 공종·규모를 잡아 드립니다.');
@@ -147,6 +159,9 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
         ...(a.sizeValue ? { sizeValue: a.sizeValue, sizeUnit: a.sizeUnit } : {}),
         lifting: { floor: a.floor || '', elevator: a.elevator || 'unknown' },
         aiAnalysis: a,
+        ...(a.clientName ? { clientName: a.clientName } : {}),
+        ...(a.clientPhone ? { clientPhone: a.clientPhone } : {}),
+        ...(a.distanceKm ? { distanceKm: a.distanceKm } : {}),
         subScopes: a.includedScopes || [],
         excludedScopes: a.excludedScopes || [],
         parseHints: a.warnings || [],
@@ -157,6 +172,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
     setSizeUnit(a.sizeUnit || '평');
     setFloor(a.floor || '');
     setElevator(a.elevator || 'unknown');
+    fillCustomer({ clientName: a.clientName, clientPhone: a.clientPhone, distanceKm: a.distanceKm });
     setStep('result');
   };
 
@@ -214,6 +230,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       setSizeUnit(r.patch.sizeUnit || '평');
       setFloor(r.patch.lifting?.floor ? String(r.patch.lifting.floor) : '');
       setElevator(r.patch.lifting?.elevator || 'unknown');
+      fillCustomer(r.patch);
       setStep('result');
     } catch (e) {
       // 영어 라이브러리 오류문을 부모님께 그대로 보여주지 않는다
@@ -236,6 +253,11 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       sizeUnit: sizeUnit || info.defaultUnit,
       lifting: { ...(base.lifting || {}), floor: floor || '', elevator },
       title: result?.title && trade === result.trade ? result.title : undefined,
+      // 직접 적은 고객 정보가 AI가 뽑은 값보다 우선한다 (빈칸이면 AI 값을 그대로 둔다)
+      ...(customer.name.trim() ? { clientName: customer.name.trim() } : {}),
+      ...(customer.phone.trim() ? { clientPhone: customer.phone.trim() } : {}),
+      ...(customer.location.trim() ? { location: customer.location.trim() } : {}),
+      ...(String(customer.km).trim() !== '' ? { distanceKm: String(customer.km).trim() } : {}),
       // 사진은 스샷/현장 구분(kind)까지 함께 저장한다.
       photos: photos
         .map((p) => ({ name: p.thumb?.name || p.file?.name || '사진', dataUrl: p.thumb?.dataUrl || '', kind: p.kind }))
@@ -252,7 +274,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       return null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, result, trade, sizeValue, sizeUnit, floor, elevator, photos, text, settings]);
+  }, [step, result, trade, sizeValue, sizeUnit, floor, elevator, photos, text, settings, customer]);
 
   const create = () => {
     onCreate(trade, draftPatch());
@@ -263,6 +285,81 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
     if (!result) return [];
     return result.rows.filter((r) => r.label !== '공종');
   }, [result]);
+
+  // 고객 정보 — 알고 있는 것만 적는 선택 입력. 접힌 채로 두어 '스샷 넣고 바로 생성' 동선을 막지 않는다.
+  // 자동으로 뽑힌 고객 정보는 '빈칸일 때만' 채운다 — 사장님이 적은 값이 항상 우선.
+  const fillCustomer = (patch = {}) =>
+    setCustomer((v) => ({
+      name: v.name || patch.clientName || '',
+      phone: v.phone || patch.clientPhone || '',
+      location: v.location || patch.location || '',
+      km: String(v.km || '') || String(patch.distanceKm ?? ''),
+    }));
+
+  // 고객 정보 — 2단계(확인 화면)에서 빈칸만 채우면 된다. 1단계는 스샷·사진만 넣고 바로 넘어가게 둔다.
+  const customerInputs = (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-ink-2">고객 이름</span>
+          <input
+            value={customer.name}
+            onChange={(e) => setCustomer((v) => ({ ...v, name: e.target.value }))}
+            placeholder="예) 김 사장님"
+            className="field-input min-h-11 text-sm"
+            aria-label="고객 이름"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-ink-2">연락처</span>
+          <input
+            inputMode="tel"
+            value={customer.phone}
+            onChange={(e) => setCustomer((v) => ({ ...v, phone: e.target.value }))}
+            placeholder="010-0000-0000"
+            className="field-input min-h-11 text-sm"
+            aria-label="고객 연락처"
+          />
+        </label>
+      </div>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-ink-2">현장 주소</span>
+        <input
+          value={customer.location}
+          onChange={(e) => setCustomer((v) => ({ ...v, location: e.target.value }))}
+          placeholder="예) 안동시 풍산읍 상가 2층"
+          className="field-input min-h-11 text-sm"
+          aria-label="현장 주소"
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-ink-2">현장까지 거리 (km)</span>
+        <input
+          inputMode="decimal"
+          value={customer.km}
+          onChange={(e) => setCustomer((v) => ({ ...v, km: e.target.value }))}
+          placeholder="예) 40 (모르면 비워두세요)"
+          className="field-input min-h-11 text-sm"
+          aria-label="현장까지 거리"
+        />
+      </label>
+    </div>
+  );
+
+  const customerFields = (
+    <div className="rounded-2xl bg-slate-50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-extrabold text-ink">
+          고객 정보 <span className="text-2xs font-bold text-ink-3">— 빈칸만 채우면 됩니다</span>
+        </p>
+        <Pill tone="plain">선택</Pill>
+      </div>
+      <p className="mb-2 mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+        자동으로 잡힌 값은 채워 뒀습니다. 거리까지 적으면 가견적에 교통비가 바로 들어갑니다.
+      </p>
+      {customerInputs}
+    </div>
+  );
 
   const headerBack = step === 'result' ? () => setStep('input') : onClose;
 
@@ -278,9 +375,9 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
         step === 'result' ? (
           <>
             <BigButton className="w-full" onClick={create}>
-              <Wand2 className="h-5 w-5" /> 이 내용으로 현장 만들기
+              <Wand2 className="h-5 w-5" /> 이 내용으로 가견적 보기
             </BigButton>
-            <p className="mt-1 text-center text-2xs text-ink-3">만든 뒤 1단계에서 언제든 다시 분류·수정할 수 있습니다</p>
+            <p className="mt-1 text-center text-2xs text-ink-3">1단계 정보는 나중에 언제든 고칠 수 있습니다</p>
           </>
         ) : null
       }
@@ -466,6 +563,10 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
                       sizeUnit: t.defaultUnit,
                       rawInput: text,
                       notes: text,
+                      ...(customer.name.trim() ? { clientName: customer.name.trim() } : {}),
+                      ...(customer.phone.trim() ? { clientPhone: customer.phone.trim() } : {}),
+                      ...(customer.location.trim() ? { location: customer.location.trim() } : {}),
+                      ...(String(customer.km).trim() !== '' ? { distanceKm: String(customer.km).trim() } : {}),
                       photos: photos
                         .map((p) => ({ name: p.thumb?.name || p.file?.name || '사진', dataUrl: p.thumb?.dataUrl || '', kind: p.kind }))
                         .filter((p) => p.dataUrl),
@@ -508,6 +609,9 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
               </p>
             </div>
           ) : null}
+
+          {customerFields}
+
           {sceneNote ? (
             <p className="flex items-start gap-1.5 rounded-xl bg-slate-100 px-3 py-2.5 text-[13px] font-semibold leading-5 text-ink-2">
               <ScanText className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
@@ -635,7 +739,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
           </div>
 
           <p className="rounded-xl bg-slate-50 px-3 py-2 text-center text-2xs font-semibold text-ink-3">
-            아래 버튼을 누르면 이 내용 그대로 현장이 만들어집니다
+            버튼을 누르면 바로 <b className="text-ink-2">2. 가견적</b>으로 넘어갑니다
           </p>
         </div>
       )}

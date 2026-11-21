@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { AlertTriangle, Camera, Check, Copy, Info, Landmark, Plus, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { TRADES, hasInteriorStyle } from '../../lib/constants.js';
 import { DESIGN_PRESETS } from '../../lib/design.js';
+import { gradeChangeLabel, gradeChangeReason } from '../../lib/changelog.js';
 import { BRAND_PRICES, combinedBrandPrices, combinedScopeSpecs, materialSetFor, materialSetsFor } from '../../lib/materials.js';
 import { DETAIL_LIBRARY } from '../../lib/details.js';
 import { firstCallQuestions, parseInput } from '../../lib/parse.js';
@@ -525,8 +526,8 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
                         ...(Array.isArray(c.changeLogs) ? c.changeLogs : []),
                         {
                           id: `chg-${Date.now()}`,
-                          item: `${design.preset.label} 등급`,
-                          reason: `${design.preset.label} 등급 권장 +${design.gradeRate}%`,
+                          item: gradeChangeLabel(design.preset.label),
+                          reason: gradeChangeReason(design.preset.label, design.gradeRate),
                           amount,
                           type: 'increase',
                           days: 0,

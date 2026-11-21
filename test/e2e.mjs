@@ -33,6 +33,9 @@ import { buildSharePayload, decodeShare, encodeShare } from '../src/lib/share.js
 import { buildTimeline, evidenceFor } from '../src/lib/gates.js';
 import { translateDesign } from '../src/lib/design.js';
 import { autoCaseTitle } from '../src/lib/classify.js';
+import { buildFreePrompt } from '../src/lib/freePrompt.js';
+import { changeLabel } from '../src/lib/changelog.js';
+import { materialSetFor } from '../src/lib/materials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '..', 'dist');
@@ -99,6 +102,9 @@ const CASE_JSON = {
   surveyChecks: ['상판 실측(수전 홀 위치)', '급수·배수 위치 변경 여부', '후드 재사용 여부'],
   summary: '10평 주방 전체 교체, 엘리베이터 사용',
   warnings: ['상판 가공 후 수전 홀 변경 불가'],
+  clientName: '박 사장님',
+  clientPhone: '010-2345-6789',
+  distanceKm: '32',
   wishText: '최신식으로 깔끔하게, 예산은 1,200만원 이하로 맞춰주세요',
   missingCosts: [{ label: '후드 교체', range: '참고 20~35만', amount: 25, why: '기존 후드 오염' }],
   costBreakdown: [
@@ -551,6 +557,36 @@ async function main() {
     record('평당: 빈 값은 0', perPyeong('') === '0' && perPyeong(undefined) === '0');
   });
 
+  await step('단위: 무료 AI 설명문 — 구조는 그대로, 마감만', async () => {
+    const c = composeCase({
+      trade: 'bathroom',
+      patch: { sizeValue: '1', sizeUnit: '칸', design: { preset: 'premium', keywords: '호텔처럼 깔끔하게' }, notes: '010-1234-5678 김사장님 연락처' },
+    });
+    const calc = computeEstimate(c);
+    const design = translateDesign(c, calc.trade);
+    const p = buildFreePrompt({ c, calc, design, materialSet: materialSetFor(c, calc.trade) });
+    record('무료 설명: 공사 후 사진 요청', p.includes('공사가 끝난 모습'));
+    record('무료 설명: 구조·창문·각도 유지', p.includes('구조') && p.includes('창문') && p.includes('각도'));
+    record('무료 설명: 고른 분위기 반영', p.includes('고급·호텔 느낌') && p.includes('premium hotel-like'));
+    record('무료 설명: 자재 반영', p.includes('포세린'));
+    record('무료 설명: 원가·남는 돈·알선료 없음', !/원가|남는|알선|예비비|순익/.test(p));
+    record('무료 설명: 손님 전화번호 안 들어감', !p.includes('010-1234-5678'));
+    // 철거 현장은 억지 인테리어가 아니라 '깔끔하게 정리된 빈 공간'
+    const d = composeCase({ trade: 'demolition', patch: { sizeValue: '15', sizeUnit: '평' } });
+    const dp = buildFreePrompt({ c: d, calc: computeEstimate(d), design: translateDesign(d) });
+    record('무료 설명: 철거는 빈 공간으로 분기', dp.includes('빈 공간') && !dp.includes('호텔') && !dp.includes('[자재]'));
+  });
+
+  await step('단위: 변동 내역 이름표 — 무엇 때문에 붙었는지', async () => {
+    record(
+      '변동 이름: 등급 라벨을 풀어 씀',
+      changeLabel({ item: '고급·호텔 느낌 등급', amount: 85 }) === '자재·마감 등급 (고급·호텔 느낌 · 기본 대비)',
+      changeLabel({ item: '고급·호텔 느낌 등급' })
+    );
+    record('변동 이름: 일반 항목은 그대로', changeLabel({ item: '폐기물 1대 추가 반출' }) === '폐기물 1대 추가 반출');
+    record('변동 이름: 항목이 비면 이유로 대체', changeLabel({ reason: '답사에서 짐이 많음' }) === '답사에서 짐이 많음');
+  });
+
   // ---------- 1. 브라우저 ----------
   const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR', deviceScaleFactor: 1 });
@@ -969,7 +1005,10 @@ async function main() {
     record('수익: −0만 없음(대안)', !/[-−]0만/.test(tOpen));
     record('수익: 항목별 산출 근거', t.includes('항목별 산출 근거') && t.includes('인건비') && /다섯 줄을 더하면 보수적 원가 [\d,]+만원/.test(t));
     record('수익: Before/After 카드', t.includes('BEFORE') && t.includes('AFTER (예상)'));
-    record('수익: AI 미연결 안내', t.includes('설정에서 Gemini API 키를 연결하면'));
+    record(
+      '수익: 무료 방법 1·2·3 안내',
+      t.includes('돈 안 드는 방법') && t.includes('설명 복사하기') && t.includes('Gemini·ChatGPT에 사진과 함께 넣기') && t.includes('만든 사진 여기에 올리기')
+    );
     await page.getByRole('button', { name: '일 끝나고 전액' }).click();
     await page.waitForTimeout(350);
     record('수익: 0·0·100 결제', (await page.getByLabel('계약금 비율').inputValue()) === '0');
@@ -1255,7 +1294,10 @@ async function main() {
     const r = await page.locator('[role=dialog]').innerText();
     record('한차: 폐기물로 분류', r.includes('폐기물 수거·처리'));
     record('한차: 1톤 1차 표시', r.includes('1톤 1차') && r.includes('1톤'));
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
+    record('한차: 생성 직후 2. 가견적 직행', (await page.locator('nav[aria-label="현장 단계"] button').nth(1).getAttribute('aria-current')) !== null || (await mainText()).includes('가견적'));
+    await goTab(1);
     await page.getByText('받은 내용').first().waitFor();
     record('한차: 현장 생성', true);
   });
@@ -1352,7 +1394,9 @@ async function main() {
       .fill('안동 15평 아파트 전체 인테리어. 방 2 / 욕실 1 / 부엌 1 / 현관(중문/신발장/타일). 창호는 안해도되고 바닥 미장 필요. 예산 1,000만원 미만. 문의/희망사항: 최신식으로 깔끔하게');
     await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
+    await goTab(1);
     await page.getByLabel('받은 내용').waitFor();
     await page.waitForTimeout(400);
     const info = await mainText();
@@ -1832,13 +1876,58 @@ async function main() {
     record('AI: 현장 상태·자재', r.includes('노후 LPM') && r.includes('무광 그레이'));
     record('AI: 희망사항 전문', r.includes('최신식으로 깔끔하게'));
     await shot('42-ai-result.png');
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
+    await goTab(1);
     await page.getByText('받은 내용').first().waitFor();
     await page.waitForTimeout(400);
     const aiInfo = await mainText();
     record('AI: 분석 카드 저장', aiInfo.includes('🤖 AI 정밀 분석'));
     record('AI: 원가 산출 근거', aiInfo.includes('AI 원가 산출 근거') && aiInfo.includes('주방 기공 2명'));
     record('AI: 누락 비용 → 맞춤 체크', aiInfo.includes('희망사항:'));
+  });
+
+  // #22760·#22773: 고객 정보는 1단계가 아니라 확인 화면에서 '빈칸만' 채우고, 만들면 바로 2. 가견적
+  await step('새 현장 — 고객 정보(이름·연락처·주소·거리)는 확인 화면에서', async () => {
+    await goHome();
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    const inputStep = await page.locator('[role=dialog]').innerText();
+    record('새 현장: 1단계는 초간단(고객 칸 없음)', !inputStep.includes('빈칸만 채우면 됩니다'));
+    await page.getByLabel('현장 요청 내용').fill('경북 안동시 15평 상가 철거, 연락처 010-2345-6789');
+    await page.getByLabel('AI 정밀 분석').click();
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
+    await page.waitForTimeout(300);
+    const confirm = await page.locator('[role=dialog]').innerText();
+    record(
+      '확인 화면: 빈칸 채우는 고객 정보',
+      confirm.includes('빈칸만 채우면 됩니다') && ['고객 이름', '연락처', '현장 주소', '현장까지 거리'].every((x) => confirm.includes(x))
+    );
+    record('확인 화면: AI가 뽑은 연락처가 미리 채워짐', (await page.getByLabel('고객 연락처').inputValue()) === '010-2345-6789');
+    record('확인 화면: AI가 뽑은 고객 이름', (await page.getByLabel('고객 이름').inputValue()) === '박 사장님');
+    record('확인 화면: 스크롤이 맨 위(헤더에 안 가림)', (await page.evaluate(() => document.getElementById('modal-body')?.scrollTop || 0)) === 0);
+
+    await page.getByLabel('고객 이름').fill('김 사장님');
+    await page.getByLabel('현장 주소').fill('안동시 풍산읍 상가 2층');
+    await page.getByLabel('현장까지 거리').fill('40');
+    await page.waitForTimeout(400);
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
+    await page.waitForTimeout(500);
+    record(
+      '생성: 바로 2. 가견적 탭',
+      (await page.locator('nav[aria-label="현장 단계"] button').nth(1).getAttribute('aria-current')) === 'step' ||
+        (await mainText()).includes('내가 부를 가견적'),
+      (await mainText()).split('\n').slice(0, 6).join(' / ')
+    );
+    await goTab(4);
+    const costTxt = await mainText();
+    record('생성: 거리 40km → 교통비 자동 반영', costTxt.includes('원거리 40km'), costTxt.match(/원거리[^\n]*/)?.[0] || '없음');
+    await goTab(1);
+    record('반영: 고객 이름', (await page.getByLabel('고객 이름').inputValue()) === '김 사장님');
+    record('반영: 연락처', (await page.getByLabel('고객 연락처').inputValue()) === '010-2345-6789');
+    record('반영: 현장 주소', (await page.getByLabel('현장 주소').inputValue()) === '안동시 풍산읍 상가 2층');
+    record('반영: 현장까지 거리', (await page.getByLabel('현장까지 거리').inputValue()) === '40');
   });
 
   await step('Gemini — 전문가 감리 검증(독립 리포트)', async () => {
@@ -1857,15 +1946,56 @@ async function main() {
     await page.getByLabel('현장 사진 선택').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
     await page.waitForTimeout(900);
     await goTab(4);
-    await page.getByText('AI 완공 예상 (손님 보여주기용)').scrollIntoViewIfNeeded();
+    await expandFolds();
+    await page.getByText('④ 손님께 보여줄 완공 사진').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: /예상 이미지 만들기/ }).click();
     await page.waitForTimeout(1200);
     const imgCount = await page.locator('img[alt="공사 후 예상"]').count();
     record('After: 이미지 생성·저장', imgCount === 1, `img=${imgCount}`);
-    record('After: 생성됨 배지', (await mainText()).includes('생성됨'));
+    record('After: 사진 있음 배지', (await mainText()).includes('사진 있음'));
     await shotAt('43-after.png', 'AI 완공 예상', -110);
     await goTab(6);
-    record('문서: 손님용 Before/After', (await mainText()).includes('AI 완공 예상 (손님께 함께 보여주기)'));
+    record('문서: 손님용 Before/After', (await mainText()).includes('공사 전 · 공사 후 (손님께 함께 보여주기)'));
+  });
+
+  // #22719: 기계치 부모님도 3초 안에 따라 하는 무료 방법 — ① 설명 복사 ② 무료 앱 열기 ③ 만든 사진 올리기
+  await step('완공 사진 — 무료 방법(설명 복사·무료 앱·사진 올리기)', async () => {
+    await goTab(4);
+    await page.waitForTimeout(300);
+    const t = await mainText();
+    record('완공: 무료 방법 카드', t.includes('돈 안 드는 방법') && t.includes('무료'));
+    record('완공: 1·2·3 순서', ['설명 복사하기', 'Gemini·ChatGPT에 사진과 함께 넣기', '만든 사진 여기에 올리기'].every((x) => t.includes(x)));
+    record('완공: 낯선 말(프롬프트·모델) 없음', !t.includes('프롬프트') && !t.includes('모델'));
+
+    await page.getByRole('button', { name: /설명 복사하기/ }).first().click();
+    await page.getByText('설명을 복사했습니다', { exact: false }).waitFor({ timeout: 5000 });
+    record('완공: 1탭 복사 + 토스트', true);
+
+    const gem = page.getByRole('link', { name: /Gemini 열기/ }).first();
+    const gpt = page.getByRole('link', { name: /ChatGPT 열기/ }).first();
+    record(
+      '완공: Gemini·ChatGPT 새 창 링크',
+      (await gem.getAttribute('href')) === 'https://gemini.google.com' &&
+        (await gem.getAttribute('target')) === '_blank' &&
+        (await gem.getAttribute('rel')) === 'noopener noreferrer' &&
+        (await gpt.getAttribute('href')) === 'https://chatgpt.com',
+      `${await gem.getAttribute('href')} / ${await gpt.getAttribute('href')}`
+    );
+
+    // 무료 AI에서 만든 사진을 올리면 AFTER 미리보기 + 비교 모달에 그대로
+    await page.getByLabel('만든 사진 올리기').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+    await page.getByText('AFTER에 올렸습니다', { exact: false }).waitFor({ timeout: 8000 });
+    const afterImg = page.locator('img[alt="공사 후 예상"]').first();
+    record('완공: 올린 사진이 AFTER에 반영', (await afterImg.getAttribute('src')).startsWith('data:image'));
+    record('완공: 직접 올린 사진 안내', (await mainText()).includes('직접 올린 사진입니다'));
+
+    await page.getByRole('button', { name: /손님께 크게 보여주기/ }).first().click();
+    await page.getByRole('dialog').waitFor();
+    const dlg = await page.getByRole('dialog').innerText();
+    record('완공: 비교 모달 Before/After', dlg.includes('BEFORE · 공사 전') && dlg.includes('AFTER · 공사 후 (예상)'));
+    await page.screenshot({ path: path.join(SHOTS, '43b-compare-modal.png') });
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
   });
 
   await step('Gemini 실패 시 폴백', async () => {
@@ -1954,7 +2084,9 @@ async function main() {
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
     const r = await page.locator('[role=dialog]').innerText();
     record('스샷 OCR: 결과 단계 분류', r.includes('복합') && r.includes('15평'));
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
+    await goTab(1);
     await page.getByLabel('받은 내용').waitFor();
     await page.waitForTimeout(400);
     const received = await page.getByLabel('받은 내용').inputValue();
@@ -2033,10 +2165,11 @@ async function main() {
     record('만들기: "2. 가견적과 같은 금액" 안내', dtext.includes('가견적과 같은 금액'), dtext.split('\n')[0]);
     const modal = await page.locator('[role=dialog]').innerText();
     record('만들기: AI 시세는 참고로 표기', modal.includes('AI가 본 시세(참고)'), modal.match(/AI가 본 시세[^\n]*/)?.[0] || '');
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
-    await page.getByLabel('받은 내용').waitFor();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
     await page.waitForTimeout(600);
     const head = await priceOfHeader();
+    record('만들기: 만들자마자 2. 가견적 탭', (await mainText()).includes('내가 부를 가견적') || (await mainText()).includes('가견적'));
     record('만들기: 만들자마자 상단 견적 = 미리보기 (1원도 안 틀림)', head === draftAmount, `미리보기 ${draftAmount} vs 상단 ${head}`);
     await goTab(2);
     const hero = await heroPrice();
@@ -2061,8 +2194,8 @@ async function main() {
     await page.waitForTimeout(300);
     const draftAmount = Number(await page.locator('[data-testid=draft-quote]').first().getAttribute('data-amount'));
     record('사진만: 미리보기 금액 있음', draftAmount > 0, `${draftAmount}만`);
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
-    await page.getByLabel('받은 내용').waitFor();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
     await page.waitForTimeout(600);
     const head = await priceOfHeader();
     await goTab(2);
@@ -2249,8 +2382,8 @@ async function main() {
     await page.getByLabel('현장 요청 내용').fill('숨고 요청서 · 경북 안동시 15평 상가 철거 · 견적 보낸 고수 8명 · 채팅하기');
     await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
-    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
-    await page.getByLabel('받은 내용').waitFor();
+    await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+    await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
     await goTab(2);
     const smCard = await page.getByTestId('quote-msg-card').innerText();
     const smMsg = await page.getByTestId('sugo-msg').innerText();
@@ -2288,7 +2421,8 @@ async function main() {
       await p.evaluate(() => {
         const st = JSON.parse(localStorage.getItem('aiSiteManager.v1'));
         const c = st.cases.find((x) => x.id === 'case-bathroom') || st.cases[0];
-        c.changeLogs = [{ id: 'cl-e2e', item: '폐기물 1대 추가 반출', reason: '답사에서 짐이 많음', amount: 85, days: 0, type: 'increase', agreed: true, at: '2026-11-20' }];
+        // #22708: 예전에 저장된 축약 라벨('고급·호텔 느낌 등급')도 화면에서는 풀어서 보여야 한다
+        c.changeLogs = [{ id: 'cl-e2e', item: '고급·호텔 느낌 등급', reason: '고급·호텔 느낌 등급 권장 +12%', amount: 85, days: 0, type: 'increase', agreed: true, at: '2026-11-20' }];
         c.calledPrice = '';
         localStorage.setItem('aiSiteManager.v1', JSON.stringify(st));
       });
@@ -2316,6 +2450,22 @@ async function main() {
       record('4단계: 배지 −101만 표기', badge1 === '-101만', badge1);
       record('4단계: 답사 후 +85만 모순 없음', !mainTxt.includes('답사 후 +85만'));
       record('4단계: 신호등은 내가 부른 금액 기준 조정', mainTxt.includes('내가 부른 금액으로 가견적 대비 -101만 조정'), mainTxt.split('·').find((x) => x.includes('가견적 대비'))?.trim() || '없음');
+
+      // #22708: 앱 계산 변동 내역은 접어 두고, 펼치면 '앱 계산 기준'과 '내가 부른 금액 조정'이 함께 보인다
+      record('4단계: 변동 내역 기본 접힘', mainTxt.includes('앱 계산 변동 내역 보기') && !mainTxt.includes('자재·마감 등급 ('));
+      await p.evaluate(() => document.querySelectorAll('main details').forEach((d) => { d.open = true; }));
+      await p.waitForTimeout(200);
+      const opened = await p.locator('main').innerText();
+      record('4단계: 등급 라벨을 풀어 씀', opened.includes('자재·마감 등급 (고급·호텔 느낌 · 기본 대비)'), opened.split('\n').find((x) => x.includes('등급')) || '없음');
+      record('4단계: 앱 계산 기준 변동 표시', opened.includes('앱이 계산한 금액 기준'));
+      const appCalc = Number((opened.match(/앱이 계산한 금액은 ([\d,]+)만원/) || [])[1]?.replace(/,/g, '') || 0);
+      const calledNum = Number(await p.getByLabel('내가 부른 금액(만원)').inputValue());
+      record(
+        '4단계: 손님 합의가 조정 = 앱 계산가 − 내가 부른 금액',
+        appCalc > 0 && opened.includes('손님과 합의한 금액으로 조정') && opened.includes(`-${appCalc - calledNum}만`),
+        `앱 ${appCalc} − 부른 ${calledNum} = ${appCalc - calledNum}`
+      );
+      record('4단계: 두 단계 합계 줄', opened.includes(`처음 가견적 ${base1}만 → 최종 ${final1}만`), `${base1} → ${final1}`);
       await p.screenshot({ path: path.join(SHOTS, '48b-called-vs-glance.png') });
     } finally {
       await ctx.close();
