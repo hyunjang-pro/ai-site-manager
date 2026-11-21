@@ -707,7 +707,7 @@ async function main() {
     await input.fill(String(cost - 20));
     await page.waitForTimeout(400);
     const tBad = await mainText();
-    record('부른 금액: 원가 이하 → 적자 경고', tBad.includes('적자') && tBad.includes('적자 · 원가 이하'));
+    record('부른 금액: 원가 이하 → 적자 경고', tBad.includes('적자') && tBad.includes('적자입니다'));
     record('부른 금액: 적자는 순익 마이너스', (await page.getByTestId('called-net').innerText()).includes('-'));
 
     await page.getByRole('button', { name: '앱 계산가로 되돌리기' }).click();

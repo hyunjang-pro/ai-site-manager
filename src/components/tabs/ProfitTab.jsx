@@ -281,7 +281,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
                 </p>
               </div>
               <Pill tone={calc.netProfitBuffered <= 0 ? 'bad' : calc.marginBuffered < 12 || effectiveCalled < defense ? 'warn' : 'ok'}>
-                {calc.netProfitBuffered <= 0 ? '적자 · 원가 이하' : calc.marginBuffered < 12 || effectiveCalled < defense ? '위험 · 방어선 이하' : '좋음'}
+                {calc.netProfitBuffered <= 0 ? '적자' : calc.marginBuffered < 12 || effectiveCalled < defense ? '방어선 이하' : '좋음'}
               </Pill>
             </div>
             <p className="mt-1 text-sm font-extrabold text-ink-2">
@@ -290,7 +290,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
             </p>
             <p className="mt-1 rounded-xl bg-white/70 px-2.5 py-1.5 text-[12.5px] font-extrabold text-emerald-800">
               하루 뛰면 {pers(dailyProfit)}만원 · 공사 {workDays}일 기준
-              <span className="ml-1 text-2xs font-bold text-emerald-700">(총 남는 돈 ÷ 공사일수)</span>
+              <span className="mt-0.5 block text-2xs font-bold text-emerald-700">총 남는 돈 ÷ 공사일수</span>
             </p>
           </div>
 
