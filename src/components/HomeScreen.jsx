@@ -360,7 +360,7 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
   const max = Math.round(calc.rangeMax);
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden scroll-mb-32">
       <button type="button" onClick={onOpen} className="w-full px-4 pb-3 pt-3.5 text-left">
         <div className="flex items-start gap-3">
           <TradeIcon trade={c.trade} />
