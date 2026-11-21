@@ -759,6 +759,56 @@ export async function analyzeSurveyGuideWithGemini({ apiKey, context = '' }) {
   }
 }
 
+// ---- 전문가 감리 검증 — 가견적을 그대로 반복하지 않는 독립 리포트 ----
+const EXPERT_AUDIT_PROMPT = `너는 한국에서 20년 넘게 철거·인테리어 현장을 지켜본 현장 감리이자 제3자 견적 검증 전문가다.
+아래 현장의 '가견적'을 손님이 아니라 우리(시공자) 편에서 독립 검증한다. 절대 견적 계산을 그대로 옮겨 적지 마라.
+1) market: 이 현장 조건에서 시장 호가 대비 우리 견적이 어떤 위치인지 감리 의견 한 줄(예: "같은 조건 실견적 대비 중상단, 자재 등급 근거를 문서로 보여줘야 수주된다").
+2) risks: 이 현장 조건(건물 연식·층수·엘베·공종·거주 여부)에서 가견적에 안 잡혔을 확률이 높은 추가 비용 2~3개.
+   각 항목은 {"title":"짧은 제목(20자)","why":"왜 이 현장에서 터지는지 구체적으로(80자)","cost":"예상 추가 비용 범위(만원)","action":"지금 할 행동 한 줄","severity":"high|mid|low"}.
+3) contract: 손해 안 보고 수주하기 위해 첫 통화·계약서에 반드시 넣어야 할 방어 조항 1~2줄(각 80자 이내).
+4) headline: 30자 이내 결론 한 줄. summary: 2문장 이내.
+금액은 만원 단위. 실제 2026 단가·판례 기준을 따르고, 없는 숫자를 지어내지 마라.
+JSON만 답해: {"headline":"","summary":"","market":"","risks":[{"title":"","why":"","cost":"","action":"","severity":"high"}],"contract":[""]}`;
+
+export async function analyzeExpertAuditWithGemini({ apiKey, context = '' }) {
+  const key = apiKey || getGeminiKey();
+  if (!key) return { ok: false, reason: 'no_key' };
+  const parts = [{ text: `${EXPERT_AUDIT_PROMPT}\n${GEMINI_KNOWLEDGE}\n\n[현장]\n${String(context || '').slice(0, 2000)}` }];
+  try {
+    const { json, model } = await callGemini({ apiKey: key, parts });
+    if (!json || typeof json !== 'object') return { ok: false, reason: 'empty' };
+    const risks = (Array.isArray(json.risks) ? json.risks : [])
+      .map((r) => ({
+        title: String(r?.title || r?.name || '').slice(0, 40),
+        why: String(r?.why || r?.detail || '').slice(0, 200),
+        cost: String(r?.cost || '').slice(0, 60),
+        action: String(r?.action || r?.fix || '').slice(0, 160),
+        severity: ['high', 'mid', 'low'].includes(r?.severity) ? r.severity : 'mid',
+      }))
+      .filter((r) => r.title)
+      .slice(0, 3);
+    const contract = (Array.isArray(json.contract) ? json.contract : [json.contract])
+      .map((t) => String(t || '').slice(0, 160))
+      .filter(Boolean)
+      .slice(0, 2);
+    if (!risks.length) return { ok: false, reason: 'empty' };
+    return {
+      ok: true,
+      data: {
+        headline: String(json.headline || '').slice(0, 120),
+        summary: String(json.summary || '').slice(0, 300),
+        market: String(json.market || json.marketComment || '').slice(0, 300),
+        risks,
+        contract,
+        model: model || '',
+        at: new Date().toISOString(),
+      },
+    };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'gemini_failed' };
+  }
+}
+
 // 실패 이유를 사장님이 읽을 수 있는 한 줄로 바꾼다.
 function geminiHint(e) {
   const status = Number(e?.status) || 0;

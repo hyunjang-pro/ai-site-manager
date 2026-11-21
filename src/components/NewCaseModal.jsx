@@ -369,6 +369,9 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
               <b className="text-brand-strong">스샷은 글자를 읽어</b> 내용을 채우고, <b className="text-ink-2">현장 사진은 글자를 읽지 않고</b> 바로
               붙어요. 현장 사진은 AI 정밀 분석 때 사진으로 함께 봅니다.
             </p>
+            <p className="mt-1 text-[10.5px] font-semibold leading-4 text-ink-4">
+              갤럭시에서 ‘갤러리’가 안 보이면 같은 화면의 <b>내 파일 &gt; 이미지</b>에서 골라도 똑같이 붙습니다.
+            </p>
           </div>
 
           {/* 3) 자동 분류 — 전체 너비 주 버튼 */}

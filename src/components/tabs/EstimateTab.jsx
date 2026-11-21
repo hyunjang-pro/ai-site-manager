@@ -6,9 +6,12 @@ import { BRAND_PRICES, combinedBrandPrices, combinedScopeSpecs, materialSetFor, 
 import { DETAIL_LIBRARY } from '../../lib/details.js';
 import { firstCallQuestions, parseInput } from '../../lib/parse.js';
 import { similarCases } from '../../lib/reference.js';
+import { expertAudit } from '../../lib/expertAudit.js';
+import { useExpertAudit } from '../../lib/useExpertAudit.js';
 import { verifyEstimate } from '../../lib/verify.js';
 import { subsidyInfo, SUBSIDY_CHECKS, SUBSIDY_DOCS, SUBSIDY_AGENCY, subsidyLimitText } from '../../lib/subsidy.js';
-import { subsidyNotice, subsidyAgencyNotice } from '../../lib/docs.js';
+import { subsidyNotice, subsidyAgencyNotice, sugoQuoteMessage } from '../../lib/docs.js';
+import { useCalledPrice } from '../../lib/useCalledPrice.js';
 import { fileToThumb } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
 import { useSurveyGuide } from '../../lib/useSurveyGuide.js';
@@ -37,6 +40,8 @@ import { quoteSignal, parseBudget, aiSignalOf } from '../../lib/budget.js';
 // 2단계 — 가견적: 1차 금액 · (마감 공종만) 스타일·자재 · 3자 시세 검증 · 답사 가이드.
 export default function EstimateTab({ c, update, calc, design, showToast, completedCases = [], onGoDoc, onGoSurvey }) {
   const verify = useMemo(() => verifyEstimate(c, calc), [c, calc]);
+  const called = useCalledPrice(c, calc, update);
+  const sugoMsg = useMemo(() => sugoQuoteMessage(c, calc), [c, calc]);
   const ref = useMemo(() => similarCases(c, calc, completedCases), [c, calc, completedCases]);
   const hasSurvey = Math.abs(calc.adjustmentTotal) > 0 || (c.changeLogs || []).length > 0;
   const info = TRADES[c.trade] || TRADES.unclassified;
@@ -97,13 +102,19 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-900 text-2xs font-black text-white">①</span>
           가견적 (답사 전 예상)
         </p>
-        <span className="text-2xs font-bold text-ink-3">{hasSurvey ? '답사 반영 전 금액' : '지금 계산된 견적 · 변동 가능'}</span>
+        <span className="text-2xs font-bold text-ink-3">
+          {calc.hasCalledPrice ? '내가 부를 금액 기준' : hasSurvey ? '답사 반영 전 금액' : '지금 계산된 견적 · 변동 가능'}
+        </span>
       </div>
       <Hero
         eyebrow="1차 가견적 (답사 전 · 변동 가능)"
-        value={Math.round(hasSurvey ? calc.baseClientPrice : calc.finalPrice).toLocaleString('ko-KR')}
+        value={Math.round(hasSurvey && !calc.hasCalledPrice ? calc.baseClientPrice : calc.clientPrice).toLocaleString('ko-KR')}
         unit="만원"
-        sub={`${c.includeVat ? '부가세 포함' : '부가세 별도'} · 실측 후 확정 · 예비비 ${calc.bufferRate}% 포함`}
+        sub={
+          calc.hasCalledPrice
+            ? `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 내가 부를 금액 기준 · 앱 계산가 ${Math.round(calc.appClientPrice).toLocaleString('ko-KR')}만`
+            : `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 실측 후 확정 · 예비비 ${calc.bufferRate}% 포함`
+        }
         badge={
           <span className={cx('rounded-lg px-2 py-1 text-2xs font-extrabold', calc.isBelowBreakEven ? 'bg-rose-500/25 text-rose-200' : 'bg-emerald-400/20 text-emerald-300')}>
             {calc.isBelowBreakEven ? '원가 이하' : calc.isUncertain ? '정보 부족' : '보호됨'}
@@ -128,6 +139,79 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           기본 원가 {Math.round(calc.totalDirectCost).toLocaleString('ko-KR')}만 + 예비비 {Math.round(calc.costBuffer).toLocaleString('ko-KR')}만({calc.bufferRate}%)을 미리 넣었습니다
         </p>
       </Hero>
+
+      {/* 내가 부를 가견적 — 숨고·카톡에 보낼 금액. 4단계 '내가 부른 금액'과 같은 값 */}
+      <Card className="p-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-extrabold text-ink">내가 부를 가견적</p>
+          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-2xs font-extrabold text-brand">숨고·카톡에 보낼 금액</span>
+        </div>
+        <div className="mt-1.5 flex items-end gap-2">
+          <input
+            inputMode="numeric"
+            aria-label="내가 부를 가견적(만원)"
+            value={called.draft}
+            onChange={(e) => called.commit(e.target.value)}
+            onBlur={() => {
+              if (String(called.draft).trim() === '') called.reset();
+            }}
+            className="num w-full min-w-0 border-b-2 border-slate-200 bg-transparent pb-1 text-right text-[30px] font-black leading-none tracking-tight text-ink outline-none placeholder:text-slate-300 focus:border-brand"
+            placeholder={String(called.appPrice)}
+          />
+          <span className="shrink-0 pb-1.5 text-sm font-bold text-ink-3">만원</span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {[-10, -5, 5, 10].map((d) => (
+            <SmallButton
+              key={d}
+              className="min-w-[52px] flex-1"
+              onClick={() => called.commit(String(Math.max(0, called.effective + d)))}
+              aria-label={`가견적 ${d > 0 ? '플러스' : '마이너스'} ${Math.abs(d)}만원`}
+            >
+              {d > 0 ? `+${d}` : d}만
+            </SmallButton>
+          ))}
+          <SmallButton
+            variant={called.noCalled ? 'soft' : 'white'}
+            className="flex-[1.4] whitespace-nowrap"
+            disabled={called.noCalled}
+            onClick={() => {
+              called.reset();
+              showToast(`앱 계산가 ${called.appPrice.toLocaleString('ko-KR')}만원으로 되돌렸습니다`);
+            }}
+          >
+            앱 계산가로
+          </SmallButton>
+        </div>
+        <p className="mt-2 text-2xs font-semibold leading-4 text-ink-3">
+          앱 계산가 <b className="num text-ink-2">{n(called.appPrice)}만원</b>
+          {calc.adjustmentTotal ? ` (답사 변동 ${calc.adjustmentTotal > 0 ? '+' : ''}${calc.adjustmentTotal}만 반영)` : ''} · 바꾸면 위 순익·신호등과{' '}
+          <b className="text-ink-2">4단계 최종·수익</b>, 견적서 금액이 같이 바뀝니다.
+        </p>
+      </Card>
+
+      {/* 숨고 견적 발송 멘트 — 그대로 붙여넣기 */}
+      <Card className="p-3.5">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-extrabold text-ink">숨고 견적 발송 멘트</p>
+            <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+              숨고에서 견적 보낼 때 그대로 붙여넣으세요. 금액을 바꾸면 멘트 안 숫자도 즉시 바뀝니다.
+            </p>
+          </div>
+          <Copy className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+        </div>
+        <pre
+          data-testid="sugo-msg"
+          className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 px-3 py-2.5 text-[12.5px] font-semibold leading-5 text-ink-2 ring-1 ring-slate-200"
+        >
+          {sugoMsg}
+        </pre>
+        <BigButton className="mt-2 w-full" onClick={() => copyText(sugoMsg, showToast, '숨고 견적 멘트를 복사했습니다')}>
+          <Copy className="h-5 w-5" /> 숨고 멘트 복사
+        </BigButton>
+        <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">손님에게 보이는 멘트입니다 — 원가·남는 돈·알선료는 넣지 않습니다.</p>
+      </Card>
 
       {calc.isBid ? (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] font-bold leading-5 text-amber-900 ring-1 ring-amber-200">
@@ -547,8 +631,8 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
       </Fold>
       ) : null}
 
-      <Fold label="시세 검증 · 빠진 비용" hint="전문가 시세와 비교하고, 빠뜨린 비용이 있는지 봅니다">
-        <VerifyCard verify={verify} calc={calc} c={c} update={update} showToast={showToast} />
+      <Fold label="전문가 검증 · 시장가·숨은 함정" hint="감리 입장에서 시장 호가·추가비 리스크·계약 방어를 따로 봅니다">
+        <VerifyCard verify={verify} calc={calc} c={c} update={update} showToast={showToast} completedCases={completedCases} />
       </Fold>
 
       <Fold label="점포철거비 지원금" hint="손님이 공단에서 돌려받는 돈 — 상가·철거 현장만">
@@ -560,10 +644,14 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
 
 const MISSING_TO_SURVEY = { protect: 'protectLevel', admin: 'adminDeposit', lift: 'materialLift', clean: 'afterCare', waste: 'wasteIncluded' };
 
-function VerifyCard({ verify, calc, c, update, showToast }) {
-  const tone = verify.verdict.tone === 'ok' ? 'good' : verify.verdict.tone === 'bad' ? 'bad' : verify.verdict.tone === 'info' ? 'info' : 'warn';
+const n = (v) => Math.round(Number(v) || 0).toLocaleString('ko-KR');
+
+function VerifyCard({ verify, calc, c, update, showToast, completedCases = [] }) {
+  const audit = useMemo(() => expertAudit(c, calc, completedCases, c?.expertAudit), [c, calc, completedCases]);
+  const { aiOn, busy, retry } = useExpertAudit(c, calc, update);
+  const market = audit.market;
+  const tone = market.verdict.tone === 'ok' ? 'good' : market.verdict.tone === 'bad' ? 'bad' : market.verdict.tone === 'info' ? 'info' : 'warn';
   const missingNow = verify.missing.filter((m) => !m.ok);
-  const { aiOn, busy, guide, retry } = useSurveyGuide(c, calc, update);
   const fillMissing = () => {
     const next = { ...(c?.survey || {}) };
     missingNow.forEach((m) => {
@@ -573,7 +661,8 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
     if (update) update({ survey: next });
     if (showToast) showToast(`빠진 비용 ${missingNow.length}가지를 견적에 넣었습니다`);
   };
-  const tips = guide.tips;
+  const marker = Math.max(0, Math.min(100, market.posPct));
+  const diff = market.ours - market.avg;
 
   return (
     <Card className="overflow-hidden">
@@ -581,11 +670,13 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
         <div>
           <p className="flex items-center gap-1.5 text-lg font-extrabold tracking-tight text-ink">
             <ShieldCheck className="h-5 w-5 text-slate-900" strokeWidth={2.4} />
-            2026 최신 시세 3자 검증
+            전문가 검증 리포트
           </p>
-          <p className="mt-0.5 text-xs font-semibold text-ink-3">예비비 {calc.bufferRate}% 넣은 원가 → 전문가·시세 입장에서 다시 봤습니다</p>
+          <p className="mt-0.5 text-xs font-semibold leading-4 text-ink-3">
+            20년 차 현장 감리·제3자 검증 — <b className="text-ink-2">시장 호가·숨은 함정·계약 방어</b>를 따로 봅니다
+          </p>
         </div>
-        <Pill tone={tone}>{verify.verdict.label}</Pill>
+        <Pill tone={tone}>{market.verdict.label}</Pill>
       </div>
 
       <div className="px-4 pb-4 pt-3">
@@ -595,25 +686,92 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
             tone === 'good' ? 'bg-emerald-50' : tone === 'bad' ? 'bg-rose-50' : tone === 'info' ? 'bg-blue-50' : 'bg-amber-50'
           )}
         >
-          <p className="text-base font-extrabold leading-6 text-ink">{verify.verdict.headline}</p>
-          <p className="mt-0.5 text-[13px] font-semibold leading-5 text-ink-2">{verify.verdict.detail}</p>
+          <p className="text-base font-extrabold leading-6 text-ink">{audit.headline}</p>
+          <p className="mt-0.5 text-[13px] font-semibold leading-5 text-ink-2">{audit.summary}</p>
+          {audit.market.comment ? (
+            <p className="mt-1.5 rounded-lg bg-white/70 px-2.5 py-1.5 text-2xs font-semibold leading-4 text-ink-2">🤖 {audit.market.comment}</p>
+          ) : null}
         </div>
 
-        <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-200">
-          {verify.rows.map((r, i) => (
-            <div key={r.label} className={cx('flex items-center justify-between gap-2 px-3 py-2', i % 2 ? 'bg-slate-50' : 'bg-white')}>
-              <span className="text-xs font-bold text-ink-3">{r.label}</span>
-              <span
-                className={cx(
-                  'num text-right text-sm font-extrabold',
-                  r.tone === 'good' ? 'text-emerald-600' : r.tone === 'bad' ? 'text-rose-600' : r.tone === 'warn' ? 'text-amber-700' : r.tone === 'brand' ? 'text-brand-strong' : 'text-ink'
-                )}
-                title={r.hint || ''}
-              >
-                {r.value}
-              </span>
-            </div>
-          ))}
+        {/* ① 시장 호가 비교 — 독립 벤치마크 */}
+        <div className="mt-3 rounded-2xl bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-extrabold text-ink">① 시장 호가 비교</p>
+            <span className="rounded-md bg-white px-1.5 py-0.5 text-2xs font-extrabold text-ink-3">독립 벤치마크</span>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1.5 text-center">
+            {[
+              { label: '시장 최저', value: market.low },
+              { label: '시장 평균', value: market.avg },
+              { label: '시장 고급', value: market.high },
+            ].map((x) => (
+              <div key={x.label} className="rounded-xl bg-white px-1 py-1.5 ring-1 ring-slate-200">
+                <p className="text-2xs font-bold text-ink-3">{x.label}</p>
+                <p className="num mt-0.5 text-[15px] font-extrabold text-ink">
+                  {n(x.value)}
+                  <span className="ml-0.5 text-2xs font-bold text-ink-3">만</span>
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="relative mt-3 h-2.5 rounded-full bg-gradient-to-r from-emerald-200 via-amber-200 to-rose-200">
+            <span
+              className="absolute -top-1 h-[18px] w-[3px] -translate-x-1/2 rounded bg-ink shadow"
+              style={{ left: `${marker}%` }}
+              title={`우리 견적 ${n(market.ours)}만`}
+            />
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] font-bold text-ink-3">
+            <span>최저 {n(market.low)}</span>
+            <span>평균 {n(market.avg)}</span>
+            <span>고급 {n(market.high)}</span>
+          </div>
+
+          <p className="mt-2 text-[13px] font-extrabold text-ink">
+            우리 견적 {n(market.ours)}만원 · 시장 평균 대비 {diff === 0 ? '같음' : `${diff > 0 ? '+' : ''}${n(diff)}만`}
+          </p>
+          <p className="mt-0.5 text-[13px] font-semibold leading-5 text-ink-2">{market.verdict.text}</p>
+          <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
+            사례 {market.sample}건{market.ownCount ? ` (우리 완료 ${market.ownCount}건 포함)` : ''} · 419건 실견적 DB와 2026 지역 시세에서 이 공종·규모로 추린 범위
+          </p>
+        </div>
+
+        {/* ② 숨은 함정 리스크 감사 */}
+        <div className="mt-3">
+          <p className="text-sm font-extrabold text-ink">② 숨은 함정 리스크 감사</p>
+          <p className="mt-0.5 text-2xs font-semibold leading-4 text-ink-3">
+            이 현장 조건(연식·층수·엘베·공종)에서 가견적에 안 잡혔을 확률이 높은 추가 비용입니다. 하나라도 터지면 남는 돈이 그대로 날아갑니다.
+          </p>
+          <div className="mt-1.5 space-y-1.5">
+            {audit.risks.map((r) => (
+              <div key={r.id} data-testid="risk-item" className="rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200">
+                <p className="flex items-start gap-1.5 text-[13px] font-extrabold leading-5 text-ink">
+                  <AlertTriangle
+                    className={cx('mt-0.5 h-4 w-4 shrink-0', r.severity === 'high' ? 'text-rose-600' : r.severity === 'mid' ? 'text-amber-600' : 'text-slate-400')}
+                    strokeWidth={2.6}
+                  />
+                  <span className="min-w-0">{r.title}</span>
+                </p>
+                {r.cost ? <p className="mt-1 rounded-md bg-rose-50 px-1.5 py-0.5 text-2xs font-extrabold leading-4 text-rose-700">예상 추가 {r.cost}</p> : null}
+                <p className="mt-1 text-[12.5px] font-semibold leading-5 text-ink-2">{r.why}</p>
+                {r.action ? <p className="mt-1 text-2xs font-bold leading-4 text-brand-strong">→ {r.action}</p> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ③ 계약 방어 */}
+        <div className="mt-3 rounded-2xl bg-slate-900 p-3 text-white">
+          <p className="text-sm font-extrabold">③ 계약 방어 — 첫 통화·계약서에 이 한 줄</p>
+          <ul className="mt-1.5 space-y-1.5">
+            {audit.contract.map((t, i) => (
+              <li key={i} className="flex gap-1.5 text-[12.5px] font-semibold leading-5 text-slate-100">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-white/70" />
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
         </div>
 
         <div className="mt-3">
@@ -623,21 +781,21 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
           </div>
           {/* 다 반영됐으면 목록을 접어 스크롤을 줄인다 (3단계 '빠뜨리기 쉬운 비용'과 중복 방지) */}
           {missingNow.length ? (
-          <div className="grid grid-cols-2 gap-1.5">
-            {verify.missing.map((m) => (
-              <div
-                key={m.id}
-                className={cx('rounded-xl px-2.5 py-2', m.ok ? 'bg-emerald-50' : 'bg-rose-50 ring-1 ring-rose-200')}
-                title={m.why}
-              >
-                <p className={cx('flex items-center gap-1 text-[11px] font-extrabold leading-4', m.ok ? 'text-emerald-700' : 'text-rose-700')}>
-                  {m.ok ? <Check className="h-3 w-3" strokeWidth={3} /> : <AlertTriangle className="h-3 w-3" strokeWidth={3} />}
-                  {m.label}
-                </p>
-                <p className="text-[10px] font-semibold text-ink-3">{m.ok ? '반영됨' : `빠짐 · ${m.cost}`}</p>
-              </div>
-            ))}
-          </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {verify.missing.map((m) => (
+                <div
+                  key={m.id}
+                  className={cx('rounded-xl px-2.5 py-2', m.ok ? 'bg-emerald-50' : 'bg-rose-50 ring-1 ring-rose-200')}
+                  title={m.why}
+                >
+                  <p className={cx('flex items-center gap-1 text-[11px] font-extrabold leading-4', m.ok ? 'text-emerald-700' : 'text-rose-700')}>
+                    {m.ok ? <Check className="h-3 w-3" strokeWidth={3} /> : <AlertTriangle className="h-3 w-3" strokeWidth={3} />}
+                    {m.label}
+                  </p>
+                  <p className="text-[10px] font-semibold text-ink-3">{m.ok ? '반영됨' : `빠짐 · ${m.cost}`}</p>
+                </div>
+              ))}
+            </div>
           ) : null}
           {missingNow.length ? (
             <BigButton className="mt-2 w-full" onClick={fillMissing}>
@@ -650,45 +808,25 @@ function VerifyCard({ verify, calc, c, update, showToast }) {
           )}
         </div>
 
-        <div className="mt-3 rounded-2xl border border-amber-300 bg-amber-50 p-3">
-          <div className="flex items-start justify-between gap-2">
-            <p className="flex items-center gap-1.5 text-sm font-extrabold text-amber-900">
-              <AlertTriangle className="h-4 w-4" /> 답사 시 꼭 확인하세요 (추가 비용 발생 경우의 수)
-            </p>
-            {guide.source === 'ai' ? (
-              <Pill tone="info">{busy ? 'AI가 고르는 중' : '🤖 AI 맞춤'}</Pill>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-2xs font-semibold text-ink-3">
+            {audit.source === 'ai' ? (
+              <span className="text-brand-strong">🤖 AI 감리 검증 반영{busy ? ' 중' : ''}</span>
             ) : aiOn ? (
-              <Pill tone="plain">{busy ? 'AI가 고르는 중' : '기본 가이드'}</Pill>
+              <span>{busy ? 'AI 감리 검증 중…' : '로컬 감리 기준'}</span>
             ) : (
-              <Pill tone="plain">공종별 기본</Pill>
+              '공종·현장 조건별 감리 기준'
             )}
-          </div>
-          <ul className="mt-1.5 space-y-1">
-            {tips.map((t, i) => (
-              <li key={i} className="flex gap-1.5 text-[13px] font-semibold leading-5 text-amber-900">
-                <span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-600" />
-                <span>{t}</span>
-              </li>
-            ))}
-          </ul>
-          {guide.comment ? (
-            <p className="mt-2 rounded-lg bg-white/70 px-2.5 py-2 text-2xs font-semibold leading-4 text-amber-900">
-              🤖 {guide.comment}
-            </p>
-          ) : null}
-          <p className="mt-2 text-2xs font-bold leading-4 text-amber-800">
-            이 중 하나라도 걸리면 견적이 올라갑니다. 확인한 내용은 3. 답사에 적으면 바로 반영됩니다.
-            {aiOn ? (
-              <button type="button" onClick={retry} className="ml-1 underline underline-offset-2">
-                AI로 다시 뽑기
-              </button>
-            ) : null}
           </p>
+          {aiOn ? (
+            <button type="button" onClick={retry} className="text-2xs font-bold text-brand underline underline-offset-2">
+              AI로 다시 검증
+            </button>
+          ) : null}
         </div>
 
-        <p className="mt-2.5 text-xs leading-5 text-ink-2">{verify.advice}</p>
         <p className="mt-1 text-2xs text-ink-4">
-          근거: 2026 하반기 대한건설협회 노임(철거공 261,108원·타일공 294,379원) · 2026.1.1 건설폐기물 중간처리단가(혼합 72,721원/톤) · 우리 실견적 419건 DB
+          근거: 2026 하반기 대한건설협회 노임(철거공 261,108원·타일공 294,379원) · 2026.1.1 건설폐기물 중간처리단가(혼합 72,721원/톤·폐보드 192,887원/톤) · 우리 실견적 419건 DB
         </p>
       </div>
     </Card>

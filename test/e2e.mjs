@@ -102,6 +102,18 @@ const SURVEY_JSON = {
   ],
   signal: { level: 'red', title: '포기·패스 권장 (적자 또는 하자·분쟁 리스크)', reason: '답사 후 원가가 희망가를 넘었습니다' },
 };
+// 전문가 감리 검증(AI) 모킹 응답 — 독립 리포트가 화면에 붙는지 확인하는 표식
+const EXPERT_AUDIT_JSON = {
+  headline: 'AI 감리: 시장 중상단, 자재 근거를 문서로 남겨야',
+  summary: 'AI 감리 총평: 같은 조건 실견적 대비 중상단입니다. 상판 실측과 폐기물 성상을 먼저 확정하세요.',
+  market: 'AI 시장 의견: 3.2m 기준 300~450만이 일반적, 400만은 자재 등급을 보여주면 설명됩니다.',
+  risks: [
+    { title: 'AI 감리 · 상판 실측 오차', why: 'AI 판단: 가공 후 수전 홀 변경 불가, 재구매 40~80만', cost: '40~80만', action: '실측 확정 후 발주', severity: 'high' },
+    { title: 'AI 감리 · 폐기물 성상', why: 'AI 판단: 혼합 반출 시 처리비 2.6배', cost: '톤당 +12만', action: '성상 분리 반출', severity: 'mid' },
+  ],
+  contract: ['AI 계약 방어: 추가 작업은 4가지(사진·사유·금액·일정) 문자 합의 후 진행', 'AI 계약 방어: 잔금 20% 이상, 준공 검수 후 지급'],
+};
+
 // 답사 가이드(AI) 모킹 응답 — AI 연동 여부를 눈으로 확인하려고 표식을 넣는다.
 const AI_GUIDE_JSON = {
   rows: [
@@ -526,6 +538,8 @@ async function main() {
       payload = { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_1PX } }] } }] };
     } else if (text.includes('답사 기록')) {
       payload = { candidates: [{ content: { parts: [{ text: JSON.stringify(SURVEY_JSON) }] } }] };
+    } else if (text.includes('현장 감리')) {
+      payload = { candidates: [{ content: { parts: [{ text: '```json\n' + JSON.stringify(EXPERT_AUDIT_JSON) + '\n```' }] } }] };
     } else if (text.includes('답사 코치')) {
       payload = { candidates: [{ content: { parts: [{ text: '```json\n' + JSON.stringify(AI_GUIDE_JSON) + '\n```' }] } }] };
     } else if (text.includes('JSON만 답해')) {
@@ -599,17 +613,74 @@ async function main() {
     await shot('30-info.png');
   });
 
+  await step('사진 선택 — 갤럭시 갤러리 호환(accept=image/*)', async () => {
+    const bad = [];
+    for (let n = 1; n <= 6; n += 1) {
+      await goTab(n);
+      const list = await page.evaluate(() =>
+        [...document.querySelectorAll('input[type=file]')].map((el) => ({
+          accept: el.getAttribute('accept'),
+          capture: el.getAttribute('capture'),
+          label: el.getAttribute('aria-label') || '',
+        }))
+      );
+      list.forEach((x) => {
+        if (x.accept !== 'image/*' || x.capture) bad.push(`${n}단계:${x.label}:${x.accept}:${x.capture}`);
+      });
+    }
+    record('사진: 업로드 input 전부 accept=image/* 단독·capture 없음', bad.length === 0, bad.join(' | ') || '6단계 전수');
+    await goTab(1);
+  });
+
   await step('2단계 가견적', async () => {
     await goTab(2);
     const t = await mainText();
     record('가견적: 1차 가견적 히어로', t.includes('1차 가견적 (답사 전 · 변동 가능)'));
-    record('가견적: 3자 시세 검증', t.includes('2026 최신 시세 3자 검증'));
-    record('가견적: 3자 검증 확인 포인트', t.includes('답사 시 꼭 확인하세요'));
+    record('가견적: 전문가 검증 리포트(독립)', t.includes('전문가 검증 리포트') && t.includes('독립 벤치마크'));
+    record(
+      '가견적: 시장 호가 밴드(최저·평균·고급)',
+      t.includes('시장 최저') && t.includes('시장 평균') && t.includes('시장 고급') && /적정선|시장 상단|저가 수주 주의|고가 이탈 주의/.test(t) && /시장 \d[\d,]*~\d[\d,]*만/.test(t)
+    );
+    const riskCount = await page.getByTestId('risk-item').count();
+    record('가견적: 숨은 함정 리스크 2~3건', t.includes('숨은 함정 리스크 감사') && riskCount >= 2 && riskCount <= 3, `${riskCount}건`);
+    record('가견적: 계약 방어 팁 1~2줄', t.includes('계약 방어') && (t.includes('문자로 합의') || t.includes('잔금은 20%')));
+    record('가견적: 가견적 계산 반복 없음', !t.includes('보수적 여유') && !t.includes('권장가(같은 마진 기준)'));
     record('가견적: 답사 가이드 중복 없음(3단계로 일원화)', !t.includes('답사 시 왜·뭘 확인해야 하나'));
     record('가견적: 스타일·자재(욕실)', t.includes('스타일·자재 정하기') && t.includes('추천 자재 세트'));
     record('가견적: 입력칸 제거', !t.includes('무엇을 하는지 적어주세요') && !(await page.getByLabel('받은 내용').count()));
     record('가견적: 신호등 배지', /🟢|🟡|🔴/.test(t) && (t.includes('적극 추천') || t.includes('해볼 만함') || t.includes('비추천')));
     await shotAt('31-estimate.png', '1차 가견적', -120);
+  });
+
+  await step('2단계 — 내가 부를 가견적·숨고 멘트', async () => {
+    await goTab(2);
+    const input = page.getByLabel('내가 부를 가견적(만원)');
+    record('가견적 호가: 상단 입력칸', (await input.count()) === 1);
+    const appPrice = Number((await input.inputValue()) || 0);
+    record('가견적 호가: 기본값 = 앱 계산가', appPrice > 0, String(appPrice));
+    const before = await page.getByTestId('sugo-msg').innerText();
+    record(
+      '숨고 멘트: 업체·금액·범위·실측 유도',
+      before.includes('견적 금액') && before.includes(appPrice.toLocaleString('ko-KR')) && before.includes('실측') && before.includes('안녕하세요')
+    );
+    record('숨고 멘트: 내부 원가·순익 없음', !['원가', '순익', '마진', '알선료', '예비비', '남는'].some((w) => before.includes(w)));
+
+    const heroBefore = await page.locator('main').innerText();
+    const called = appPrice - 30;
+    await input.fill(String(called));
+    await page.waitForTimeout(450);
+    const after = await page.getByTestId('sugo-msg').innerText();
+    record('숨고 멘트: 금액 즉시 변경', after.includes(called.toLocaleString('ko-KR')) && !after.includes(` ${appPrice.toLocaleString('ko-KR')}만원`), `${called}만`);
+    const heroAfter = await page.locator('main').innerText();
+    record('가견적 호가: 순익·신호등 연동', heroBefore !== heroAfter && heroAfter.includes('보수적 남는 돈'));
+
+    await page.getByRole('button', { name: /숨고 멘트 복사/ }).click();
+    await page.waitForTimeout(350);
+    record('숨고 멘트: 1탭 복사', (await page.getByText('숨고 견적 멘트를 복사했습니다').count()) >= 1);
+
+    await page.getByRole('button', { name: '앱 계산가로', exact: true }).click();
+    await page.waitForTimeout(350);
+    record('가견적 호가: 앱 계산가로 원복', (await input.inputValue()) === String(appPrice), await input.inputValue());
   });
 
   await step('단계 이동 시 맨 위로', async () => {
@@ -894,7 +965,7 @@ async function main() {
     await goTab(2);
     const est = await mainText();
     record('철거: 가견적에 스타일·자재 카드 없음', !est.includes('스타일·자재 정하기') && !est.includes('추천 자재 세트'));
-    record('철거: 3자 검증은 그대로', est.includes('2026 최신 시세 3자 검증'));
+    record('철거: 전문가 검증 리포트(3자 감사)는 그대로', est.includes('전문가 검증 리포트') && est.includes('시장 호가 비교'));
     record('철거: 가견적에 답사 가이드 중복 없음', !est.includes('답사 시 왜·뭘 확인해야 하나'));
     record('실견적 근거 419건 DB', est.includes('우리 실견적 419건 DB') && !est.includes('실견적 60건'));
     await goTab(3);
@@ -1363,6 +1434,18 @@ async function main() {
     record('AI: 분석 카드 저장', aiInfo.includes('🤖 AI 정밀 분석'));
     record('AI: 원가 산출 근거', aiInfo.includes('AI 원가 산출 근거') && aiInfo.includes('주방 기공 2명'));
     record('AI: 누락 비용 → 맞춤 체크', aiInfo.includes('희망사항:'));
+  });
+
+  await step('Gemini — 전문가 감리 검증(독립 리포트)', async () => {
+    await goTab(2);
+    await page.waitForTimeout(1600);
+    const t = await mainText();
+    record('AI 감리: 반영 표시', t.includes('AI 감리 검증 반영'), t.match(/AI 감리[^\n]{0,20}/)?.[0] || '');
+    record('AI 감리: AI가 쓴 헤드라인', t.includes('AI 감리: 시장 중상단'));
+    record('AI 감리: AI 리스크 2건', (await page.getByTestId('risk-item').count()) >= 2 && t.includes('AI 감리 · 상판 실측 오차'));
+    record('AI 감리: 시장 밴드는 DB 숫자 유지', /시장 최저\s*[\d,]+/.test(t) && /시장 고급\s*[\d,]+/.test(t), (t.match(/시장 최저[\s\S]{0,12}/) || [])[0]?.replace(/\n/g, ' ') || '');
+    record('AI 감리: 계약 방어 문구', t.includes('AI 계약 방어'));
+    await goTab(1);
   });
 
   await step('After 미리보기 — 모킹된 이미지', async () => {

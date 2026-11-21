@@ -310,6 +310,9 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
             <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
               스샷은 글자를 읽어 내용을 채우고, 현장 사진은 글자를 읽지 않고 바로 저장합니다(AI 정밀 분석 때 사진으로 함께 봅니다).
             </p>
+            <p className="mt-1 text-[10.5px] font-semibold leading-4 text-ink-4">
+              갤럭시에서 ‘갤러리’가 안 보이면 <b>내 파일 &gt; 이미지</b>에서 골라도 똑같이 붙습니다.
+            </p>
           </div>
 
           <BigButton variant="amber" className="w-full" onClick={analyze} disabled={analyzing}>

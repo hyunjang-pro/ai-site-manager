@@ -10,6 +10,7 @@ import SignalBanner from '../SignalBanner.jsx';
 import { finalSignal, aiSignalOf } from '../../lib/budget.js';
 import { materialSetFor, materialSetsFor } from '../../lib/materials.js';
 import { hasInteriorStyle } from '../../lib/constants.js';
+import { useCalledPrice } from '../../lib/useCalledPrice.js';
 
 export default function ProfitTab({ c, update, calc, design, showToast, onOpenSettings }) {
   const listPrice = Math.round(calc.clientPrice);
@@ -23,26 +24,18 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
   const initial = Number(c.negotiation?.proposal) || listPrice;
   const [proposal, setProposal] = useState(initial);
 
-  // ---- 내가 부른 금액(손님 합의가) — 이 화면의 기준 금액 ----
-  // 저장값이 없으면 앱이 계산한 최종 견적이 기본값이다.
-  const appPrice = Math.round(calc.appClientPrice);
-  const storedCalled = c.calledPrice;
-  const noCalled = storedCalled === '' || storedCalled === null || storedCalled === undefined;
-  const [calledDraft, setCalledDraft] = useState(() => (noCalled ? String(appPrice) : String(storedCalled)));
-  useEffect(() => {
-    setCalledDraft(noCalled ? String(appPrice) : String(storedCalled));
-  }, [storedCalled, appPrice, noCalled]);
-  const commitCalled = (v) => {
-    const clean = String(v ?? '').replace(/[^0-9]/g, '').slice(0, 7);
-    setCalledDraft(clean);
-    update({ calledPrice: clean });
-  };
-  const draftNum = Number(calledDraft);
-  const effectiveCalled = String(calledDraft).trim() === '' || !Number.isFinite(draftNum) ? appPrice : Math.max(0, Math.round(draftNum));
+  // ---- 내가 부른 금액(손님 합의가) — 이 화면의 기준 금액 (2단계 가견적과 같은 저장값) ----
+  const {
+    draft: calledDraft,
+    commit: commitCalled,
+    reset: resetCalled,
+    appPrice,
+    noCalled,
+    effective: effectiveCalled,
+  } = useCalledPrice(c, calc, update);
   const nudgeCalled = (delta) => commitCalled(String(Math.max(0, effectiveCalled + delta)));
   const restoreAppPrice = () => {
-    setCalledDraft(String(appPrice));
-    update({ calledPrice: '' });
+    resetCalled();
     showToast(`앱 계산가 ${appPrice.toLocaleString('ko-KR')}만원으로 되돌렸습니다`);
   };
   const [negoOpen, setNegoOpen] = useState(false);

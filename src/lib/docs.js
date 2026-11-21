@@ -86,8 +86,8 @@ const CLIENT_COST_GROUPS = [
   { key: 'meal', name: '식비', desc: '현장 인력 식대', unit: '명·일' },
   { key: 'travel', name: '원거리 교통비', desc: '현장 거리 기준 추가 운행비', unit: '식' },
   { key: 'waste', name: '폐기물 처리·운반비', desc: '철거 폐기물 상차·운반·처리', unit: '대' },
-  { key: 'equip', name: '장비 사용료', desc: '사다리차·집게차 등 장비 사용', unit: '식' },
-  { key: 'extra', name: '현장 추가 공사', desc: '답사에서 확인된 추가 작업', unit: '식' },
+  { key: 'equip', name: '장비·운반비', desc: '사다리차·집게차·자재 운반', unit: '식' },
+  { key: 'extra', name: '현장 조건 반영', desc: '보양·신고·거주 중 관리 등', unit: '식' },
 ];
 
 export function allocateClientLines(trade, calc, c) {
@@ -113,15 +113,16 @@ export function allocateClientLines(trade, calc, c) {
   const crew = calc?.crewCosts || {};
   const crewDays = Math.max(0, Math.round((Number(crew.days) || 0) * 10) / 10);
   const money = (i) => (Number(i.amount) || 0) > 0;
+  const catOf = (i) => String(i.category || '');
   const weights = {
-    material: sumBy((i) => i.category === '자재' && money(i)),
+    material: sumBy((i) => catOf(i) === '자재' && money(i)),
     // '교통비 · 식비'는 아래 식비·교통비 줄로 따로 나눈다
-    labor: sumBy((i) => i.category === '노무' && i.id !== 'crew_cost'),
+    labor: sumBy((i) => catOf(i) === '노무' && i.id !== 'crew_cost'),
     meal: Math.max(0, Number(crew.mealCost) || 0),
     travel: Math.max(0, Number(crew.travelCost) || 0),
-    waste: sumBy((i) => i.category === '폐기물'),
-    equip: sumBy((i) => i.category === '장비' && money(i)),
-    extra: sumBy((i) => /^추가/.test(String(i.category || '')) && money(i)),
+    waste: sumBy((i) => (catOf(i) === '폐기물' || catOf(i) === '추가(폐기물)') && money(i)),
+    equip: sumBy((i) => (catOf(i) === '장비' || catOf(i) === '추가(운반)') && money(i)),
+    extra: sumBy((i) => /^추가\((현장|디테일|규제|구조|공고)\)$/.test(catOf(i)) && money(i)),
   };
   const live = CLIENT_COST_GROUPS.filter((g) => weights[g.key] > 0);
   if (!live.length || price <= 0) {
@@ -143,6 +144,11 @@ export function allocateClientLines(trade, calc, c) {
     if (key === 'meal') return crewDays ? `현장 인력 식대 (연인원 ${crewDays}명·일 기준)` : '현장 인력 식대';
     if (key === 'travel') return distanceKm ? `현장 거리 ${distanceKm}km 기준 운행비` : '현장 운행비';
     if (key === 'waste') return `폐기물 상차·운반·처리 (${trucks}대 기준)`;
+    if (key === 'equip') return '사다리차·집게차·자재 운반';
+    if (key === 'extra') {
+      const names = [...new Set(items.filter((i) => /^추가\((현장|디테일|규제|구조|공고)\)$/.test(catOf(i)) && money(i)).map((i) => i.name))].slice(0, 3);
+      return names.length ? names.join(' · ') : '답사에서 확인된 현장 조건';
+    }
     return null;
   };
   // 수량·단가는 실제로 믿을 수 있는 곳(폐기물 차량 대수)만 적는다.
@@ -575,6 +581,51 @@ export function strengthLines(c, calc, completedCases = []) {
     lines.push('철거부터 마감까지 같은 팀이 책임지고, 일정과 금액을 문자로 남겨 두고 진행합니다.');
   }
   return lines;
+}
+
+// 숨고·카톡 '견적 보내기'에 그대로 붙여넣는 멘트 — 금액은 내가 부른 금액 기준, 내부 원가·순익은 절대 넣지 않는다.
+export function sugoQuoteMessage(c, calc) {
+  const sup = getSupplier();
+  const biz = sup.name || c?.businessName || '철거·인테리어 전문';
+  const label = tradeLabelOf(c, calc);
+  const size = sizeText(c);
+  const place = String(c?.location || c?.region || '').trim();
+  const price = Math.round(Number(calc?.finalPrice) || 0);
+  const items = (calc?.items || []).filter((i) => !i.excluded && Number(i.amount) !== 0);
+  const has = (pred) => items.some(pred);
+  const include = [
+    has((i) => i.category === '폐기물') ? '폐기물 반출·처리' : '',
+    has((i) => i.category === '자재') ? '자재·부자재' : '',
+    has((i) => i.category === '노무') ? '기공·보조 인력' : '',
+    Number(calc?.lifting?.cost) > 0 ? '자재 양중·운반' : '',
+    has((i) => i.id === 'clean') || c?.survey?.afterCare ? '준공 정리·청소' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ') || '자재·인력 포함';
+  const trade = calc?.trade;
+  // 별도(제외) 항목은 고객이 읽기 짧게 — 손님이 뺀 공종 + 이 공종에서 실제로 붙는 것만
+  const excluded = [];
+  if ((c?.excludedScopes || []).some((x) => x === 'window')) excluded.push('창호');
+  if (['demolition', 'combined', 'bathroom', 'tilewaterproof'].includes(trade)) excluded.push('석면 발견 시 조사·처리');
+  if (trade === 'demolition') excluded.push('가전·가구 등 생활폐기물');
+  excluded.splice(2);
+  const days = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
+  const lines = [
+    `안녕하세요, ${biz}입니다.`,
+    `${place ? `${place} ` : ''}${size} ${label} 요청 주신 내용으로 견적 드립니다.`,
+    '',
+    `· 견적 금액: ${won(price)} (${c?.includeVat ? '부가세 포함' : '부가세 별도'})`,
+    `· 공사 범위: ${calc?.clientSummary || calc?.targetSummary || label}`,
+    `· 포함: ${include}`,
+  ];
+  if (excluded.length) lines.push(`· 별도: ${excluded.join(' / ')}`);
+  lines.push(`· 공사 기간: ${days}일 내외 (실측 후 확정)`);
+  lines.push('');
+  lines.push('가견적이라 현장 상태(철거 범위·자재 수급)에 따라 조금 달라질 수 있습니다.');
+  lines.push('실측 가능하신 시간 알려주시면 정확한 금액으로 다시 보내드리겠습니다.');
+  lines.push('추가 작업은 사진·사유·금액·일정을 문자로 합의한 뒤 진행합니다.');
+  if (trade === 'bathroom' || trade === 'tilewaterproof') lines.push('방수는 담수 48시간 확인 후 타일 시공합니다.');
+  return lines.join('\n');
 }
 
 // 견적 안내 문자 — 손님에게 바로 보낼 수 있는 짧은 문자
