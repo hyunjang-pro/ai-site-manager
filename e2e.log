@@ -279,7 +279,7 @@ PASS  탐색: 목록에서 새 flash 모델 선택 — 연결됨 · gemini-3.0-f
 PASS  503: 다음 모델로 자동 전환 — 연결됨 · gemini-2.0-flash
 PASS  503: 과부하 모델부터 시도함 — gemini-2.5-flash → gemini-2.5-flash-latest → gemini-2.0-flash
 PASS  503: 실패로 끝나지 않음 — 없음
-PASS  503: 막힌 모델을 쿨다운에 기록 — {"fp":"17ow9yf-14","until":{"gemini-2.5-flash":1795240173668,"gemini-2.5-flash-latest":179
+PASS  503: 막힌 모델을 쿨다운에 기록 — {"fp":"17ow9yf-14","until":{"gemini-2.5-flash":1795240692071,"gemini-2.5-flash-latest":179
 PASS  503: 재시도 때 503 모델은 건너뜀 — gemini-2.0-flash
 PASS  503: 재시도도 연결됨 — 연결됨 · gemini-2.0-flash
 PASS  설정: 업체 상호 입력칸 1개 — 1

@@ -302,7 +302,8 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
         </div>
       </SectionCard>
 
-      <WeatherStrip region={c.region} startDate={startDate} days={workDays} />
+      {/* 날짜를 넣기 전에는 날씨 카드도 띄우지 않는다 — '날짜 미정'만 두 번 보이면 헷갈린다 */}
+      {startDate ? <WeatherStrip region={c.region} startDate={startDate} days={workDays} /> : null}
 
       {/* 2. 공종별 타임라인 */}
       <Card className="p-4">

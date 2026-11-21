@@ -62,8 +62,8 @@ export default function LockScreen({ onUnlock }) {
           ))}
         </div>
 
-        <p className={cx('mt-3 h-5 text-center text-xs font-bold', error ? 'text-rose-600' : 'text-transparent')}>
-          비밀번호가 맞지 않습니다
+        <p className={cx('mt-3 h-5 text-center text-xs font-bold', error ? 'text-rose-600' : 'invisible')} aria-live="polite">
+          {error ? '비밀번호가 맞지 않습니다' : ''}
         </p>
 
         <div className="mx-auto mt-1 grid w-[264px] grid-cols-3 gap-x-6 gap-y-4">
