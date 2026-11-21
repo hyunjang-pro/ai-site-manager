@@ -1,5 +1,6 @@
 // 저장·예시 데이터 — LocalStorage 자동 저장
 import { STORAGE_KEY, TRADES } from './constants.js';
+import { autoCaseTitle } from './classify.js';
 import { emptyWasteScopes } from './waste.js';
 import { DEFAULT_RATES, cloneRates, mergeRates } from './rates.js';
 import { kstToday } from './date.js';
@@ -269,19 +270,42 @@ const SEED_CASES = [
   }),
 ];
 
+// 저장 파일이 오래됐거나 일부가 깨져도 앱이 죽지 않게, 예전 현장은 지금 기본값으로 한 번 덮어 읽는다.
+// (배열·객체 자리에 문자열이 들어간 경우가 실제로 있었다 — 그대로 쓰면 화면이 하얗게 죽는다)
+function sanitizeStoredCase(c, rates) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+  const base = baseCase({ trade: TRADES[c.trade] ? c.trade : 'demolition' });
+  const merged = { ...base, ...c };
+  ['waste', 'asbestos', 'lifting', 'design', 'customPlan', 'tileWork', 'plaster', 'dispatch', 'gates', 'subsidyApplicant', 'negotiation', 'paymentPlan'].forEach((k) => {
+    if (!merged[k] || typeof merged[k] !== 'object' || Array.isArray(merged[k])) merged[k] = base[k];
+  });
+  ['survey', 'surveyAmounts', 'orderChecks', 'subsidyCheck', 'evidence', 'preview'].forEach((k) => {
+    if (!merged[k] || typeof merged[k] !== 'object' || Array.isArray(merged[k])) merged[k] = base[k];
+  });
+  ['photos', 'subScopes', 'customChecklist', 'excludedScopes', 'changeLogs', 'extraWorks', 'excludedWorks', 'excludedItems', 'crew'].forEach((k) => {
+    if (merged[k] !== undefined && !Array.isArray(merged[k])) merged[k] = base[k] || [];
+  });
+  if (!merged.id) merged.id = base.id;
+  if (!TRADES[merged.trade]) merged.trade = 'unclassified';
+  if (typeof merged.sizeValue === 'number') merged.sizeValue = String(merged.sizeValue);
+  if (!merged.title) merged.title = '이름 없는 현장';
+  merged.unitPriceSnapshot = merged.unitPriceSnapshot && typeof merged.unitPriceSnapshot === 'object'
+    ? mergeRates(DEFAULT_RATES, merged.unitPriceSnapshot)
+    : mergeRates(DEFAULT_RATES, rates || {});
+  return merged;
+}
+
 export function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.cases) && parsed.cases.length > 0) {
-        const settings = { ...defaultState().settings, ...(parsed.settings || {}) };
+      if (parsed && Array.isArray(parsed.cases)) {
+        const settings = { ...defaultState().settings, ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}) };
         // 예전에 저장된 현장은 지금 설정 단가를 한 번 복사해 고정한다 (이후 설정 변경에 영향 없음)
-        const cases = parsed.cases.map((c) => ({
-          ...c,
-          unitPriceSnapshot: c.unitPriceSnapshot || mergeRates(DEFAULT_RATES, settings.rates || {}),
-        }));
-        return { ...defaultState(), ...parsed, settings, cases };
+        const cases = parsed.cases.map((c) => sanitizeStoredCase(c, settings.rates)).filter(Boolean);
+        if (cases.length > 0) return { ...defaultState(), ...parsed, settings, cases };
+        // 저장은 있는데 현장이 전부 깨졌다면 — 빈 장부가 아니라 예시로 되살린다
       }
     }
   } catch (e) {
@@ -316,6 +340,24 @@ export function resetState() {
     // ignore
   }
   return defaultState();
+}
+
+// 새 현장 만들기 — 화면 미리보기와 실제 장부 등록이 '같은 계산'을 쓰도록 한 곳에서 만든다.
+// (만들 때 본 금액과 2단계 가견적 금액이 다르게 보이던 문제의 원인 제거)
+export function composeCase({ trade = 'demolition', patch = {}, settings = {} } = {}) {
+  const created = newCase(trade, settings.rates);
+  created.region = settings.region || '안동';
+  created.agencyFeeRate = settings.agencyFeeRate ?? 10;
+  const clean = Object.fromEntries(Object.entries(patch || {}).filter(([, v]) => v !== undefined));
+  const merged = { ...created, ...clean };
+  if (!clean.title) {
+    const size = clean.sizeValue ? `${clean.sizeValue}${clean.sizeUnit || ''}` : '';
+    merged.title =
+      autoCaseTitle({ ...merged, region: clean.region || created.region }) ||
+      `${clean.region || created.region} ${size} ${TRADES[trade]?.label || '새 현장'}`.replace(/\s+/g, ' ').trim();
+  }
+  merged.titleAuto = true;
+  return merged;
 }
 
 export function newCase(trade = 'demolition', rates = null) {

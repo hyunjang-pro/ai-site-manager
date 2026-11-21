@@ -318,7 +318,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
       </Card>
 
       {/* 원가·마진·수금 — 항상 펼쳐 둔다 */}
-      <SectionCard num="2" title="원가·마진·수금 조절" subtitle="여기 숫자를 바꾸면 3단계 입금 카드와 홈 장부 금액까지 함께 바뀝니다.">
+      <SectionCard fold num="2" title="원가·마진·수금 조절" subtitle="여기 숫자를 바꾸면 3단계 입금 카드와 홈 장부 금액까지 함께 바뀝니다.">
         <div className="space-y-3">
           <Field label={`남는 비율 ${c.marginRate}%`} hint="고객에게 받는 금액 = 원가 ÷ (1 − 남는 비율)">
             <input
@@ -535,7 +535,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
       ) : null}
 
       {/* 네고 시뮬레이터 */}
-      <SectionCard num="3" title="고객이 깎자고 할 때" subtitle="숫자를 바꾸면 남는 돈이 바로 바뀝니다. 가격만 깎지 말고 범위·자재로 맞추세요.">
+      <SectionCard fold num="3" title="고객이 깎자고 할 때" subtitle="숫자를 바꾸면 남는 돈이 바로 바뀝니다. 가격만 깎지 말고 범위·자재로 맞추세요.">
         <div className="space-y-3">
           <Field label="고객이 부른 금액 (만원)">
             <TextInput

@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, ImagePlus, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { SIZE_UNITS, TRADES, TRADE_LIST } from '../lib/constants.js';
 import { classifyRequest, summarizeRequest } from '../lib/classify.js';
+import { computeEstimate } from '../lib/pricing.js';
+import { composeCase } from '../lib/storage.js';
 import { analyzeCaseWithGemini, getGeminiKey } from '../lib/gemini.js';
 import { ocrAnalyzeWithTimeout, scenePhotoNote } from '../lib/ocr.js';
 import { fileToThumb } from '../lib/image.js';
 import { AlertCard, BigButton, Details, Modal, Pill, Select, TextArea, TradeIcon, cx } from './ui.jsx';
 
-export default function NewCaseModal({ open, onClose, onCreate }) {
+export default function NewCaseModal({ open, onClose, onCreate, settings }) {
   const [step, setStep] = useState('input'); // input | result
   const [text, setText] = useState('');
   const [photos, setPhotos] = useState([]); // {file, url, thumb}
@@ -23,6 +25,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
   const [error, setError] = useState('');
   const fileRef = useRef(null);
   const aiOn = !!getGeminiKey();
+  const info = TRADES[trade] || TRADES.unclassified;
 
   useEffect(() => {
     if (!open) {
@@ -78,7 +81,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           const rows = [
             { label: '공종', value: TRADES[a.trade]?.label || '직접 입력' },
             a.sizeValue ? { label: '규모', value: `${a.sizeValue}${a.sizeUnit || ''}` } : null,
-            a.priceRange?.max > 0 ? { label: 'AI 범위', value: `${a.priceRange.min}~${a.priceRange.max}만` } : null,
+            a.priceRange?.max > 0 ? { label: 'AI 참고 시세', value: `${a.priceRange.min}~${a.priceRange.max}만` } : null,
           ].filter(Boolean);
           setSceneNote('');
           setResult({
@@ -155,7 +158,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
           const rows = [
             { label: '공종', value: TRADES[a.trade]?.label || '직접 입력' },
             a.sizeValue ? { label: '규모', value: `${a.sizeValue}${a.sizeUnit || ''}` } : null,
-            a.priceRange?.max > 0 ? { label: 'AI 범위', value: `${a.priceRange.min}~${a.priceRange.max}만` } : null,
+            a.priceRange?.max > 0 ? { label: 'AI 참고 시세', value: `${a.priceRange.min}~${a.priceRange.max}만` } : null,
           ].filter(Boolean);
           setResult({
             trade: a.trade,
@@ -198,16 +201,20 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
       setElevator(r.patch.lifting?.elevator || 'unknown');
       setStep('result');
     } catch (e) {
-      setError(e.message || '사진 글자를 읽지 못했습니다. 직접 입력해 주세요.');
+      // 영어 라이브러리 오류문을 부모님께 그대로 보여주지 않는다
+      const msg = String(e?.message || '');
+      setError(
+        /[가-힣]/.test(msg) ? msg : '사진 글자를 읽지 못했습니다. 요청 내용을 한 줄만 적어주시면 공종·규모를 잡아 드립니다.'
+      );
     } finally {
       setProgress(null);
     }
   };
 
-  const create = () => {
+  // 만들 때 넘길 값을 한 곳에서 만든다 — 미리보기 금액과 실제 등록 금액이 같은 값을 쓴다.
+  const draftPatch = () => {
     const base = result?.patch || { rawInput: text, notes: text, parseHints: [] };
-    const info = TRADES[trade] || TRADES.unclassified;
-    onCreate(trade, {
+    return {
       ...base,
       trade,
       sizeValue,
@@ -215,7 +222,22 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
       lifting: { ...(base.lifting || {}), floor: floor || '', elevator },
       title: result?.title && trade === result.trade ? result.title : undefined,
       photos: photos.map((p) => p.thumb),
-    });
+    };
+  };
+
+  // 이 내용으로 만들면 2. 가견적에 뜨는 금액 — 같은 함수(composeCase + computeEstimate)로 미리 계산한다.
+  const draftCalc = useMemo(() => {
+    if (step !== 'result') return null;
+    try {
+      return computeEstimate(composeCase({ trade, patch: draftPatch(), settings: settings || {} }));
+    } catch (e) {
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, result, trade, sizeValue, sizeUnit, floor, elevator, photos, text, settings]);
+
+  const create = () => {
+    onCreate(trade, draftPatch());
     onClose();
   };
 
@@ -388,6 +410,18 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
         </div>
       ) : (
         <div className="space-y-4">
+          {draftCalc ? (
+            <div data-testid="draft-quote" data-amount={Math.round(draftCalc.finalPrice)} className="rounded-2xl bg-ink px-4 py-3 text-white shadow-float">
+              <p className="text-2xs font-bold text-blue-200">이 내용으로 만들면 · 2. 가견적과 같은 금액</p>
+              <p className="num mt-0.5 text-[26px] font-black leading-8">
+                {Math.round(draftCalc.finalPrice).toLocaleString('ko-KR')}
+                <span className="ml-1 text-sm font-bold text-blue-200">만원</span>
+              </p>
+              <p className="mt-0.5 text-2xs font-semibold leading-4 text-blue-200/90">
+                부가세 별도 · 예비비 {draftCalc.bufferRate}% 포함 · {draftCalc.targetSummary}
+              </p>
+            </div>
+          ) : null}
           {sceneNote ? (
             <p className="flex items-start gap-1.5 rounded-xl bg-slate-100 px-3 py-2.5 text-[13px] font-semibold leading-5 text-ink-2">
               <ScanText className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
@@ -412,7 +446,7 @@ export default function NewCaseModal({ open, onClose, onCreate }) {
               ) : null}
               {result.patch.aiAnalysis.priceRange?.max > 0 ? (
                 <p className="mt-0.5">
-                  보수적 범위: {result.patch.aiAnalysis.priceRange.min}~{result.patch.aiAnalysis.priceRange.max}만 (부가세 별도)
+                  AI가 본 시세(참고): {result.patch.aiAnalysis.priceRange.min}~{result.patch.aiAnalysis.priceRange.max}만 (부가세 별도)
                 </p>
               ) : null}
             </AlertCard>

@@ -1,4 +1,5 @@
 import { hasScope } from './constants.js';
+import { needsLadder } from './pricing.js';
 // 공사순서·선행조건 잠금 게이트
 export const LEAK_PRECEDENT_WARNING =
   '아래층 누수 배상 판례: 1,050,000원 ~ 60,760,533원(서울동부지법 2022나33816, 책임 70% 제한). 방수 하자보수 책임은 3년입니다.';
@@ -164,7 +165,7 @@ export function managementChecklist(c, trade) {
       id: 'ladder',
       label: '사다리차 설치 승인',
       hint: '자재·폐기물을 창밖으로 내릴 때',
-      applicable: ladderPossible && lift.elevator !== 'yes' && !wasteOnly,
+      applicable: ladderPossible && lift.elevator !== 'yes' && !wasteOnly && needsLadder(c),
       skipWhy: wasteOnly
         ? '폐기물·인력 단독 현장'
         : lift.elevator === 'yes'

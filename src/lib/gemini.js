@@ -215,14 +215,25 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
   }
 }
 
-async function readApiError(res) {
+// 구글 응답·오류 문장에 키가 섞여 돌아오는 경우가 있어, 화면·로그로 나가기 전에 지운다.
+export function scrubSecret(text, apiKey = '') {
+  let out = String(text || '');
+  const key = String(apiKey || '').trim();
+  if (key) out = out.split(key).join('[키 숨김]');
+  return out
+    .replace(/key=[^&\s"']+/gi, 'key=[키 숨김]')
+    .replace(/AIza[0-9A-Za-z_\-]{10,}/g, '[키 숨김]')
+    .slice(0, 200);
+}
+
+async function readApiError(res, apiKey = '') {
   try {
     const text = await res.text();
     try {
       const json = JSON.parse(text);
-      return String(json?.error?.message || '').slice(0, 200);
+      return scrubSecret(json?.error?.message || '', apiKey);
     } catch (e) {
-      return String(text || '').slice(0, 200);
+      return scrubSecret(text, apiKey);
     }
   } catch (e) {
     return '';
@@ -240,10 +251,10 @@ async function postGenerate(apiKey, model, body, timeoutMs = 25000, version = ''
       timeoutMs
     );
   } catch (e) {
-    return { ok: false, model, reason: e?.name === 'AbortError' ? 'timeout' : e?.message || 'network', status: 0, notFound: false };
+    return { ok: false, model, reason: e?.name === 'AbortError' ? 'timeout' : scrubSecret(e?.message || 'network', apiKey), status: 0, notFound: false };
   }
   if (!res.ok) {
-    const detail = await readApiError(res);
+    const detail = await readApiError(res, apiKey);
     return { ok: false, model, reason: `gemini_http_${res.status}`, status: res.status, detail, notFound: res.status === 404 };
   }
   let data;

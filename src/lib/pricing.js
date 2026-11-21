@@ -124,6 +124,26 @@ export function detailSurcharge(c) {
   return { rows, rate, days };
 }
 
+// 사다리차가 실제로 필요한 현장인지 — 기본은 꺼짐(제안하지 않음).
+// 엘리베이터가 있으면 필요 없고, 창호·철거처럼 부피 큰 자재·폐기물을 내릴 때(2층 이상)나
+// 5층 이상 고층에서 자재를 올릴 때만 후보로 보여준다.
+export function needsLadder(c) {
+  const lift = c?.lifting || {};
+  if (lift.ladderAllowed === 'no') return false;
+  if (lift.elevator === 'yes') return false;
+  const floor = Math.max(0, parseInt(lift.floor, 10) || 0);
+  const trade = TRADES[c?.trade] ? c.trade : 'unclassified';
+  const scopes = Array.isArray(c?.subScopes) ? c.subScopes : [];
+  const bulky =
+    trade === 'window' ||
+    trade === 'demolition' ||
+    trade === 'waste' ||
+    scopes.includes('window') ||
+    scopes.includes('demolition');
+  if (bulky) return floor >= 2;
+  return floor >= 5;
+}
+
 // 양중·반출 4문항 → 옵션별 실비 (만원)
 export function computeLifting(c, ratesIn) {
   const rates = ratesIn || ratesOf(c);
@@ -145,7 +165,14 @@ export function computeLifting(c, ratesIn) {
   const wage = getRate(rates, ['labor', 'helper'], 19);
   const truckUnit = getRate(rates, ['waste', 'truck1'], 42.5);
   const carryPeople = Math.max(1, parseInt(lift.carryPeople, 10) || Math.max(1, Math.ceil((floor || 2) / 2)));
-  const truckCount = Math.max(1, parseInt(lift.truckCount, 10) || Math.max(1, Math.ceil(tons / 1.5)));
+  // 트럭은 철거재·폐기물이 실제로 나오는 현장만 — 도배·창호·필름은 사람이 들고 내린다
+  const carryTrade = TRADES[c?.trade] ? c.trade : 'unclassified';
+  const carryScopes = Array.isArray(c?.subScopes) ? c.subScopes : [];
+  const needsTruck =
+    ['demolition', 'waste', 'bathroom', 'tilewaterproof'].includes(carryTrade) ||
+    carryScopes.includes('demolition') ||
+    carryScopes.includes('bathroom');
+  const truckCount = needsTruck ? Math.max(1, parseInt(lift.truckCount, 10) || Math.max(1, Math.ceil(tons / 1.5))) : 0;
   const carryComputed = Math.round(carryPeople * wage + truckCount * truckUnit);
   const carryManual = manual(lift.carryAmount);
   const carryCost = carryManual !== null ? carryManual : carryComputed;
@@ -172,15 +199,22 @@ export function computeLifting(c, ratesIn) {
       detail: '단지 규정 사용료(기본 5.5만, 고층 15~30만)',
     });
   }
-  if (elevator !== 'yes') {
+  // 1층 단독 현장은 계단 양중이 없다 — 직접 하차가 기본이고, 필요하면 아래에서 고른다.
+  if (elevator !== 'yes' && floor <= 1) {
+    options.push({ id: 'none', label: '1층 직접 하차(양중 없음)', cost: 0, detail: '차에서 바로 내리고 들고 들어갑니다' });
+  }
+  if (elevator !== 'yes' && floor >= 2) {
     options.push({
       id: 'carry',
-      label: `인력 반출 (인부 ${carryPeople}명 · 1톤차 ${truckCount}대)`,
+      label: truckCount ? `인력 반출 (인부 ${carryPeople}명 · 1톤차 ${truckCount}대)` : `인력 반출 (인부 ${carryPeople}명)`,
       cost: carryCost,
-      detail: `인부 ${carryPeople}명 × ${wage}만 + 1톤차 ${truckCount}대 × ${truckUnit}만 = ${carryCost}만`,
+      detail: truckCount
+        ? `인부 ${carryPeople}명 × ${wage}만 + 1톤차 ${truckCount}대 × ${truckUnit}만 = ${carryCost}만`
+        : `인부 ${carryPeople}명 × ${wage}만 = ${carryCost}만 (폐기물 차량은 별도)`,
+      editable: 'carry',
       editable: 'carry',
     });
-    if (ladderAllowed !== 'no') {
+    if (ladderAllowed !== 'no' && needsLadder(c)) {
       options.push({
         id: 'ladder_half',
         label: '사다리차 반나절',
@@ -211,7 +245,16 @@ export function computeLifting(c, ratesIn) {
     options.push({ id: 'longcarry', label: '장거리 운반(30m 이상) 추가', cost: 8, detail: '잡부 반일 추가' });
   }
 
-  const chosenId = lift.mode || (options[0] ? options[0].id : 'none');
+  // 현장 조건에 맞는 기본값을 고른다 — 엘베 있으면 엘베, 1층이면 직접 하차,
+  // 창호·철거처럼 부피 큰 반출이 고층이면 사다리차, 나머지는 인력 반출.
+  const autoMode = (() => {
+    if (elevator === 'yes') return 'elevator';
+    if (floor <= 1) return 'none';
+    if (needsLadder(c)) return floor >= 8 ? 'ladder_day' : 'ladder_half';
+    return 'carry';
+  })();
+  const hasMode = (id) => options.some((o) => o.id === id);
+  const chosenId = lift.mode && (lift.mode === 'none' || hasMode(lift.mode)) ? lift.mode : hasMode(autoMode) ? autoMode : options[0] ? options[0].id : 'none';
   const noneOption = { id: 'none', label: '직접 하차(양중 없음)', cost: 0, detail: '고객이 1층에서 직접 내림' };
   const chosen = chosenId === 'none' ? noneOption : options.find((o) => o.id === chosenId) || options[0] || noneOption;
   const warnings = [];

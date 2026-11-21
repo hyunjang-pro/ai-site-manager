@@ -5,7 +5,7 @@ import { toPyung } from '../../lib/pricing.js';
 import { ratesOf } from '../../lib/rates.js';
 import { computeWaste, WASTE_SCOPES, vehicleRealCost } from '../../lib/waste.js';
 import { assessAsbestos, ASBESTOS_CLAUSE } from '../../lib/asbestos.js';
-import { parseAdjustment, PROCESS_KEYWORDS, PROCESS_TO_SURVEY, surveyDrafts } from '../../lib/parse.js';
+import { parseAdjustment, parseAdjustments, PROCESS_KEYWORDS, PROCESS_TO_SURVEY, surveyDrafts } from '../../lib/parse.js';
 import { analyzeSurveyWithGemini, getGeminiKey } from '../../lib/gemini.js';
 import { useSurveyGuide } from '../../lib/useSurveyGuide.js';
 import { ocrAnalyzeWithTimeout } from '../../lib/ocr.js';
@@ -18,6 +18,7 @@ import {
   CheckRow,
   Details,
   Field,
+  Fold,
   Pill,
   SectionCard,
   Segmented,
@@ -44,11 +45,10 @@ export default function SurveyTab({ c, update, calc, showToast }) {
 
       <SurveyGuideCard c={c} update={update} calc={calc} />
 
-      <SectionCard
-        num="3"
-        title="현장 점검 (운반·실측·폐기물)"
-        subtitle="여기서 체크한 것이 견적과 순서에 바로 반영됩니다."
-        status={<Pill tone={calc.lifting.warnings.length ? 'warn' : 'ok'}>{calc.lifting.warnings.length ? '확인 필요' : '기본'}</Pill>}
+      <Fold
+        label="현장 점검 (운반·실측·폐기물)"
+        hint="층수·엘리베이터·폐기물만 확인하면 됩니다"
+        badge={<Pill tone={calc.lifting.warnings.length ? 'warn' : 'ok'}>{calc.lifting.warnings.length ? '확인 필요' : '기본'}</Pill>}
       >
         <div className="space-y-3">
           <LiftingBlock c={c} update={update} calc={calc} />
@@ -83,7 +83,7 @@ export default function SurveyTab({ c, update, calc, showToast }) {
 
           <CustomChecklist c={c} update={update} showToast={showToast} />
         </div>
-      </SectionCard>
+      </Fold>
 
       <MissingLines c={c} update={update} calc={calc} showToast={showToast} />
     </div>
@@ -94,15 +94,14 @@ export default function SurveyTab({ c, update, calc, showToast }) {
 function SurveyGuideCard({ c, update, calc }) {
   const { aiOn, busy, guide, retry } = useSurveyGuide(c, calc, update);
   return (
-    <SectionCard
-      num="2"
-      title="답사 시 왜·뭘 확인해야 하나"
-      subtitle={
+    <Fold
+      label="답사 때 꼭 볼 것"
+      hint={
         guide.source === 'ai'
-          ? 'AI가 이 현장(공종·규모·건물·관공서 여부)에 맞춰 고른 확인 포인트입니다.'
+          ? 'AI가 이 현장에 맞춰 고른 확인 포인트 4가지입니다.'
           : '현장에서 이 4가지만 눈으로 보면, 나중에 돈이 새는 곳을 미리 막을 수 있습니다.'
       }
-      status={
+      badge={
         guide.source === 'ai' ? (
           <Pill tone="info">{busy ? 'AI 확인 중' : '🤖 AI 맞춤'}</Pill>
         ) : aiOn ? (
@@ -139,7 +138,7 @@ function SurveyGuideCard({ c, update, calc }) {
           <p className="text-2xs font-bold text-ink-3">설정에서 Gemini API 키를 연결하면 이 현장에 맞춰 AI가 다시 골라 줍니다.</p>
         )}
       </div>
-    </SectionCard>
+    </Fold>
   );
 }
 
@@ -334,7 +333,8 @@ function ChangeQuick({ c, update, calc, showToast }) {
   const sign = type === 'decrease' ? -1 : 1;
   const amountNum = Number(amount) || 0;
   const before = Math.round(calc.clientPrice);
-  const adj = parseAdjustment(memo);
+  const adjList = parseAdjustments(memo);
+  const adj = adjList[0] || null;
   const drafts = useMemo(() => surveyDrafts(memo, c, calc), [memo, c, calc]);
   const manualReady = !!memo.trim() && amountNum > 0;
   const hasPhotos = !!(c.photos && c.photos.length);
@@ -349,35 +349,44 @@ function ChangeQuick({ c, update, calc, showToast }) {
   });
   const pushUndo = (patch) => update({ ...patch, undoStack: [...stack.slice(-9), snapshot()] });
 
-  const matchLog = (log) => {
+  const matchLog = (log, a) => {
     const text = `${log.item || ''} ${log.reason || ''}`;
-    if (adj?.label && text.includes(adj.label)) return true;
-    const proc = PROCESS_KEYWORDS.find((p) => p.id === adj?.processId);
+    if (a?.label && text.includes(a.label)) return true;
+    const proc = PROCESS_KEYWORDS.find((p) => p.id === a?.processId);
     return !!proc && proc.words.some((w) => text.includes(w));
   };
 
+  // 한 번에 여러 개 빼기 — "사다리차 취소, 보양 제외"처럼 두 줄을 한 번에 처리한다.
   const cancelItem = () => {
-    const target = [...logs].reverse().find(matchLog);
-    if (target) {
-      pushUndo({ changeLogs: logs.filter((l) => l.id !== target.id) });
-      showToast(`‘${target.item}’ ${target.amount}만원을 뺐습니다`);
-      setMemo('');
+    let nextLogs = [...logs];
+    const surveyPatch = { ...(c.survey || {}) };
+    let wastePatch = c.waste ? { ...c.waste } : null;
+    const removed = [];
+    for (const a of adjList) {
+      const target = [...nextLogs].reverse().find((l) => matchLog(l, a));
+      if (target) {
+        nextLogs = nextLogs.filter((l) => l.id !== target.id);
+        removed.push(`‘${target.item}’ ${target.amount}만원`);
+        continue;
+      }
+      const surveyId = PROCESS_TO_SURVEY[a.processId];
+      if (surveyId && surveyPatch[surveyId]) {
+        surveyPatch[surveyId] = false;
+        removed.push(`‘${a.label}’ 비용`);
+        continue;
+      }
+      if (a.processId === 'waste' && wastePatch?.applyActual) {
+        wastePatch = { ...wastePatch, applyActual: false };
+        removed.push('폐기물 실비 반영');
+      }
+    }
+    if (!removed.length) {
+      showToast('뺄 항목을 찾지 못했습니다. 아래 변동 내역에서 직접 빼주세요');
       return;
     }
-    const surveyId = PROCESS_TO_SURVEY[adj?.processId];
-    if (surveyId && c.survey?.[surveyId]) {
-      pushUndo({ survey: { ...c.survey, [surveyId]: false } });
-      showToast(`‘${adj.label}’ 비용을 견적에서 뺐습니다`);
-      setMemo('');
-      return;
-    }
-    if (adj?.processId === 'waste' && c.waste?.applyActual) {
-      pushUndo({ waste: { ...c.waste, applyActual: false } });
-      showToast('폐기물 실비 반영을 껐습니다');
-      setMemo('');
-      return;
-    }
-    showToast('뺄 항목을 찾지 못했습니다. 아래 변동 내역에서 직접 빼주세요');
+    pushUndo({ changeLogs: nextLogs, survey: surveyPatch, ...(wastePatch ? { waste: wastePatch } : {}) });
+    showToast(`${removed.join(' · ')} 을(를) 견적에서 뺐습니다`);
+    setMemo('');
   };
 
   const runApply = (text, provided) => {
@@ -457,7 +466,7 @@ function ChangeQuick({ c, update, calc, showToast }) {
         text = res.text || '';
         setMemo(text);
       } catch (e) {
-        showToast(e.message || '사진 글자를 읽지 못했습니다. 직접 적어주세요');
+        showToast(/[가-힣]/.test(String(e?.message || '')) ? e.message : '사진 글자를 읽지 못했습니다. 직접 적어주세요');
         setReading(false);
         return;
       } finally {
@@ -563,7 +572,10 @@ function ChangeQuick({ c, update, calc, showToast }) {
         </div>
 
         {adj?.cancel ? (
-          <WarningBox tone="info" title={`‘${adj.label || '해당 항목'}’ 빼기로 읽었습니다`}>
+          <WarningBox
+            tone="info"
+            title={`‘${adjList.map((a) => a.label).filter(Boolean).join('·') || '해당 항목'}’ 빼기로 읽었습니다`}
+          >
             금액을 넣지 않아도 됩니다. 아래 버튼을 누르면 견적에서 바로 빠집니다.
           </WarningBox>
         ) : drafts.length ? (
@@ -731,18 +743,15 @@ function MissingLines({ c, update, calc }) {
   const total = checkedRows.reduce((sum, r) => sum + amountOf(r), 0);
 
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-base font-extrabold text-ink">빠뜨리기 쉬운 비용</p>
-          <p className="mt-0.5 text-xs font-semibold leading-4 text-ink-3">
-            눈으로 보고 누른 뒤, 옆 칸에서 금액을 직접 고치세요. 서비스로 해주는 항목은 0으로 두면 됩니다.
-          </p>
-        </div>
+    <Fold
+      label="빠뜨리기 쉬운 비용"
+      hint="현장에서 본 것만 누르세요 — 금액은 옆 칸에서 고칠 수 있습니다"
+      badge={
         <Pill tone={checkedRows.length ? 'warn' : 'plain'}>
           {checkedRows.length}/{rows.length} · {total.toLocaleString('ko-KR')}만
         </Pill>
-      </div>
+      }
+    >
       <div className="mt-2 space-y-1.5">
         {rows.map((r) => {
           const on = isOn(r);
@@ -794,7 +803,7 @@ function MissingLines({ c, update, calc }) {
       ) : (
         <p className="mt-2 text-2xs font-semibold leading-4 text-ink-3">아직 체크한 항목이 없습니다. 현장에서 확인한 것만 눌러주세요.</p>
       )}
-    </Card>
+    </Fold>
   );
 }
 

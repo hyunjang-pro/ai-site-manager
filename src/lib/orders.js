@@ -1,6 +1,6 @@
 // 업체별 자재 발주 리스트 — "발주 문자" 하나로 뭉뚱그리지 않고, 거래처마다 따로 발주한다.
 // 각 업체 카드: 품명·규격·수량 + 저렴하게 사는 팁 + 그 업체에만 보낼 짧은 발주 내용.
-import { toPyung } from './pricing.js';
+import { toPyung, needsLadder } from './pricing.js';
 import { scopeList } from './constants.js';
 
 const num = (v, f = 0) => {
@@ -388,7 +388,7 @@ export function buildOrderGroups(c, calc, design, mset) {
         [
           { name: '집게차(1회 출동)', qty: `${Math.max(1, Math.round(pyung / 10))}회` },
           { name: '1톤/2.5톤 덤프', qty: `${Math.max(1, Math.round(pyung / 5))}대` },
-          { name: '사다리차(층수·주차 확인)', qty: c?.lifting?.ladderAllowed === 'no' ? '불가 — 인력 반출' : '반나절' },
+          ...(needsLadder(c) ? [{ name: '사다리차(층수·주차 확인)', qty: '반나절' }] : []),
         ],
         [
           '집게차는 오전에 예약해야 합니다. 오후는 대기 시간이 붙습니다.',

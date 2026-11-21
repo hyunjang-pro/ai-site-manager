@@ -23,7 +23,7 @@ page.setDefaultTimeout(180000);
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto('http://127.0.0.1:4175/', { waitUntil: 'networkidle' });
-for (const d of ['3', '8', '8', '5']) await page.getByLabel(`${d} 번`).click();
+for (const d of ['3', '8', '5', '5']) await page.getByLabel(`${d} 번`).click();
 await page.getByText('오늘 장부').waitFor();
 const files = ['IMG_1428', 'IMG_1429', 'IMG_1430'].map((n) => {
   const dir = '/workspace/attachments/2026-11-21';
@@ -33,9 +33,13 @@ for (const file of files) {
   await page.getByRole('button', { name: /새 현장 만들기/ }).click();
   await page.waitForTimeout(300);
   await page.locator('input[type=file]').setInputFiles(file);
-  await page.waitForTimeout(700);
-  await page.getByRole('button', { name: '자동으로 분류' }).click();
-  await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 180000 });
+  // 사진을 올리면 앱이 바로 글자를 읽는다(버튼은 읽는 동안 잠김) — 끝날 때까지 기다린다.
+  const done = page.getByText('자동으로 잡았습니다');
+  await done.waitFor({ timeout: 60000 }).catch(async () => {
+    const btn = page.getByRole('button', { name: '자동으로 분류' });
+    if ((await btn.count()) && (await btn.first().isEnabled())) await btn.first().click();
+    await done.waitFor({ timeout: 180000 });
+  });
   await page.waitForTimeout(500);
   const dialog = page.locator('[role=dialog]').first();
   const txt = await dialog.innerText();

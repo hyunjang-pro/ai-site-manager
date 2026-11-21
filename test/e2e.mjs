@@ -7,10 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { cleanOcrText, evaluateOcr, scenePhotoNote } from '../src/lib/ocr.js';
 import { classifyRequest, summarizeRequest } from '../src/lib/classify.js';
-import { surveyWasteDrafts, firstCallQuestions } from '../src/lib/parse.js';
+import { surveyWasteDrafts, firstCallQuestions, parseAdjustments } from '../src/lib/parse.js';
 import { wasteVehicle } from '../src/lib/waste.js';
 import { kstToday, addDaysISO, korDateLabel, korMonthDay } from '../src/lib/date.js';
-import { pickTextModel, pickImageModel, GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE } from '../src/lib/gemini.js';
+import { pickTextModel, pickImageModel, scrubSecret, GEMINI_MODEL_STORAGE, GEMINI_COOLDOWN_STORAGE } from '../src/lib/gemini.js';
 import { perPyeong, DEFAULT_RATES, RATE_FIELDS } from '../src/lib/rates.js';
 import { computeEstimate } from '../src/lib/pricing.js';
 import { hasInteriorStyle } from '../src/lib/constants.js';
@@ -350,7 +350,9 @@ async function main() {
 
   await step('단위: 답사 가이드는 AI가 있으면 AI, 없으면 공종 폴백', async () => {
     const local = surveyGuideFor({ trade: 'demolition' }, { trade: 'demolition' });
-    record('가이드: AI 없으면 공종 기본값', local.source === 'local' && local.rows.length === 4 && local.rows[0].check.includes('사다리차'), local.rows[0]?.check);
+    // 사다리차를 세울 수 없는 현장(이 케이스)에서는 첫 줄이 '천장 위 숨은 물량'으로 시작한다
+    record('가이드: AI 없으면 공종 기본값', local.source === 'local' && local.rows.length >= 3 && local.rows[0].check.includes('천장'), local.rows[0]?.check);
+    record('가이드: 사다리 불가 현장엔 사다리차 항목 없음', !local.rows.some((r) => /사다리차/.test(r.check)), local.rows.map((r) => r.check.slice(0, 10)).join(' / '));
     const aiPlan = {
       trade: 'kitchen',
       surveyPlan: { rows: [{ check: 'AI 확인 A', why: 'AI 이유 A', how: 'AI 방법 A' }], tips: ['AI 팁 A'], comment: 'AI 코멘트 A' },
@@ -465,11 +467,24 @@ async function main() {
     }
     await shot(name);
   };
-  const mainText = () => page.locator('main').innerText();
+  // 접힌 카드(자세히 보기)는 필요할 때 펼친다 — 화면 검사·클릭 전에 모두 펼쳐 둔다.
+  const expandFolds = async () => {
+    await page.evaluate(() => {
+      document.querySelectorAll('main details, [role=dialog] details').forEach((d) => {
+        d.open = true;
+      });
+    });
+    await page.waitForTimeout(80);
+  };
+  const mainText = async () => {
+    await expandFolds();
+    return page.locator('main').innerText();
+  };
   const tabs = () => page.locator('nav[aria-label="현장 단계"] button');
   const goTab = async (n) => {
     await tabs().nth(n - 1).click();
     await page.waitForTimeout(350);
+    await expandFolds();
   };
   const goHome = async () => {
     const back = page.getByLabel('장부로 돌아가기');
@@ -535,9 +550,9 @@ async function main() {
 
   await step('잠금 화면', async () => {
     await page.getByText('가족 전용').waitFor();
-    for (const d of ['3', '8', '8', '5']) await page.getByLabel(`${d} 번`).click();
+    for (const d of ['3', '8', '5', '5']) await page.getByLabel(`${d} 번`).click();
     await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
-    record('잠금: 3885로 해제', true);
+    record('잠금: 3855로 해제', true);
   });
 
   await step('홈', async () => {
@@ -748,7 +763,9 @@ async function main() {
     record('실견적 근거 419건 DB', est.includes('우리 실견적 419건 DB') && !est.includes('실견적 60건'));
     await goTab(3);
     const survey = await mainText();
-    record('답사: 왜·뭘 확인 카드가 3단계에 있음', survey.includes('답사 시 왜·뭘 확인해야 하나') && survey.includes('사다리차 자리'));
+    record('답사: 볼 것 카드가 3단계에 있음', survey.includes('답사 때 꼭 볼 것'));
+    // 사다리차를 세울 수 없는 현장(설정: 불가)에서는 사다리차 확인 항목을 꺼내지 않는다
+    record('답사: 사다리 불가 현장엔 사다리차 항목 없음', !survey.includes('사다리차 자리'));
     record('답사: 현장 점검은 3번', survey.includes('현장 점검 (운반·실측·폐기물)'));
     // 1단계에서 '기초·정지'를 켜면 철거+정지 → 스타일 카드 계속 숨김
     await goTab(1);
@@ -1251,6 +1268,263 @@ async function main() {
     record('OCR: 잡글자 없음', !/삭제하기|요청 상세|\d{1,2}:\d{2}/.test(r));
     await shot('45-ocr-shot.png');
     await page.getByLabel('닫기').first().click();
+  });
+
+  // ---------- 사용자 제보: 만들 때 금액 ≠ 2단계 가견적 ----------
+  const priceOfHeader = async () => {
+    const t = await mainText();
+    const m = t.match(/견적\s*([\d,]+)\s*만원/);
+    return m ? Number(m[1].replace(/,/g, '')) : null;
+  };
+  const heroPrice = () =>
+    page.evaluate(() => {
+      const h = document.querySelector('main .hero-card .num');
+      return h ? Number(String(h.textContent || '').replace(/[^\d]/g, '')) : null;
+    });
+
+  await step('단위: 사다리차·양중은 현장 조건마다 다르게', async () => {
+    const liftOf = (c) => computeEstimate(c).lifting;
+    const d1 = liftOf({ trade: 'wallpaper', sizeValue: '24', lifting: { floor: '1', elevator: 'no' } });
+    record('양중: 1층은 양중비 0', d1.cost === 0 && d1.chosen.id === 'none', `${d1.chosen.id} ${d1.cost}만`);
+    const w3 = liftOf({ trade: 'wallpaper', sizeValue: '24', lifting: { floor: '3', elevator: 'no' } });
+    record('양중: 3층 도배는 사다리차 없음', !w3.options.some((o) => o.id.startsWith('ladder')) && w3.chosen.id === 'carry', w3.options.map((o) => o.id).join(','));
+    const b8 = liftOf({ trade: 'bathroom', sizeValue: '1', sizeUnit: '칸', lifting: { floor: '8', elevator: 'yes' } });
+    record('양중: 엘베 8층은 엘베 사용', b8.chosen.id === 'elevator', `${b8.chosen.id} ${b8.cost}만`);
+    const d4 = liftOf({ trade: 'demolition', sizeValue: '15', lifting: { floor: '4', elevator: 'no' } });
+    record('양중: 4층 철거는 사다리차 자동', d4.chosen.id === 'ladder_half', `${d4.chosen.id} ${d4.cost}만`);
+    const win = liftOf({ trade: 'window', sizeValue: '20', sizeUnit: '㎡', lifting: { floor: '4', elevator: 'no' } });
+    record('양중: 창호 4층은 사다리차', win.chosen.id.startsWith('ladder'), win.chosen.id);
+    const manual = liftOf({ trade: 'demolition', sizeValue: '15', lifting: { floor: '4', elevator: 'no', mode: 'carry' } });
+    record('양중: 손으로 인력 반출로 바꿀 수 있음', manual.chosen.id === 'carry', manual.chosen.id);
+    const d1d = liftOf({ trade: 'demolition', sizeValue: '15', lifting: { floor: '1', elevator: 'no' } });
+    record('양중: 1층 철거도 사다리차 없음', !d1d.options.some((o) => o.id.startsWith('ladder')), d1d.options.map((o) => o.id).join(','));
+    const noTruck = liftOf({ trade: 'wallpaper', sizeValue: '24', lifting: { floor: '3', elevator: 'no' } });
+    record('양중: 도배 반출에 폐기물 트럭 안 붙음', !/1톤차/.test(noTruck.chosen.detail), noTruck.chosen.detail);
+  });
+
+  await step('화면 단순화 — 보조 카드는 접힘', async () => {
+    await goHome();
+    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').click();
+    await page.getByLabel('받은 내용').waitFor();
+    const perTab = {};
+    for (let n = 1; n <= 6; n++) {
+      await tabs().nth(n - 1).click();
+      await page.waitForTimeout(320);
+      perTab[n] = await page.evaluate(() => {
+        const main = document.querySelector('main');
+        return { folds: main.querySelectorAll('details').length, open: main.querySelectorAll('details[open]').length, height: main.scrollHeight };
+      });
+    }
+    record('단순화: 가견적·답사·수익에 접는 카드 있음', [2, 3, 4].every((n) => perTab[n].folds >= 1), JSON.stringify(perTab));
+    record('단순화: 답사·수익은 처음에 접혀 있음', [3, 4].every((n) => perTab[n].open <= 1), JSON.stringify(perTab));
+    record('단순화: 가견적 화면이 짧아짐', perTab[2].height <= 3600, `${perTab[2].height}px`);
+    await expandFolds();
+  });
+
+  await step('만들 때 금액 = 2단계 가견적 = 홈 카드 (사진·AI)', async () => {
+    await context.route('https://generativelanguage.googleapis.com/**', geminiMock);
+    await goHome();
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    await page.getByLabel('현장 요청 내용').fill('부엌을 전면 인테리어. 최신식으로');
+    await page.getByLabel('AI 정밀 분석').click();
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
+    await page.waitForTimeout(400);
+    const draft = page.locator('[data-testid=draft-quote]');
+    record('만들기: 견적 미리보기 카드 있음', (await draft.count()) === 1);
+    const draftAmount = Number(await draft.first().getAttribute('data-amount'));
+    record('만들기: 미리보기 금액 > 0', draftAmount > 0, `${draftAmount}만`);
+    const dtext = await draft.first().innerText();
+    record('만들기: "2. 가견적과 같은 금액" 안내', dtext.includes('가견적과 같은 금액'), dtext.split('\n')[0]);
+    const modal = await page.locator('[role=dialog]').innerText();
+    record('만들기: AI 시세는 참고로 표기', modal.includes('AI가 본 시세(참고)'), modal.match(/AI가 본 시세[^\n]*/)?.[0] || '');
+    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByLabel('받은 내용').waitFor();
+    await page.waitForTimeout(600);
+    const head = await priceOfHeader();
+    record('만들기: 만들자마자 상단 견적 = 미리보기 (1원도 안 틀림)', head === draftAmount, `미리보기 ${draftAmount} vs 상단 ${head}`);
+    await goTab(2);
+    const hero = await heroPrice();
+    record('만들기: 2단계 가견적 = 미리보기', hero === draftAmount, `미리보기 ${draftAmount} vs 가견적 ${hero}`);
+    const estText = await mainText();
+    record('만들기: 가견적 화면의 견적 문구', estText.includes('가견적'));
+    await goHome();
+    const firstCard = await page.locator('main .card').first().innerText();
+    const cardAmount = Number((firstCard.match(/([\d,]+)\s*만원/) || [])[1]?.replace(/,/g, '') || 0);
+    record('만들기: 홈 카드 금액 = 미리보기', cardAmount === draftAmount, `미리보기 ${draftAmount} vs 홈 ${cardAmount}`);
+  });
+
+  await step('만들 때 금액 = 가견적 (사진만)', async () => {
+    await context.route('https://generativelanguage.googleapis.com/**', geminiMock);
+    await goHome();
+    await page.getByRole('button', { name: /새 현장 만들기/ }).click();
+    await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    await page.locator('[role=dialog] input[type=file]').setInputFiles(path.join(FIXTURES, 'kitchen-scene.jpg'));
+    await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 25000 });
+    await page.waitForTimeout(300);
+    const draftAmount = Number(await page.locator('[data-testid=draft-quote]').first().getAttribute('data-amount'));
+    record('사진만: 미리보기 금액 있음', draftAmount > 0, `${draftAmount}만`);
+    await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
+    await page.getByLabel('받은 내용').waitFor();
+    await page.waitForTimeout(600);
+    const head = await priceOfHeader();
+    await goTab(2);
+    const hero = await heroPrice();
+    record('사진만: 상단·가견적·미리보기 모두 같은 금액', head === draftAmount && hero === draftAmount, `${draftAmount} / ${head} / ${hero}`);
+  });
+
+  await step('단위: 답사 한 줄에 여러 개 빼기', async () => {
+    const list = parseAdjustments('사다리차 취소, 보양 제외');
+    record('답사: 두 개를 다 읽음', list.length === 2 && list.map((x) => x.label).join('·') === '사다리차·보양', JSON.stringify(list));
+    const one = parseAdjustments('미장 불필요');
+    record('답사: 한 개도 그대로', one.length === 1 && one[0].label === '미장', JSON.stringify(one));
+    record('답사: 빼기가 아니면 빈 목록', parseAdjustments('폐기물 1톤 추가').length === 0);
+  });
+
+  await step('단위·보안: API 키가 오류 문구·문서에 남지 않는다', async () => {
+    const KEY = 'AIzaTESTKEY1234567890abcdef';
+    const dirty = `failed https://generativelanguage.googleapis.com/v1beta/models/x:generateContent?key=${KEY} 400 API key not valid ${KEY}`;
+    const clean = scrubSecret(dirty, KEY);
+    record('보안: 오류 문구에서 키 삭제', !clean.includes(KEY) && clean.includes('[키 숨김]'), clean.slice(0, 80));
+    record('보안: key= 쿼리 삭제', !/key=AIza/.test(clean));
+    await page.getByLabel('설정').click().catch(async () => {
+      await goHome();
+      await page.getByLabel('설정').click();
+    });
+    await page.getByText('AI 정밀 분석 (무료 Gemini API 키)').waitFor();
+    const type = await page.getByLabel('Gemini API 키').first().getAttribute('type');
+    record('보안: 설정의 키 칸은 가려짐(password)', type === 'password', String(type));
+    await page.getByLabel('닫기').first().click();
+    await page.waitForTimeout(300);
+    await goHome();
+    await page.getByText('구미 형곡동 32평 아파트 욕실 1칸').click();
+    await page.getByLabel('받은 내용').waitFor();
+    await goTab(6);
+    const printed = await page.locator('.print-area').first().innerText().catch(() => '');
+    record('보안: 손님 문서에 키·설정 없음', !printed.includes('AIza') && !printed.includes('apiKey'), printed.slice(0, 40));
+  });
+
+  await step('저장 데이터가 깨져도 앱이 뜬다', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ko-KR' });
+    await ctx.addInitScript(() => {
+      localStorage.setItem(
+        'aiSiteManager.v1',
+        JSON.stringify({
+          cases: [
+            { id: 'broken-1', title: null, trade: 'zzz', waste: 'oops', lifting: null, survey: 'x', subScopes: 'nope', sizeValue: {}, changeLogs: 'x', photos: 'x' },
+            null,
+            42,
+          ],
+          settings: { rates: 'oops', apiKey: '' },
+        })
+      );
+    });
+    const p2 = await ctx.newPage();
+    const errs = [];
+    p2.on('pageerror', (e) => errs.push(e.message));
+    p2.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+    await p2.goto('http://127.0.0.1:4173/', { waitUntil: 'networkidle' });
+    for (const d of ['3', '8', '5', '5']) await p2.getByLabel(`${d} 번`).click();
+    await p2.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    record('깨진 저장: 홈이 뜸', true);
+    const t = await p2.locator('main').innerText();
+    record('깨진 저장: NaN·undefined 없음', !/\b(NaN|undefined)\b/.test(t));
+    const card = p2.locator('main .card').first();
+    if (await card.count()) {
+      await card.locator('button').first().click();
+      await p2.waitForTimeout(500);
+      let ok = true;
+      for (let n = 1; n <= 6; n++) {
+        await p2.locator('nav[aria-label="현장 단계"] button').nth(n - 1).click().catch(() => { ok = false; });
+        await p2.waitForTimeout(200);
+      }
+      record('깨진 저장: 6단계 다 열림', ok);
+      const t2 = await p2.locator('main').innerText();
+      record('깨진 저장: 화면에 이상한 값 없음', !/\b(NaN|undefined)\b/.test(t2), t2.match(/.{0,20}(NaN|undefined).{0,20}/)?.[0] || '');
+    }
+    record('깨진 저장: 페이지 오류 없음', errs.filter((e) => !/Failed to load resource|open-meteo/i.test(e)).length === 0, errs.slice(0, 2).join(' | '));
+    await ctx.close();
+  });
+
+  await step('잠금 — 3855 (옛 번호 3885은 안 열림)', async () => {
+    await goHome();
+    await page.getByLabel('잠그기').click();
+    await page.getByText('가족 전용').waitFor();
+    for (const d of ['3', '8', '8', '5']) await page.getByLabel(`${d} 번`).click();
+    await page.waitForTimeout(700);
+    record('잠금: 옛 번호 3885 거부', (await page.getByText('비밀번호 4자리를 눌러 주세요').count()) === 1);
+    for (const d of ['3', '8', '5', '5']) await page.getByLabel(`${d} 번`).click();
+    await page.getByText('오늘 장부').waitFor({ timeout: 12000 });
+    record('잠금: 새 번호 3855로 해제', true);
+  });
+
+  await step('360px — 가로 넘침·잘린 버튼 없음', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 640 }, locale: 'ko-KR', deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const p2 = await ctx.newPage();
+    p2.setDefaultTimeout(15000);
+    const errs = [];
+    p2.on('pageerror', (e) => errs.push(e.message));
+    await p2.goto('http://127.0.0.1:4173/', { waitUntil: 'networkidle' });
+    await p2.getByText('가족 전용').waitFor({ timeout: 15000 });
+    for (const d of ['3', '8', '5', '5']) await p2.getByLabel(`${d} 번`).click();
+    await p2.getByText('오늘 장부').waitFor({ timeout: 15000 });
+    record('360: 잠금 해제·홈', true);
+    const check = async (label) => {
+      const res = await p2.evaluate(() => {
+        const vw = window.innerWidth;
+        const over = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+        const bad = [];
+        for (const el of document.querySelectorAll('main *, header *, [role=dialog] *')) {
+          const st = getComputedStyle(el);
+          if (st.display === 'none' || st.visibility === 'hidden') continue;
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) continue;
+          if (r.right > vw + 1.5) {
+            let n = el.parentElement;
+            let scroll = false;
+            while (n && n !== document.body) {
+              const ox = getComputedStyle(n).overflowX;
+              if (ox === 'auto' || ox === 'scroll' || ox === 'hidden') { scroll = true; break; }
+              n = n.parentElement;
+            }
+            if (!scroll) bad.push(`${el.tagName}:${(el.innerText || '').slice(0, 18)}`);
+          }
+        }
+        return { over, bad: bad.slice(0, 3) };
+      });
+      record(`360: ${label} 가로 넘침 없음`, res.over <= 1 && res.bad.length === 0, `over=${res.over} ${res.bad.join(' | ')}`);
+    };
+    let last = '홈 검사';
+    try {
+    await check('홈');
+    last = '현장 카드 클릭';
+    await p2.getByText('구미 형곡동 32평 아파트 욕실 1칸').first().click();
+    await p2.getByLabel('받은 내용').waitFor({ timeout: 15000 });
+    record('360: 현장 열림', true);
+    for (let n = 1; n <= 6; n++) {
+      await p2.locator('nav[aria-label="현장 단계"] button').nth(n - 1).click();
+      await p2.waitForTimeout(250);
+      await check(`${n}단계`);
+    }
+    record('360: 6단계 이동', true);
+    await p2.getByLabel('장부로 돌아가기').first().click();
+    await p2.waitForTimeout(500);
+    await p2.getByRole('button', { name: /새 현장 만들기/ }).first().click();
+    await p2.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
+    await check('새 현장 모달');
+    await p2.waitForTimeout(500);
+    const sheet = await p2.evaluate(() => {
+      const s = document.querySelector('.modal-sheet').getBoundingClientRect();
+      return { top: Math.round(s.top), bottom: Math.round(s.bottom), vh: window.innerHeight };
+    });
+    record('360: 모달이 화면 안에 들어옴', sheet.top >= -1 && sheet.bottom <= sheet.vh + 1, JSON.stringify(sheet));
+    await p2.screenshot({ path: path.join(SHOTS, '48-360-newcase.png') });
+    record('360: 페이지 오류 없음', errs.length === 0, errs.slice(0, 2).join(' | '));
+    } catch (e) {
+      await p2.screenshot({ path: path.join(SHOTS, 'error-360-step.png') }).catch(() => {});
+      record(`360: '${last}' 실패`, false, e.message.split('\n')[0].slice(0, 120));
+    }
+    await ctx.close();
   });
 
   await step('모바일 마무리', async () => {

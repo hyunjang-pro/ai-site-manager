@@ -1,7 +1,7 @@
 // 가족 전용 잠금 — 앱 진입 시 4자리 PIN.
 // ※ 브라우저에서 도는 화면 잠금이라 강한 보안 장치는 아닙니다(코드를 보면 우회 가능).
 //   개인정보·계정은 저장하지 않고, 결제·발송 같은 일은 하지 않는 앱입니다.
-export const FAMILY_PIN = '3885';
+export const FAMILY_PIN = '3855';
 export const UNLOCK_KEY = 'aiSiteManager.unlocked';
 
 export function isUnlocked() {

@@ -178,15 +178,34 @@ export const PROCESS_KEYWORDS = [
   { id: 'demolition', label: '철거', words: ['철거'] },
 ];
 
-export function parseAdjustment(text = '') {
+// 한 줄에 여러 개를 빼도 된다 — "사다리차 취소, 보양 제외" → 사다리차·보양 둘 다 뺀다.
+// (예전에는 문장에서 처음 걸린 한 개만 읽어서 '보양 제외'가 그대로 남았다)
+export function parseAdjustments(text = '') {
   const t = String(text || '');
-  if (!CANCEL_RE.test(t)) return null;
-  const hit = PROCESS_KEYWORDS.find((p) => p.words.some((w) => t.includes(w)));
-  return {
-    cancel: true,
-    processId: hit?.id || null,
-    label: hit?.label || null,
+  if (!CANCEL_RE.test(t)) return [];
+  const chunks = t
+    .split(/[,\uff0c\u3001/\u00b7\n]|\s+\uadf8\ub9ac\uace0\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const out = [];
+  const push = (id, label) => {
+    if (!out.some((o) => o.processId === id && o.label === label)) out.push({ cancel: true, processId: id, label });
   };
+  for (const chunk of chunks) {
+    if (!CANCEL_RE.test(chunk)) continue;
+    const hits = PROCESS_KEYWORDS.filter((p) => p.words.some((w) => chunk.includes(w)));
+    if (hits.length) hits.forEach((h) => push(h.id, h.label));
+    else push(null, null);
+  }
+  if (!out.length) {
+    const hit = PROCESS_KEYWORDS.find((p) => p.words.some((w) => t.includes(w)));
+    push(hit?.id || null, hit?.label || null);
+  }
+  return out;
+}
+
+export function parseAdjustment(text = '') {
+  return parseAdjustments(text)[0] || null;
 }
 
 // 공정 → 체크박스(견적 항목) 연결

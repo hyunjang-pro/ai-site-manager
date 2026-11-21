@@ -180,8 +180,36 @@ export function Details({ label = '자세히 보기', children, className = '', 
   );
 }
 
+/* ── 접히는 카드 — 처음엔 한 줄, 필요할 때만 펼친다 ───────────── */
+export function Fold({ label, hint, children, className = '', defaultOpen = false, badge }) {
+  return (
+    <details className={cx('card overflow-hidden', className)} open={defaultOpen}>
+      <summary className="flex min-h-[58px] cursor-pointer items-center justify-between gap-3 px-4 py-3">
+        <span className="min-w-0">
+          <span className="block text-[15px] font-extrabold leading-5 text-ink">{label}</span>
+          {hint ? <span className="mt-0.5 block text-xs font-semibold leading-4 text-ink-3">{hint}</span> : null}
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {badge}
+          <span className="text-xs font-bold text-brand group-open:hidden">열기</span>
+          <ChevronDown className="h-4 w-4 text-slate-400 transition group-open:rotate-180" />
+        </span>
+      </summary>
+      <div className="border-t border-slate-100 px-4 py-3.5">{children}</div>
+    </details>
+  );
+}
+
 /* ── 섹션 카드 ───────────────────────────────────────────── */
-export function SectionCard({ num, title, subtitle, status, locked, lockHint, children, className = '', icon }) {
+export function SectionCard({ num, title, subtitle, status, locked, lockHint, children, className = '', icon, fold = false }) {
+  // fold — 처음엔 한 줄로 접어 두고, 필요할 때만 펼치는 카드 (같은 제목·상태를 그대로 쓴다)
+  if (fold && !locked) {
+    return (
+      <Fold label={title} hint={subtitle} badge={status} className={className}>
+        {children}
+      </Fold>
+    );
+  }
   return (
     <Card className={cx('overflow-hidden', className)}>
       <div className="flex items-start gap-3 px-4 pt-4">

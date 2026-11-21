@@ -1,3 +1,5 @@
+import { needsLadder } from './pricing.js';
+
 // 답사에서 '왜·뭘 확인해야 하나' — AI가 있으면 이 현장에 맞춰 만들고, 없을 때만 공종별 기본값을 쓴다.
 // ① 3단계 답사 카드(4줄: 확인/왜/이렇게) ② 2단계 3자 검증의 '답사 시 꼭 확인하세요' 짧은 목록이 같은 소스를 쓴다.
 
@@ -173,7 +175,12 @@ export function surveyGuideFor(c, calc) {
     : aiChecks
         .map((x) => ({ check: x?.label || '', why: x?.why || '', how: x?.how || '' }))
         .filter((x) => x.check);
-  const rows = (aiRows.length ? aiRows : rowsKey(c, calc)).slice(0, 4);
+  // 사다리차는 실제로 세울 수 있는 현장(엘베 없음·2층 이상·부피 큰 반출)에서만 확인 항목으로 꺼낸다.
+  const ladderOk = needsLadder(c);
+  const rawRows = (aiRows.length ? aiRows : rowsKey(c, calc)).filter(
+    (r) => ladderOk || !/사다리차/.test(String(r?.check || ''))
+  );
+  const rows = rawRows.slice(0, 4);
   const fromAi = aiRows.length > 0;
 
   const tips = Array.isArray(plan?.tips) && plan.tips.length

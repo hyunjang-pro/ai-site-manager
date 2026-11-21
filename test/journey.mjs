@@ -42,7 +42,7 @@ async function main() {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
   await page.goto('http://127.0.0.1:4188/', { waitUntil: 'networkidle' });
-  for (const d of ['3', '8', '8', '5']) await page.getByLabel(`${d} 번`).click();
+  for (const d of ['3', '8', '5', '5']) await page.getByLabel(`${d} 번`).click();
   await page.getByText('오늘 장부').waitFor({ timeout: 15000 });
 
   const tabs = () => page.locator('nav[aria-label="현장 단계"] button');

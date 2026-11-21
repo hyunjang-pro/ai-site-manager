@@ -23,7 +23,7 @@ import { materialSetFor, BRAND_PRICES } from '../../lib/materials.js';
 import { hasInteriorStyle, hasScope } from '../../lib/constants.js';
 import { estimateWorkDays } from '../../lib/schedule.js';
 import { kstToday, addDaysISO, korDateLabel } from '../../lib/date.js';
-import { BigButton, Card, CheckRow, Details, Field, Pill, ProgressTrack, SectionCard, SmallButton, TextInput, WarningBox, cx } from '../ui.jsx';
+import { BigButton, Card, CheckRow, Details, Field, Fold, Pill, ProgressTrack, SectionCard, SmallButton, TextInput, WarningBox, cx } from '../ui.jsx';
 import { copyText } from '../../lib/clipboard.js';
 import { ChangeBlock } from './ChangeBlock.jsx';
 import WeatherStrip from '../WeatherStrip.jsx';
@@ -342,7 +342,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
       </Card>
 
       {aiPlan && (aiPlan.checks?.length || aiPlan.tell || aiPlan.notes?.length) ? (
-        <Card className="p-4">
+        <Fold label="이 현장 맞춤 시공 안내" hint="AI가 고른 확인 포인트만">
           <p className="flex items-center gap-1.5 text-base font-extrabold text-ink">🤖 이 현장 맞춤 시공 안내</p>
           <p className="mt-0.5 text-xs font-semibold text-ink-3">사진·요청서·층수·엘베·포함 공종을 보고 AI가 이 현장에만 해당하는 것만 골랐습니다.</p>
           {aiPlan.checks?.length ? (
@@ -367,7 +367,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
               ))}
             </ul>
           ) : null}
-        </Card>
+        </Fold>
       ) : null}
 
       {/* 3. 입금 확인 */}
@@ -390,7 +390,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
                   checked={!!c.gates?.deposit}
                   onChange={(v) => {
                     setGate({ deposit: v });
-                    if (v) update({ gates: { ...c.gates, deposit: true }, collection: 'deposit_paid' });
+                    if (v) update({ gates: { ...c.gates, deposit: true }, collection: 'deposit_paid', paidAmount: Math.round(pay.deposit.amount) });
                   }}
                   label={`계약금 ${Math.round(pay.deposit.amount).toLocaleString('ko-KR')}만원 입금 확인`}
                   hint="통장 입금 내역을 확인하고 체크하세요"
@@ -410,7 +410,8 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
               checked={!!c.gates?.midPaid}
               onChange={(v) => {
                 setGate({ midPaid: v });
-                if (v) update({ gates: { ...c.gates, midPaid: true }, collection: 'mid_paid' });
+                // 중도금까지 받으면 실제로 받은 돈(계약금+중도금)을 장부에 남긴다 — 남은 돈 계산이 이 값으로 맞는다
+                if (v) update({ gates: { ...c.gates, midPaid: true }, collection: 'mid_paid', paidAmount: Math.round((c.gates?.deposit ? pay.deposit.amount : 0) + pay.mid.amount) });
               }}
               label={`중도금 ${Math.round(pay.mid.amount).toLocaleString('ko-KR')}만원 입금 확인`}
               hint="철거·주요 공정이 끝난 뒤 받는 금액입니다"
@@ -445,7 +446,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
 
       {/* 4. 업체별 발주 — 켜 둔 공종의 자재·장비만 */}
       {showOrders ? (
-        <Card className="p-4">
+        <Fold label="자재·장비 발주 리스트 (업체별)" hint="업체별로 복사해 보내면 됩니다">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 text-base font-extrabold text-ink">
@@ -530,11 +531,11 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
               <Check className="h-4 w-4" /> 모두 발주 완료로 표시
             </SmallButton>
           ) : null}
-        </Card>
+        </Fold>
       ) : null}
 
       {/* 관리실 신고·보양 — 필요한 현장만 */}
-      <SectionCard
+      <SectionCard fold
         num="4"
         title="관리실 신고·보양·사다리차 승인"
         subtitle="이 4개를 해두면 인부가 헛걸음하지 않습니다. 해당 없는 항목은 자동으로 뺐습니다."
@@ -572,7 +573,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
       </SectionCard>
 
       {/* 오늘 투입 인원 · 차량 · 현장 브리핑 */}
-      <SectionCard
+      <SectionCard fold
         num="5"
         title="오늘 투입 인원 · 차량 · 현장 브리핑"
         subtitle="아침에 이 카드만 보면 누구를 몇 명, 차를 몇 대 보낼지 바로 정해집니다."
@@ -634,7 +635,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
       <EvidenceBlock c={c} update={update} calc={calc} showToast={showToast} />
 
       {/* 공정(방수 담수 / 일반) */}
-      <SectionCard
+      <SectionCard fold
         num="6"
         title={stage3Title}
         subtitle={isWaterproof ? '사진 3장과 48시간이 지나야 타일 시공을 시작합니다.' : '이 공정이 끝나야 다음 공정이 안전합니다.'}
@@ -651,7 +652,7 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
       </SectionCard>
 
       {/* 준공 */}
-      <SectionCard num="7" title="준공 검수·잔금 받고 마무리" subtitle="준공 사진·하자 종결·잔금 입금이 모두 확인되면 정산 완료입니다." status={statusFor(gates[3], 3)}>
+      <SectionCard fold num="7" title="준공 검수·잔금 받고 마무리" subtitle="준공 사진·하자 종결·잔금 입금이 모두 확인되면 정산 완료입니다." status={statusFor(gates[3], 3)}>
         <div className="space-y-3">
           <StepGuide guide={STEP_GUIDES.gate4} />
           <CheckRow checked={!!c.gates?.donePhoto} onChange={(v) => setGate({ donePhoto: v })} label="준공 사진 있음" />

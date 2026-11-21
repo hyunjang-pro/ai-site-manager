@@ -8,10 +8,8 @@ import NewCaseModal from './components/NewCaseModal.jsx';
 import BidsScreen from './components/BidsScreen.jsx';
 import { isUnlocked, setUnlocked } from './lib/auth.js';
 import { Toast, cx } from './components/ui.jsx';
-import { loadState, saveState, newCase } from './lib/storage.js';
+import { loadState, saveState, newCase, composeCase } from './lib/storage.js';
 import { BIDS, bidStats, bidToCase } from './lib/bids.js';
-import { TRADES } from './lib/constants.js';
-import { autoCaseTitle } from './lib/classify.js';
 import { setGeminiKey } from './lib/gemini.js';
 
 export default function App() {
@@ -36,6 +34,8 @@ export default function App() {
     const t = setTimeout(() => {
       const ok = saveState(state);
       if (ok) setSavedAt(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
+      // 저장이 막히면(iOS 사파리 사생활 보호·용량 초과) 조용히 넘기지 않고 알려 준다
+      else showToast('저장 공간이 부족해 저장하지 못했습니다 — 사진을 줄이거나 설정에서 초기화해 주세요');
     }, 350);
     return () => clearTimeout(t);
   }, [state]);
@@ -68,26 +68,15 @@ export default function App() {
 
   const handleCreate = useCallback(
     (trade, patch = {}) => {
-      const created = newCase(trade, state.settings.rates);
-      created.region = state.settings.region || '안동';
-      created.agencyFeeRate = state.settings.agencyFeeRate ?? 10;
-      const clean = Object.fromEntries(Object.entries(patch || {}).filter(([, v]) => v !== undefined));
-      const merged = { ...created, ...clean };
-      if (!clean.title) {
-        const size = clean.sizeValue ? `${clean.sizeValue}${clean.sizeUnit || ''}` : '';
-        merged.title =
-          autoCaseTitle({ ...merged, region: clean.region || created.region }) ||
-          `${clean.region || created.region} ${size} ${TRADES[trade]?.label || '새 현장'}`.replace(/\s+/g, ' ').trim();
-      }
-      // 자동으로 만든 제목 — 1단계에서 공종을 바꾸면 제목도 같이 맞춘다(직접 고치면 고정)
-      merged.titleAuto = true;
+      // 카드 미리보기와 똑같은 함수로 만든다 (금액이 어긋나지 않게)
+      const merged = composeCase({ trade, patch, settings: state.settings });
       setState((prev) => ({ ...prev, cases: [merged, ...prev.cases] }));
       setActiveId(merged.id);
       setTab(1);
       setScreen('case');
       showToast('현장을 만들고 자동으로 채웠습니다 — 1단계에서 고쳐도 됩니다');
     },
-    [state.settings.region, state.settings.rates, showToast]
+    [state.settings, showToast]
   );
 
   const handleImportBid = useCallback(
@@ -234,7 +223,7 @@ export default function App() {
         />
       )}
 
-      <NewCaseModal open={newCaseOpen} onClose={() => setNewCaseOpen(false)} onCreate={handleCreate} />
+      <NewCaseModal open={newCaseOpen} onClose={() => setNewCaseOpen(false)} onCreate={handleCreate} settings={state.settings} />
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

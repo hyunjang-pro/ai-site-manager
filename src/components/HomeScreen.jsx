@@ -387,13 +387,7 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
           <p className="num pb-0.5 text-2xs font-medium text-ink-4">{c.createdAt}</p>
         </div>
 
-        <p className="mt-1 text-2xs font-bold text-ink-3">
-          계약금 {Math.round(calc.payments.deposit.amount).toLocaleString('ko-KR')}만 · 중도금{' '}
-          {Math.round(calc.payments.mid.amount).toLocaleString('ko-KR')}만 · 잔금{' '}
-          {Math.round(calc.payments.balance.amount).toLocaleString('ko-KR')}만
-        </p>
 
-        <RangeMeter min={min} base={base} max={max} className="mt-2.5" />
       </button>
 
       <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
@@ -422,7 +416,7 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
 
       {openPick ? (
         <div className="border-t border-slate-100 bg-slate-50/70 px-3.5 py-3">
-          <p className="mb-2 text-xs font-bold text-ink-2">수금 상태 바꾸기</p>
+          <p className="mb-2 text-xs font-bold text-ink-2">수금 상태·받은 돈</p>
           <div className="grid grid-cols-2 gap-1.5">
             {COLLECTION_STAGES.map((s) => {
               const amountOf = (id) =>
@@ -431,12 +425,21 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
                   : id === 'mid_paid'
                   ? calc.payments.mid.amount
                   : calc.payments.balance.amount;
+              // 상태를 고르면 '지금까지 받은 돈'도 같이 맞춘다 (부분 입금은 아래 칸에 직접 적는다)
+              const paidSoFar = (id) => {
+                const dep = calc.payments.deposit.amount;
+                const mid = calc.payments.mid.amount;
+                if (id === 'deposit_wait') return 0;
+                if (id === 'deposit_paid') return dep;
+                if (id === 'mid_paid' || id === 'balance_wait') return dep + mid;
+                return calc.finalPrice;
+              };
               return (
                 <button
                   key={s.id}
                   type="button"
                   onClick={() => {
-                    onUpdate({ collection: s.id });
+                    onUpdate({ collection: s.id, paidAmount: Math.round(paidSoFar(s.id)) });
                     onTogglePick();
                   }}
                   className={cx(
@@ -453,6 +456,22 @@ function CaseCard({ c, openPick, onTogglePick, onOpen, onUpdate, onDelete }) {
                 </button>
               );
             })}
+          </div>
+          <div className="mt-2 rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
+            <label className="block">
+              <span className="text-2xs font-bold text-ink-3">실제로 받은 돈 (만원) — 계약금만·일부만 받았으면 여기에 적으세요</span>
+              <input
+                inputMode="numeric"
+                value={c.paidAmount ?? ''}
+                onChange={(e) => onUpdate({ paidAmount: e.target.value === '' ? 0 : Number(e.target.value) || 0 })}
+                aria-label="실제로 받은 돈"
+                className="num mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-base font-extrabold text-ink outline-none focus:border-brand focus:bg-white"
+              />
+            </label>
+            <p className="mt-1 text-2xs font-bold text-ink-3">
+              총 {Math.round(calc.finalPrice).toLocaleString('ko-KR')}만 중 받은 돈 {Math.round(Number(c.paidAmount) || 0).toLocaleString('ko-KR')}만 · 남은 돈{' '}
+              <b className="text-rose-600">{Math.max(0, Math.round(calc.finalPrice - (Number(c.paidAmount) || 0))).toLocaleString('ko-KR')}만</b>
+            </p>
           </div>
           <button
             type="button"

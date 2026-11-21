@@ -6,6 +6,8 @@
 let workerPromise = null;
 let progressCb = null;
 
+const OCR_LOAD_FAIL =
+  '사진 글자 읽기(OCR)를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 다시 올리거나, 요청 내용을 한 줄만 직접 적어 주세요.';
 async function getWorker() {
   if (workerPromise) return workerPromise;
   workerPromise = (async () => {
@@ -16,7 +18,13 @@ async function getWorker() {
       },
     });
   })();
-  return workerPromise;
+  try {
+    return await workerPromise;
+  } catch (e) {
+    // 실패한 약속을 캐시해 두면 이후 시도가 영원히 실패한다 — 지우고 다음에 다시 받게 한다.
+    workerPromise = null;
+    throw new Error(OCR_LOAD_FAIL);
+  }
 }
 
 // 스크린샷에 같이 찍히는 폰 상단바·앱 버튼 문구. 이 줄은 현장 내용이 아니므로 버린다.
@@ -52,7 +60,7 @@ const UI_WORDS = [
 
 const UI_LINE = new RegExp(`^[<«》\\[\\]()\\s]*(${UI_WORDS.join('|')})[\\s>»\\])]*$`);
 const UI_META =
-  /(견적\s*(보낸|받은)\s*고수|고수\s*\d+\s*명|\d+\s*(일|시간|분)\s*전\s*$|채팅\s*하기|평점|응답률|재로그인|앱에서\s*보기|전체\s*보기|더\s*보기|숨고|soomgo|SUMGGO|크몽|카카오톡|톡\s*서랍)/i;
+  /(견적\s*(보낸|받은)\s*고수|고수\s*\d+\s*명|\d+\s*(일|시간|분)\s*전\s*$|채팅\s*하기|평점|응답률|재로그인|앱에서\s*보기|전체\s*보기|더\s*보기|숨고|soomgo|SUMGGO|크몽|카카오톡|톡\s*서랍|견적서\s*발송|캐시를\s*확인|고객\s*정보\s*신고|신고하기)/i;
 const CLOCK = /^(\d{1,2}:\d{2}(:\d{2})?|(오전|오후)\s*\d{1,2}:\d{2})/;
 const STATUS = /^(배터리|LTE|5G|Wi-?Fi|VPN|알림\s*끄기|무음|진동)\b/i;
 const UNIT_OK = /\d+(\.\d+)?\s*(평|㎡|m2|m|칸|개|개소|층|명|일|톤|원|만원?|%)/i;
@@ -151,7 +159,12 @@ export async function ocrAnalyze(files, onProgress, { clean = true } = {}) {
     return { text: '', cleaned: '', raw: '', isScenePhoto: true, confidence: 0, meaningfulWords: 0, hangulRatio: 0 };
   }
   progressCb = onProgress || null;
-  const worker = await getWorker();
+  let worker;
+  try {
+    worker = await getWorker();
+  } catch (e) {
+    throw new Error(OCR_LOAD_FAIL);
+  }
   const raws = [];
   let confWeighted = 0;
   let confWeight = 0;

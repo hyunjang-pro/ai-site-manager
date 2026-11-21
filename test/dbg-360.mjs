@@ -1,0 +1,40 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { chromium } from 'playwright';
+const DIST = path.resolve('dist');
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const server = http.createServer((req, res) => {
+  const p = decodeURIComponent((req.url || '/').split('?')[0]);
+  let file = path.join(DIST, p === '/' ? 'index.html' : p);
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+});
+await new Promise((r) => server.listen(4194, '127.0.0.1', r));
+const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const ctx = await browser.newContext({ viewport: { width: 360, height: 640 }, locale: 'ko-KR', deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const p2 = await ctx.newPage();
+p2.on('pageerror', (e) => console.log('PAGEERROR', e.message));
+await p2.goto('http://127.0.0.1:4194/', { waitUntil: 'networkidle' });
+for (const d of ['3', '8', '5', '5']) await p2.getByLabel(`${d} 번`).click();
+await p2.getByText('오늘 장부').waitFor({ timeout: 12000 });
+console.log('home ok');
+const t = p2.getByText('구미 형곡동 32평 아파트 욕실 1칸');
+console.log('count', await t.count());
+await t.click({ timeout: 5000 }).then(() => console.log('click ok')).catch((e) => console.log('click fail:', e.message.split('\n').slice(0, 6).join(' | ')));
+await p2.waitForTimeout(600);
+console.log('has tabs', await p2.locator('nav[aria-label="현장 단계"]').count());
+await p2.getByLabel('받은 내용').waitFor();
+for (let n = 1; n <= 6; n++) {
+  await p2.locator('nav[aria-label="현장 단계"] button').nth(n - 1).click({ timeout: 5000 }).then(() => console.log('tab', n, 'ok')).catch((e) => console.log('tab', n, 'fail', e.message.split('\n')[0]));
+  await p2.waitForTimeout(250);
+}
+await p2.getByLabel('장부로 돌아가기').first().click({ timeout: 5000 }).then(() => console.log('back ok')).catch((e) => console.log('back fail', e.message.split('\n')[0]));
+await p2.waitForTimeout(400);
+await p2.getByRole('button', { name: /새 현장 만들기/ }).click({ timeout: 5000 }).then(() => console.log('new ok')).catch((e) => console.log('new fail', e.message.split('\n').slice(0,4).join(' | ')));
+await p2.waitForTimeout(400);
+console.log('modal?', await p2.locator('[role=dialog]').count());
+await p2.screenshot({ path: 'screenshots/dbg-360-last.png' });
+await browser.close();
+server.close();

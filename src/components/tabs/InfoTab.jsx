@@ -682,7 +682,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
 
       {/* 🤖 AI 정밀 분석 결과 */}
       {c.aiAnalysis ? (
-        <SectionCard num="4" title="🤖 AI 정밀 분석" subtitle="사진·글에서 읽은 현장 상태와 준비물입니다." status={<Pill tone="info">{c.aiAnalysis.summary ? '분석 완료' : '참고'}</Pill>}>
+        <SectionCard fold num="4" title="🤖 AI 정밀 분석" subtitle="사진·글에서 읽은 현장 상태와 준비물입니다." status={<Pill tone="info">{c.aiAnalysis.summary ? '분석 완료' : '참고'}</Pill>}>
           <div className="space-y-2">
             {c.aiAnalysis.wishText ? (
               <p className="rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-bold leading-5 text-amber-900">희망사항: {c.aiAnalysis.wishText}</p>
@@ -724,9 +724,14 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
               </div>
             ) : null}
             {c.aiAnalysis.priceRange?.max > 0 ? (
-              <p className="rounded-xl bg-slate-50 px-3 py-2 text-[13px] font-bold text-ink-2">
-                AI 보수적 범위 {c.aiAnalysis.priceRange.min}~{c.aiAnalysis.priceRange.max}만원 (부가세 별도)
-              </p>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[13px] font-bold text-ink-2">
+                <p>
+                  AI가 본 시세 {c.aiAnalysis.priceRange.min}~{c.aiAnalysis.priceRange.max}만원 <span className="font-semibold text-ink-3">(참고)</span>
+                </p>
+                <p className="mt-0.5 text-brand-strong">
+                  우리 단가표 견적 {Math.round(calc.finalPrice).toLocaleString('ko-KR')}만원 — 2단계 가견적과 같은 금액입니다
+                </p>
+              </div>
             ) : null}
             {c.aiAnalysis.surveyChecks?.length ? (
               <div className="rounded-xl bg-amber-50 px-3 py-2">

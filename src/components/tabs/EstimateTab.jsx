@@ -18,6 +18,7 @@ import {
   CheckRow,
   Details,
   Field,
+  Fold,
   Hero,
   Metric,
   Pill,
@@ -43,6 +44,25 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
   const msets = materialSetsFor(calc.trade);
   // 인테리어·마감 공종만 스타일·자재 카드를 보여준다 (철거·폐기물·기초·정지·인력은 자재 등급 개념이 없다)
   const showStyleCard = hasInteriorStyle(c);
+  // '분위기(호텔식·우드 등)'는 감성 마감 공종에만 어울린다.
+  // 바닥 미장은 몰탈 등급, 타일·방수는 타일 크기·방수 방식이라 분위기 대신 '자재 등급'으로 부른다.
+  // 관공서 공고는 '호텔식 분위기'를 고르는 일이 없다 — 공고는 자재 등급만 참고로 둔다.
+  const isBidCase = !!c?.bid;
+  const showMood = !isBidCase && !['plaster', 'tilewaterproof'].includes(calc.trade);
+  const styleTitle = isBidCase
+    ? '자재 등급·사양'
+    : calc.trade === 'plaster'
+    ? '바닥 자재 등급 (몰탈)'
+    : calc.trade === 'tilewaterproof'
+    ? '타일·방수 자재 등급'
+    : '스타일·자재 정하기';
+  const styleSubtitle = isBidCase
+    ? '설계내역서를 받기 전이라 자재 등급·사양만 참고로 정해 둡니다. 등급을 바꾸면 원가 계산이 함께 바뀝니다.'
+    : calc.trade === 'plaster'
+    ? '일반·고강도·자동수평 몰탈 중 무엇으로 할지에 따라 자재비와 두께·양생 기간이 달라집니다.'
+    : calc.trade === 'tilewaterproof'
+    ? '타일 크기(300각·600각·대형)와 방수 방식으로 자재비가 바뀝니다.'
+    : '고객이 “깔끔하게”라고만 해도 쓸 자재를 정해 드립니다. 지금 공종에 맞춰 자재가 바뀝니다.';
 
   // 복합(집 전체)이면 포함 공종별 자재 사양을 등급마다 전부 보여준다.
   const scopesForSpec = Array.isArray(c.subScopes) ? c.subScopes : [];
@@ -200,17 +220,12 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
         </Details>
       </Card>
 
-      <VerifyCard verify={verify} calc={calc} c={c} update={update} showToast={showToast} />
-
       {/* 2. 스타일·자재 — 마감 공종만 */}
       {showStyleCard ? (
-      <SectionCard
-        num="2"
-        title="스타일·자재 정하기"
-        subtitle="고객이 “깔끔하게”라고만 해도 쓸 자재를 정해 드립니다. 지금 공종에 맞춰 자재가 바뀝니다."
-        status={design.rate > 0 ? <Pill tone="warn">+{design.rate}%</Pill> : <Pill tone="ok">표준</Pill>}
-      >
-        <div className="space-y-3">
+      <Fold label={styleTitle} hint={styleSubtitle}>
+      <div className="space-y-3">
+          {showMood ? (
+          <>
           <div>
             <p className="text-sm font-bold text-ink-2">어떤 분위기로 할까요?</p>
             <div className="mt-1.5 grid grid-cols-2 gap-1.5">
@@ -271,12 +286,16 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
               </SmallButton>
             </div>
           </Field>
+          </>
+          ) : null}
 
           {/* 추천 자재 세트 — 탭 한 번으로 견적·손님 견적서·발주 리스트가 함께 바뀐다 */}
           <div>
             <p className="text-sm font-extrabold text-ink">추천 자재 세트</p>
             <p className="mt-0.5 text-xs font-semibold text-ink-3">
-              고객이 “실속으로” “호텔처럼”이라고만 해도 여기서 고르면 됩니다. 가격·견적서 사양·업체별 발주가 같이 바뀝니다.
+              {showMood
+                ? '고객이 “실속으로” “호텔처럼”이라고만 해도 여기서 고르면 됩니다. 가격·견적서 사양·업체별 발주가 같이 바뀝니다.'
+                : '등급을 고르면 자재비·견적서 사양·업체별 발주가 같이 바뀝니다.'}
             </p>
             {msets ? (
               <div className="mt-1.5 space-y-1.5">
@@ -525,19 +544,16 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
             </ol>
           </Details>
         </div>
-      </SectionCard>
+      </Fold>
       ) : null}
 
-      <VerifyCard verify={verify} calc={calc} c={c} update={update} showToast={showToast} />
+      <Fold label="시세 검증 · 빠진 비용" hint="전문가 시세와 비교하고, 빠뜨린 비용이 있는지 봅니다">
+        <VerifyCard verify={verify} calc={calc} c={c} update={update} showToast={showToast} />
+      </Fold>
 
-      <SubsidyCard c={c} update={update} showToast={showToast} onOpenDoc={onGoDoc} />
-
-      <Card className="p-4">
-        <p className="text-base font-extrabold text-ink">금액이 나왔습니다 — 이제 현장에 가보세요</p>
-        <p className="mt-1 text-[13px] font-semibold leading-5 text-ink-2">
-          답사에서 달라진 점을 적으면 3단계에서 최종 견적이 다시 계산되고, 4단계에서 가견적과 비교해 보여드립니다.
-        </p>
-      </Card>
+      <Fold label="점포철거비 지원금" hint="손님이 공단에서 돌려받는 돈 — 상가·철거 현장만">
+        <SubsidyCard c={c} update={update} showToast={showToast} onOpenDoc={onGoDoc} />
+      </Fold>
     </div>
   );
 }
