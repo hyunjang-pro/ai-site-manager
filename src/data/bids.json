@@ -645,6 +645,38 @@
       "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
     },
     {
+      "id": "R26BK01852695",
+      "noticeNo": "R26BK01852695",
+      "title": "부석면 북지리 버디골지구 외 1개소 포장복구공사",
+      "org": "경상북도 영주시 수도사업소",
+      "region": "영주시",
+      "regionKey": "gyeongbuk",
+      "site": "경상북도 영주시 수도사업소",
+      "price": 40272728,
+      "budget": 40272728,
+      "deadline": "2026-11-30T10:00:00+09:00",
+      "postedAt": "2026-11-24",
+      "trade": "실내건축·수선",
+      "workTypes": [
+        "interior"
+      ],
+      "licenses": [
+        "지반조성ㆍ포장공사업"
+      ],
+      "licenseRequired": true,
+      "restricted": false,
+      "restrictionNote": "",
+      "preference": "",
+      "status": "open",
+      "result": null,
+      "competition": null,
+      "winRate": null,
+      "url": "https://gongong.kr/notice/R26BK01852695",
+      "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01852695&bidPbancOrd=000",
+      "summary": "경상북도 영주시 수도사업소 공고 · 부석면 북지리 버디골지구 외 1개소 포장복구공사",
+      "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
+    },
+    {
       "id": "R26BK01846710",
       "noticeNo": "R26BK01846710",
       "title": "대창중학교 내진보강 부적정 건물 개축 건축공사",
