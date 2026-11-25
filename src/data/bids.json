@@ -1,5 +1,5 @@
 {
-  "collectedAt": "2026-11-24",
+  "collectedAt": "2026-11-25",
   "source": "나라장터 입찰공고(공고번호 원문 링크) · 경상북도 안동시/경북 시군 · 공공알림(gongong.kr) 공고 상세 미러",
   "notice": "가격은 공고 화면의 추정가격(예산) 기준입니다. 실제 투찰 전 나라장터 원문·공고문을 반드시 확인하세요.",
   "bids": [
@@ -704,6 +704,72 @@
       "url": "https://gongong.kr/notice/R26BK01846710",
       "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01846710&bidPbancOrd=000",
       "summary": "경상북도예천교육청 대창중학교 공고 · 대창중학교 내진보강 부적정 건물 개축 건축공사",
+      "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
+    },
+    {
+      "id": "R26BK01852118",
+      "noticeNo": "R26BK01852118",
+      "title": "순심여자중학교 1층 화장실 개선 건축공사",
+      "org": "경상북도칠곡교육청 순심여자중학교",
+      "region": "경북",
+      "regionKey": "gyeongbuk",
+      "site": "경상북도칠곡교육청 순심여자중학교",
+      "price": 110360000,
+      "budget": 110360000,
+      "deadline": "2026-11-30T14:00:00+09:00",
+      "postedAt": "2026-11-25",
+      "trade": "실내건축·수선",
+      "workTypes": [
+        "interior"
+      ],
+      "licenses": [
+        "실내건축공사업"
+      ],
+      "licenseRequired": true,
+      "restricted": false,
+      "restrictionNote": "",
+      "preference": "",
+      "status": "open",
+      "result": null,
+      "competition": null,
+      "winRate": null,
+      "url": "https://gongong.kr/notice/R26BK01852118",
+      "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01852118&bidPbancOrd=000",
+      "summary": "경상북도칠곡교육청 순심여자중학교 공고 · 순심여자중학교 1층 화장실 개선 건축공사",
+      "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
+    },
+    {
+      "id": "R26BK01848494",
+      "noticeNo": "R26BK01848494",
+      "title": "삼성현중학교 별관동 화장실 개선공사 입찰 공고",
+      "org": "경상북도교육청 경상북도경산교육지원청",
+      "region": "경북",
+      "regionKey": "gyeongbuk",
+      "site": "경상북도교육청 경상북도경산교육지원청",
+      "price": 403330000,
+      "budget": 403330000,
+      "deadline": "2026-12-01T10:00:00+09:00",
+      "postedAt": "2026-11-25",
+      "trade": "실내건축·수선",
+      "workTypes": [
+        "interior"
+      ],
+      "licenses": [
+        "실내건축공사업",
+        "도장ㆍ습식ㆍ방수ㆍ석공사업",
+        "금속창호ㆍ지붕건축물조립공사업"
+      ],
+      "licenseRequired": true,
+      "restricted": false,
+      "restrictionNote": "",
+      "preference": "",
+      "status": "open",
+      "result": null,
+      "competition": null,
+      "winRate": null,
+      "url": "https://gongong.kr/notice/R26BK01848494",
+      "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01848494&bidPbancOrd=000",
+      "summary": "경상북도교육청 경상북도경산교육지원청 공고 · 삼성현중학교 별관동 화장실 개선공사 입찰 공고",
       "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
     },
     {
