@@ -1,7 +1,7 @@
 {
   "name": "ai-site-manager",
   "private": true,
-  "version": "1.0.0",
+  "version": "3.13.0",
   "type": "module",
   "description": "AI 현장 매니저 — 경북 철거·인테리어 현장 장부/견적/수익방어/공정잠금/고객문서",
   "scripts": {

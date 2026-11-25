@@ -3,6 +3,7 @@
 // 현장 성격(아파트/단독·층수·엘베·공종·외부 작업)을 보고 처음부터 견적에 넣는다.
 // 사용자가 한 번이라도 직접 끄면(survey[id] === false) 그 선택이 자동 포함보다 우선한다.
 import { getRate, ratesOf } from './rates.js';
+import { bathroomDemoOnly, kitchenDemoOnly } from './scope.js';
 
 // 평 환산 (pricing.js와 같은 기준 — 순환 import를 피하려고 여기서 계산한다)
 function pyungOf(sizeValue, sizeUnit, fallback = 15) {
@@ -68,8 +69,10 @@ export function autoIncidentals(c) {
       out.materialLift = true;
       reason.materialLift = '엘베 없이 계단 양중';
     }
-    // 준공 청소는 '마감'이 있는 현장만 — 철거+정지처럼 마감이 없으면 붙이지 않는다
-    const cleanTrade = CLEAN_TRADES.includes(ctx.trade) && ctx.trade !== 'combined';
+    // 준공 청소는 '마감'이 있는 현장만 — 철거+정지처럼 마감이 없으면 붙이지 않는다.
+    // 욕실·주방도 '철거만' 하는 현장이면 청소할 마감이 없다.
+    const demoOnly = bathroomDemoOnly(c) || kitchenDemoOnly(c);
+    const cleanTrade = CLEAN_TRADES.includes(ctx.trade) && ctx.trade !== 'combined' && !demoOnly;
     if (cleanTrade || c?.fullInterior) {
       out.afterCare = true;
       reason.afterCare = '마감 공정 — 준공 검수 대비';

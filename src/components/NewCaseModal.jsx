@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 'lucide-react';
 import { SIZE_UNITS, TRADES, TRADE_LIST } from '../lib/constants.js';
 import { classifyRequest, summarizeRequest } from '../lib/classify.js';
+import { isDemoOnlyText } from '../lib/scope.js';
 import { computeEstimate } from '../lib/pricing.js';
 import { composeCase } from '../lib/storage.js';
 import { analyzeCaseWithGemini, getGeminiKey } from '../lib/gemini.js';
@@ -140,6 +141,20 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
   };
 
   const applyAi = (a, baseText) => {
+    // AI가 '전체 인테리어'로 읽어도, 글에 뜯는 말(철거·제거)만 있으면 철거로 바로잡는다.
+    // (스샷·글에서 '장판 제거 + 화장실 2개 + 샷시 + 싱크대 철거'를 combined로 읽어 1,000만원대 견적이 나갔다)
+    const rule = baseText ? classifyRequest(baseText) : null;
+    if (baseText && isDemoOnlyText(baseText) && rule?.patch?.demolition?.mode === 'partial') {
+      a = {
+        ...a,
+        trade: 'demolition',
+        tradeName: '',
+        includedScopes: ['demolition'],
+        excludedScopes: [],
+        ...(a.sizeValue ? {} : { sizeValue: rule.patch.sizeValue, sizeUnit: rule.patch.sizeUnit }),
+        summary: rule.title || a.summary,
+      };
+    }
     const rows = [
       { label: '공종', value: TRADES[a.trade]?.label || '직접 입력' },
       a.sizeValue ? { label: '규모', value: `${a.sizeValue}${a.sizeUnit || ''}` } : null,

@@ -803,18 +803,18 @@ async function main() {
     const before = await page.getByTestId('sugo-msg').innerText();
     record(
       '견적 멘트: 업체·금액·범위·실측 유도',
-      before.includes('견적 금액') && before.includes(appPrice.toLocaleString('ko-KR')) && before.includes('실측') && before.includes('안녕하세요')
+      before.includes('안녕하세요') && before.includes(appPrice.toLocaleString('ko-KR')) && before.includes('실측') && before.includes('부가세')
     );
     record('견적 멘트: 내부 원가·순익 없음', !['원가', '순익', '마진', '알선료', '예비비', '남는'].some((w) => before.includes(w)));
     // #22480: 숨고 스샷이 없는 일반 문의면 숨고라고 부르지 않고 고객님/사장님으로 부른다
     const cardTxt = await page.getByTestId('quote-msg-card').innerText();
     record('견적 멘트: 숨고 아님 → 카드 제목 고객용', cardTxt.includes('고객 견적 발송 멘트') && !cardTxt.includes('숨고 견적 발송 멘트'), cardTxt.split('\n')[0]);
     record('견적 멘트: 숨고 단어 없음', !before.includes('숨고'), before.split('\n').find((l) => l.includes('숨고')) || '없음');
-    record('견적 멘트: 주거 현장 호칭 고객님', before.includes('고객님,') && !before.includes('사장님,'));
-    // 사진이 없으면 '사진 없이 주신 정보만으로 낸 가견적'까지 짚는다
+    record('견적 멘트: 주거 현장 호칭 고객님', /고객님[,.]/.test(before) && !/사장님[,.]/.test(before));
+    // 사진이 없으면 '사진 없이 주신 내용만으로 잡은 금액'까지 짚는다
     record(
       '견적 멘트: 사진 없이 낸 가견적 → 비용 변동 안내',
-      before.includes('아직 현장 사진 없이 주신 정보만으로 낸 가견적') && before.includes('줄어들 수도') && before.includes('늘어날 수도')
+      before.includes('아직 현장 사진이 없어서') && before.includes('줄어들 수도') && before.includes('늘어날 수도')
     );
 
     const heroBefore = await page.locator('main').innerText();
@@ -873,8 +873,8 @@ async function main() {
     const house = mk({ title: '포항 두호동 24평 빌라 도배', location: '포항시 북구 두호동 빌라 3층' });
     record('멘트 단위: 주거 현장 호칭 고객님', clientHonorific(house, computeEstimate(house)) === '고객님');
 
-    record('멘트 단위: 사진 없음 문구', tentativePriceNotice({ photos: [] }).includes('아직 현장 사진 없이'));
-    record('멘트 단위: 사진 있으면 내용+사진 기준', tentativePriceNotice({ photos: [{ dataUrl: 'data:image/png;base64,AA' }] }).includes('주신 내용과 사진 기준'));
+    record('멘트 단위: 사진 없음 문구', tentativePriceNotice({ photos: [] }).includes('아직 현장 사진이 없어서'));
+    record('멘트 단위: 사진 있으면 내용+사진 기준', tentativePriceNotice({ photos: [{ dataUrl: 'data:image/png;base64,AA' }] }).includes('주신 사진과 내용으로'));
     record('멘트 단위: 사진 있어도 비용 증감 안내', msgOf(mk({ photos: [{ dataUrl: 'data:image/png;base64,AA' }] })).includes('늘어날 수도'));
   });
 
@@ -1231,7 +1231,8 @@ async function main() {
     await goTab(5);
     await goTab(3);
     const lift = await mainText();
-    record('운반: 인력 반출이 인부×일당+트럭', /인력 반출 \(인부 \d명 · 1톤차 \d대\)/.test(lift) && lift.includes('일당'));
+    record('운반: 인력 반출이 인부×일당', /인력 반출 \(인부 \d+명\)/.test(lift) && lift.includes('일당'));
+    record('운반: 폐기물차를 양중비에 또 넣지 않음', !/인력 반출[^\n]*1톤차/.test(lift));
     record('운반: 5만원 고정값 없음', !/인력 반출[^\n]*5만원/.test(lift));
     record('운반: 인부·트럭·금액 수정칸', (await page.getByLabel('인부 수', { exact: true }).count()) >= 1 && (await page.getByLabel('인력 반출 금액').count()) === 1);
     await shotAt('42-lifting.png', '운반 방법 고르기', -110);

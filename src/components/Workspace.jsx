@@ -52,7 +52,7 @@ export default function Workspace({
       ? activeCase.tradeName
       : calc.trade === 'combined'
       ? combinedTitle(scopeList(activeCase)) // 철거+정지를 '복합 인테리어'로 부르지 않는다
-      : info.label;
+      : calc.tradeLabel || info.label;
   const stageIdx = STAGES.findIndex((s) => s.id === activeCase.stage);
 
   // 어느 단계로 가든 화면 맨 위부터 보여준다.

@@ -39,6 +39,9 @@ export default function WasteVehicleSwitch({ c, update, showToast, className = '
         })}
       </div>
       <p className="mt-1.5 text-2xs font-semibold leading-4 text-amber-800">{current.note}</p>
+      <p className="mt-1 text-2xs font-semibold leading-4 text-amber-700">
+        차량 값에 상차·운반·처리 인건비가 다 들어 있습니다. 인부비를 따로 또 붙이지 않습니다.
+      </p>
     </div>
   );
 }

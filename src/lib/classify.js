@@ -89,20 +89,20 @@ export function classifyRequest(rawText = '') {
   const push = (id, re, strong = false) => {
     if (re.test(t)) hits.push({ id, strong });
   };
-  push('demolition', /철거|해체|원상복구|데코타일|경량벽체|가벽|집게차/);
+  push('demolition', /철거|해체|부수|부숴|뜯|원상복구|데코타일|경량벽체|가벽|집게차/);
   push('wallpaper', /도배|벽지|합지|실크|장판|초배/);
   push('bathroom', /욕실|화장실|양변기|세면대|샤워|욕조/);
   // 부엌·싱크·상부장·하부장·후드까지 주방으로 읽는다 ("부엌을 전면 인테리어" → 주방)
   push('kitchen', /주방|부엌|싱크|씽크|상판|후드|수납장|상부장|하부장|조리대|아일랜드|식기세척기/);
   push('tilewaterproof', /타일|방수|줄눈|담수|에폭시/);
   push('plaster', /미장|몰탈|엑셀관|바닥미장|바닥 미장/, true);
-  push('window', windowExcluded ? /__none__/ : /창호|샤시|폴딩도어|발코니|중문|방충망|유리|블라인드/);
+  push('window', windowExcluded ? /__none__/ : /창호|샤시|샷시|폴딩도어|발코니|중문|방충망|유리|블라인드/);
   push('waste', /폐기물|쓰레기|수거|배출|반출|마대|처리장|한\s*차/);
   push('labor', /인부|일용|인력|인력사무소|잠부|사람.{0,6}(구해|필요)/);
   push('repair', /수선|보수|교체|문짝|몰딩|도장|페인트|걸레받이|경첩|손잡이|실리콘/);
   push('carpentry', /목공|문틀|문짝|몰딩|가구|데크|선반|파티션|합판/);
   push('electric', /전기\s*(공사|배선|증설)|콘센트|조명|스위치|분전반|누전|형광등|LED|배선/);
-  push('plumbing', /배관|급수|배수|수도|보일러|하수구|막힘|수전\s*(교체|수리)/);
+  push('plumbing', /배관|급수|배수|수도|보일러|하수구|막힘|수전|세면기|변기\s*(막힘|교체)/);
   push('film', /필름|시트지|래핑|유리\s*필름/);
   push('groundwork', /토목|터파기|기초\s*(공사|타설|콘크리트)|맨땅|콘크리트\s*타설|배수로|정원\s*공사|포장\s*공사|성토|절토|굴삭기|포크레인|아스콘|옹벽|부지\s*정지|정지\s*(작업|공사)|땅\s*고르|지반\s*(공사|복구)|노면\s*복구|부지\s*(정리|고르|공사)/);
 
@@ -156,6 +156,13 @@ export function classifyRequest(rawText = '') {
 
   // 폐기물 + 철거가 같이 있으면 실제 주작업(철거)으로
   if (trade === 'waste' && /철거|해체/.test(t)) trade = 'demolition';
+  // "샷시 철거 후 새로 설치"·"장판 철거하고 새 장판"처럼 철거 뒤 시공까지 말했으면
+  // 철거가 아니라 그 공종(창호·도배·욕실·주방) 현장이다.
+  if (!fullInterior && ['demolition', 'combined'].includes(trade) && /설치|교체|새로|시공|깔아/.test(t)) {
+    const finishIds = ids.filter((id) => ['wallpaper', 'bathroom', 'kitchen', 'window', 'tilewaterproof', 'carpentry', 'electric', 'plumbing', 'film', 'plaster'].includes(id));
+    if (finishIds.length === 1) trade = finishIds[0];
+    else if (ids.includes('window') && /(샷시|샤시|창호)[^\n]{0,12}(설치|교체)/.test(t)) trade = 'window';
+  }
   // "발코니 방수"는 창호가 아니라 타일·방수
   if (trade === 'window' && /방수|누수/.test(t) && !/창호|샤시|폴딩|중문/.test(t)) trade = 'tilewaterproof';
   // 상가 폐업 집기·비품 정리는 철거가 아니라 폐기물 수거 현장이다
@@ -171,7 +178,17 @@ export function classifyRequest(rawText = '') {
   // ── 소형·부분 철거(개수 단위) ──
   // "간판 두개 철거", "싱크대 철거"를 15평 전체 철거로 계산하면 400~500만원이 나온다.
   const partial = detectPartial(t);
-  if (partial.on) trade = 'demolition';
+  if (partial.on) {
+    // 품목이 하나뿐인 욕실·주방 철거는 그 공종에서 '철거만'으로 계산한다
+    const only = partial.items.length === 1 ? partial.items[0].id : '';
+    trade = only === 'bathroom' ? 'bathroom' : only === 'sink' && /주방|부엌/.test(t) ? 'kitchen' : 'demolition';
+  }
+
+  // "욕실 타일 20㎡"는 욕실 리모델링이 아니라 타일·방수 면적 공사다.
+  const explicitSqm = t.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m2|제곱미터)/);
+  if (trade === 'bathroom' && ids.includes('tilewaterproof') && explicitSqm && !/올수리|리모델링|인테리어|전체\s*교체/.test(t)) {
+    trade = 'tilewaterproof';
+  }
 
   const floorMatch = t.match(/(\d+)\s*층/);
   const tonMatch = t.match(/(\d+(?:\.\d+)?)\s*톤/);
@@ -181,18 +198,30 @@ export function classifyRequest(rawText = '') {
   const pyung = t.match(/(\d+(?:\.\d+)?)\s*평(?:대)?/);
   const sqm = t.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m2|제곱미터)/);
   const meter = t.match(/(\d+(?:\.\d+)?)\s*(?:m|미터)(?!\s*2)/);
-  const spot = t.match(/(\d+(?:\.\d+)?)\s*(?:개소|군데|곳)/);
+  const spot = t.match(/(\d+(?:\.\d+)?)\s*(?:개소|군데|곳|개)/);
   const kan = t.match(/(\d+(?:\.\d+)?)\s*칸/);
+  // "욕실 하나", "화장실 두 칸"처럼 숫자를 한글로 적는 경우가 많다
+  const kanWord =
+    t.match(/(한|두|세|네|다섯|여섯)\s*칸/) ||
+    t.match(/(?:욕실|화장실)\s*(\d+|[한두세네]|다섯|여섯)\s*(?:개|칸|곳)?/);
+  const KOR_NUM = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6 };
   const budgetMatch = t.match(/예산\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/);
 
   let sizeValue = '';
   let sizeUnit = '';
   const livingWaste = trade === 'waste' && /생활\s*폐기물/.test(t);
   if (partial.on) {
-    // 부분 철거는 품목 수량이 곸 규모다 (간판 2개 · 샷시 2짝 · 가벽 3m)
-    const total = partial.items.reduce((sum, it) => sum + (Number(it.qty) || 1), 0);
-    sizeValue = String(Math.round(total * 10) / 10);
-    sizeUnit = partial.items.length === 1 ? partial.items[0].unit : '개';
+    // 부분 철거는 품목 수량이 곸 규모다 (간판 2개 · 샷시 2짝 · 가벽 3m).
+    // 단위가 섞여 있으면 숫자를 합치지 않는다 (장판 15평 + 욕실 2칸 = 17? 뜻이 없다).
+    const units = Array.from(new Set(partial.items.map((it) => it.unit)));
+    if (units.length === 1) {
+      const total = partial.items.reduce((sum, it) => sum + (Number(it.qty) || 1), 0);
+      sizeValue = String(Math.round(total * 10) / 10);
+      sizeUnit = units[0];
+    } else {
+      sizeValue = '';
+      sizeUnit = '모름';
+    }
   } else if (trade === 'waste') {
     if (tonMatch) {
       sizeValue = num(tonMatch[1]);
@@ -208,7 +237,7 @@ export function classifyRequest(rawText = '') {
     sizeValue = peopleMatch ? parseInt(peopleMatch[1], 10) : '';
     sizeUnit = '명';
   } else if (trade === 'bathroom') {
-    sizeValue = kan ? num(kan[1]) : 1;
+    sizeValue = kan ? num(kan[1]) : kanWord ? Number(kanWord[1]) || KOR_NUM[kanWord[1]] || 1 : 1;
     sizeUnit = '칸';
   } else if (trade === 'kitchen' && meter) {
     sizeValue = num(meter[1]);
@@ -390,6 +419,14 @@ export function classifyRequest(rawText = '') {
     subScopes: Array.from(new Set(subScopes)),
     excludedScopes: Array.from(new Set(excludedScopes)),
   };
+  // 규모를 안 적은 요청 — 무엇이든 15평으로 잡으면 "데코타일 철거"가 461만원이 된다.
+  // 한 공간(욕실·방·바닥) 요청인지, 매장·건물 요청인지 구분해 기본값을 나눈다.
+  if (!sizeValue || sizeValue === '0') {
+    const roomWords = /욕실|화장실|주방|부엌|베란다|발코니|현관|원룸|투룸|방\s*\d|방 하나|데코타일|텍스|가벽|장판|마루|바닥|싱크대|붙박이|간판|창호|샷시|문짝|몰딩|타일/;
+    const placeWords = /상가|상점|매장|식당|음식점|카페|사무실|공장|창고|학원|병원|약국|관공서|학교|빌딩|건물|아파트|빌라|주택|오피스텔|층|평수/;
+    patch.scaleHint = placeWords.test(t) ? 'place' : roomWords.test(t) ? 'room' : '';
+    patch.sizeUnknown = true;
+  }
   if (region) patch.region = region;
   if (location) patch.location = location;
   if (phoneMatch) patch.clientPhone = `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}`;
@@ -400,6 +437,7 @@ export function classifyRequest(rawText = '') {
     patch.sizeUnit = sizeUnit;
   }
   if (fullInterior) patch.fullInterior = true;
+  if (/덧방/.test(t)) patch.tileRemain = true;
   if (trade === 'tilewaterproof') patch.tileWork = { mode };
   if (trade === 'plaster') patch.plaster = { heating: extraWorks.includes('난방 보강'), tile: extraWorks.includes('타일') };
 

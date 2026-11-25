@@ -1,5 +1,8 @@
-// 공사기간 예상 — 공종·규모·선택 마감으로 계산한다. (시공일 날씨·하루 순수익 계산에 함께 쓴다)
+// 공사일수 — 견적 엔진이 계산한 일수(calc.workDays)를 먼저 쓴다.
+// 화면마다 다른 일수를 보여 주면(가견적 '하루 96만' vs 최종 '하루 32만') 사장님이 손해 본다.
 export function estimateWorkDays(c, calc, designDays = 0) {
+  const fromCalc = Number(calc?.workDays);
+  if (Number.isFinite(fromCalc) && fromCalc > 0) return Math.max(1, Math.round((fromCalc + (Number(designDays) || 0)) * 10) / 10);
   const size = parseFloat(c?.sizeValue) || 0;
   const unit = c?.sizeUnit || '평';
   const pyung = unit === '평' ? size : unit === '㎡' ? size / 3.3 : unit === '칸' ? size * 1.8 : size || 15;
