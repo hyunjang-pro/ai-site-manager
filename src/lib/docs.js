@@ -691,7 +691,9 @@ export function clientQuoteMessage(c, calc) {
     Number(calc?.lifting?.cost) > 0 ? '자재·폐기물 운반' : '',
   ].filter(Boolean);
   const includeLine = goods.length ? `${goods.join('·')}까지 다 포함한 금액입니다.` : '부가세를 뺀 금액입니다.';
-  const days = Math.max(1, parseInt(c?.workDays, 10) || estimateWorkDays(c, calc));
+  // '1.5일'은 사장님이 쓰는 말이 아니다 — 반나절·하루·하루 반나절로 바꿔 쓴다.
+  const rawDays = Number(c?.workDays) || estimateWorkDays(c, calc);
+  const dayText = rawDays <= 0.5 ? '반나절' : rawDays <= 1 ? '하루' : rawDays <= 1.5 ? '하루 반나절' : rawDays % 1 ? `${Math.floor(rawDays)}~${Math.ceil(rawDays)}일` : `${Math.round(rawDays)}일`;
   const vat = c?.includeVat ? '부가세 포함' : '부가세 별도';
   const where = place ? `${place} ` : '';
   const ask = soomgo ? '숨고 채팅으로' : '문자나 전화로';
@@ -704,7 +706,7 @@ export function clientQuoteMessage(c, calc) {
   if (trade === 'labor') {
     lines.push('일당과 4대보험까지 넣은 금액이라, 인원이나 날짜가 바뀌면 그만큼 조정됩니다.');
   } else {
-    lines.push(`기간은 ${days}일 정도 생각하고 있고, 현장 사정에 따라 하루 이틀은 달라질 수 있습니다.`);
+    lines.push(`기간은 ${dayText} 정도 생각하고 있고, 현장 사정에 따라 하루 이틀은 달라질 수 있습니다.`);
   }
   lines.push('', tentativePriceNotice(c));
   lines.push(`편하실 때 ${ask} 연락 주시면 현장 한번 뵙고 실측해서 정확한 금액으로 다시 말씀드리겠습니다. 방문 견적은 비용 안 받습니다.`);
