@@ -17,6 +17,7 @@ import {
   constructionNotice,
 } from '../../lib/docs.js';
 import { buildOrderGroups } from '../../lib/orders.js';
+import { parseRequestSheet, sheetValue } from '../../lib/request.js';
 import { defaultCrew } from '../../lib/docs.js';
 import { wasteVehicle } from '../../lib/waste.js';
 import { materialSetFor, BRAND_PRICES } from '../../lib/materials.js';
@@ -659,7 +660,15 @@ export default function BuildTab({ c, update, calc, gates, design, showToast, on
                 {c.lifting?.elevator === 'yes' ? '엘리베이터 있음' : c.lifting?.elevator === 'no' ? '엘리베이터 없음' : '엘베 확인 필요'}
                 <br />
                 {c.lifting?.ladderAllowed === 'no' ? '사다리차 불가' : c.lifting?.ladderAllowed === 'yes' ? '사다리차 가능' : '사다리차 확인 필요'} ·{' '}
-                {/공실|빈집/.test(`${c.notes || ''} ${c.rawInput || ''}`) ? '공실' : '거주·사용 중'}
+                {(() => {
+                  // '공실 상태'라는 라벨을 내용으로 읽으면 입주 중인 가게도 '공실'이 된다 — 값으로 판단한다.
+                  const sheet = parseRequestSheet(`${c.notes || ''}\n${c.rawInput || ''}`);
+                  const occ = `${sheetValue(sheet, 'contract')} ${sheetValue(sheet, 'vacancy')}`;
+                  if (/입주\s*중|영업\s*중|거주\s*중/.test(occ)) return '입주·사용 중';
+                  if (/공실|빈집|비어\s*있/.test(`${sheetValue(sheet, 'vacancy')} ${sheetValue(sheet, 'contract')}`)) return '공실';
+                  if (c.survey?.residential === true) return '거주·사용 중';
+                  return '공실·거주 확인 필요';
+                })()}
               </p>
             </div>
           </div>
