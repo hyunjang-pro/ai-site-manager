@@ -258,8 +258,8 @@ export function buildDayPlans({ c, calc, workDays, startDate, crew, trade }) {
     const day = i + 1;
     const isLast = day === days;
     const iso = start ? addDaysISO(start, i) : '';
-    // 마감·검수 날은 기공만 남긴다 (보조·잡부는 철수) — 인력·폐기물 파견은 그대로
-    const dayCrew = isLast && skilled.length && !['labor', 'waste'].includes(trade) ? skilled : base;
+    // 마감·검수 날은 기공만 남긴다 (보조·잡부는 철수) — 단 하루짜리 현장은 그날이 전부라 그대로 투입한다
+    const dayCrew = isLast && days > 1 && skilled.length && !['labor', 'waste'].includes(trade) ? skilled : base;
 
     let vehicle;
     if (trade === 'labor') vehicle = '차량 없음 (현장 집결)';
