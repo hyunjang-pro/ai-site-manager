@@ -804,7 +804,11 @@ export function defaultCrew(trade, c, calc) {
       if (crew.length) return crew;
     }
   }
-  // 철거·복합(인테리어)
+  // 철거·복합(인테리어) — 견적이 고른 '추천 인원'을 그대로 쓴다 (4단계 '2명 1일'과 5단계 배정 인원이 다르면 안 된다)
+  if (trade === 'demolition' && calc?.crewPlan?.crew) {
+    const n = Math.max(1, Math.min(6, Number(calc.crewPlan.crew) || 1));
+    return n > 1 ? [{ role: '철거 기공', count: 1 }, { role: '잡부', count: n - 1 }] : [{ role: '철거 기공', count: 1 }];
+  }
   const helper = pyung >= 12 ? 2 : 1;
   return [{ role: '철거 기공', count: 1 }, { role: '잡부', count: helper }];
 }
