@@ -8,7 +8,7 @@ import { composeCase } from '../lib/storage.js';
 import { analyzeCaseWithGemini, getGeminiKey } from '../lib/gemini.js';
 import { ocrAnalyzeWithTimeout } from '../lib/ocr.js';
 import { fileToThumb } from '../lib/image.js';
-import { AlertCard, BigButton, Details, Modal, Pill, Select, TextArea, TradeIcon, cx } from './ui.jsx';
+import { AlertCard, BigButton, Details, Modal, Pill, Select, SmallButton, TextArea, TradeIcon, cx } from './ui.jsx';
 
 export default function NewCaseModal({ open, onClose, onCreate, settings }) {
   const [step, setStep] = useState('input'); // input | result
@@ -200,10 +200,12 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       setError('붙여넣은 내용이 없습니다. 요청 글을 넣거나 스샷·현장 사진을 올려주세요.');
       return;
     }
-    setProgress(getGeminiKey() ? '🤖 AI가 글·현장 사진을 함께 보는 중…' : '분류 중…');
+    setProgress(getGeminiKey() && sites.length ? '🤖 AI가 글·현장 사진을 함께 보는 중…' : '분류 중…');
     try {
       const key = getGeminiKey();
-      if (key) {
+      // 사진이 없으면 AI를 기다리지 않는다 — 손님이 글만 적은 현장은 내장 규칙 엔진이 즉시(수십 ms) 분류한다.
+      // (예전에는 키가 있으면 글만 적어도 Gemini 응답을 기다려 5~20초 걸렸다)
+      if (key && sites.length) {
         // 현장 사진은 시각 정보로 그대로 넘긴다. 스샷은 이미 글자로 읽어 두었다.
         const ai = await analyzeCaseWithGemini({
           apiKey: key,
@@ -247,6 +249,15 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
       setElevator(r.patch.lifting?.elevator || 'unknown');
       fillCustomer(r.patch);
       setStep('result');
+      // 결과를 먼저 띄우고, AI 키가 있으면 뒤에서 한 번 더 정밀 분석해 조용히 덧붙인다.
+      // (기다리지 않으므로 부모님은 누르자마자 금액을 본다. AI가 늦거나 실패해도 화면은 그대로 쓸 수 있다)
+      if (key) {
+        analyzeCaseWithGemini({ apiKey: key, text: typed, photos: [] })
+          .then((ai) => {
+            if (ai.ok) applyAi(ai.data, typed);
+          })
+          .catch(() => {});
+      }
     } catch (e) {
       // 영어 라이브러리 오류문을 부모님께 그대로 보여주지 않는다
       const msg = String(e?.message || '');
@@ -484,16 +495,17 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
             </p>
           </div>
 
-          {/* 3) 자동 분류 — 전체 너비 주 버튼 */}
+          {/* 3) 자동 분류 — 전체 너비 주 버튼.
+              사진이 없으면 글만으로 내장 엔진이 바로 끝난다(AI를 기다리지 않음). 사진이 있으면 AI가 사진까지 본다. */}
           <BigButton
             variant="amber"
             className="w-full whitespace-nowrap text-sm"
             onClick={() => analyze()}
             disabled={busy}
-            aria-label={aiOn ? 'AI 정밀 분석' : '자동으로 분류하기'}
+            aria-label={aiOn && siteCount ? 'AI 정밀 분석' : '자동으로 분류하기'}
           >
             {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
-            {busy ? '읽는 중…' : aiOn ? '🤖 AI 정밀 분석' : '자동으로 분류하기'}
+            {busy ? '읽는 중…' : aiOn && siteCount ? '🤖 AI 정밀 분석' : '자동으로 분류하기'}
           </BigButton>
 
           {photos.length ? (

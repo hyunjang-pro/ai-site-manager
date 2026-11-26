@@ -469,14 +469,15 @@ export function computeEstimate(c) {
       }
     }
 
+    const floorName = /데코타일/.test(notes) ? '데코타일' : is22 ? '2.2T 장판' : '1.8T 장판';
     targetSummary = [
       useWall ? `${pyung}평 ${silk ? '실크' : '합지'} 도배(벽 ${wallPyung}평/${rolls}롤)` : '',
-      useFloor ? `${is22 ? '2.2T' : '1.8T'} 장판(${floorSqm}㎡)` : '',
+      useFloor ? `${floorName}(${floorSqm}㎡)` : '',
     ]
       .filter(Boolean)
       .join(' + ');
     if (useWall) items.push({ id: 'wallpaper', category: '자재', name: `${silk ? '실크' : '합지'} 벽지 (${rolls}롤)`, detail: `벽 ${wallPyung}평 ÷ 5평/롤 × 1.15(손실) × ${rollUnit}만`, amount: wallCost });
-    if (useFloor) items.push({ id: 'floor', category: '자재', name: `${is22 ? '2.2T' : '1.8T'} 장판 (${floorSqm}㎡)`, detail: `${pyung}평 × 2.3 = ${floorSqm}㎡ × ${floorUnit}만`, amount: floorCost });
+    if (useFloor) items.push({ id: 'floor', category: '자재', name: `${/데코타일/.test(notes) ? '데코타일' : is22 ? '2.2T' : '1.8T'} ${/데코타일/.test(notes) ? '' : '장판'}`.trim() + ` (${floorSqm}㎡)`, detail: `${pyung}평 × 2.3 = ${floorSqm}㎡ × ${floorUnit}만`, amount: floorCost });
     items.push({ id: 'submat', category: '자재', name: '도배·장판 부자재', detail: '친환경 풀·초배지·장판본드·실리콘', amount: subMatUse });
     items.push({ id: 'labor', category: '노무', name: `도배·장판 노무 (${laborDaysUse}일)`, detail: `도배 ${wallDaysUse}일 × ${wallRate}만 + 장판·마루 ${floorDaysUse}일 × ${floorRate}만`, amount: laborCost });
   } else if (trade === 'bathroom') {

@@ -1869,8 +1869,11 @@ async function main() {
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
     record('모달: AI ON 뱃지', (await page.locator('[role=dialog]').innerText()).includes('AI 정밀 분석 ON'));
     await page.getByLabel('현장 요청 내용').fill('부엌을 전면 인테리어. 최신식으로');
-    await page.getByLabel('AI 정밀 분석').click();
+    // 사진 없이 글만이면 내장 엔진이 즉시 끝난다(v3.14) — AI 정밀 분석은 결과 화면의 '한 번 더 보기'로 확인
+    await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
+    await page.getByText(/AI 참고 시세|희망사항:/).first().waitFor({ timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(400);
     const r = await page.locator('[role=dialog]').innerText();
     record('AI: 주방 분류', r.includes('주방'));
     record('AI: 보수적 범위 표시', r.includes('420~560만'));
@@ -1896,7 +1899,7 @@ async function main() {
     const inputStep = await page.locator('[role=dialog]').innerText();
     record('새 현장: 1단계는 초간단(고객 칸 없음)', !inputStep.includes('빈칸만 채우면 됩니다'));
     await page.getByLabel('현장 요청 내용').fill('경북 안동시 15평 상가 철거, 연락처 010-2345-6789');
-    await page.getByLabel('AI 정밀 분석').click();
+    await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
     await page.waitForTimeout(300);
     const confirm = await page.locator('[role=dialog]').innerText();
@@ -2005,7 +2008,8 @@ async function main() {
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
     await page.getByLabel('현장 요청 내용').fill('안동 24평 아파트 도배·장판');
-    await page.getByLabel('AI 정밀 분석').click();
+    // 글만이면 AI를 기다리지 않고 내장 엔진이 즉시 분류한다(v3.14) — AI가 죽어 있어도 결과는 나온다
+    await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 15000 });
     const r = await page.locator('[role=dialog]').innerText();
     record('폴백: 로컬 규칙으로 도배 분류', r.includes('도배'));
@@ -2155,8 +2159,9 @@ async function main() {
     await page.getByRole('button', { name: /새 현장 만들기/ }).click();
     await page.getByText('숨고·카톡·메모를 그대로 넣으세요').waitFor();
     await page.getByLabel('현장 요청 내용').fill('부엌을 전면 인테리어. 최신식으로');
-    await page.getByLabel('AI 정밀 분석').click();
+    await page.getByLabel(/AI 정밀 분석|자동으로 분류하기/).click();
     await page.getByText('자동으로 잡았습니다').waitFor({ timeout: 20000 });
+    await page.getByText(/AI 참고 시세|희망사항:/).first().waitFor({ timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(400);
     const draft = page.locator('[data-testid=draft-quote]');
     record('만들기: 견적 미리보기 카드 있음', (await draft.count()) === 1);

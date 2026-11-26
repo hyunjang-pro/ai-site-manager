@@ -19,6 +19,7 @@ const PARTIAL_SHORT = {
   deck: '데크',
   furniture: '가구',
   floor: '장판',
+  woodFloor: '마루',
   decoTile: '데코타일',
   wallpaper: '벽지',
   bathroom: '욕실',
@@ -217,6 +218,23 @@ export function classifyRequest(rawText = '') {
   const otherTrades = ids.some((id) => ['groundwork', 'electric', 'plumbing', 'plaster', 'film'].includes(id));
   if (trade === 'combined' && ids.includes('demolition') && !otherTrades && isDemoOnlyText(t)) trade = 'demolition';
 
+  // ── '하나만 갈아 끼우는' 수선은 올수리·창호 교체가 아니다 ──
+  // "학교 화장실 변기 1개 교체"가 욕실 올수리 566만으로 나가면 안 된다.
+  const fixtureOnly =
+    /변기|양변기|세면대|수전|샤워기|도기/.test(t) &&
+    /교체|갈아|바꾸/.test(t) &&
+    !/타일|방수|철거|올수리|전체\s*교체|리모델링|인테리어/.test(t);
+  if (fixtureOnly && trade === 'bathroom') trade = 'repair';
+  if (/중문|방화문|문짝|도어/.test(t) && /교체|설치|갈아/.test(t) && !/창호|샷시|샤시/.test(t) && ['window', 'bathroom'].includes(trade)) trade = 'repair';
+  // 바닥 데코타일 시공은 타일·방수(㎡)가 아니라 장판과 같은 평당 바닥 공사다.
+  // 단 '상가 15평 철거 후 데코타일'처럼 건물 전체 철거가 앞에 있으면 복합으로 묶어 둔다.
+  if (/데코타일/.test(t) && /시공|깔|교체|새/.test(t) && !/원상복구|올수리|전체/.test(t)) {
+    if (/철거|제거/.test(t) && (pyungNum >= 8 || /상가|사무실|매장|카페|식당|학원|병원/.test(t))) trade = 'combined';
+    else if (['tilewaterproof', 'demolition'].includes(trade)) trade = 'wallpaper';
+  }
+  // "장판만 제거"·"벽지 뜯기" — '제거'만 적힌 마감재는 도배 시공이 아니라 철거 현장이다
+  if (trade === 'wallpaper' && /제거|철거|뜯|까\s*내/.test(t) && isDemoOnlyText(t)) trade = 'demolition';
+
   // ── 소형·부분 철거(개수 단위) ──
   // "간판 두개 철거", "싱크대 철거"를 15평 전체 철거로 계산하면 400~500만원이 나온다.
   const partial = detectPartial(t);
@@ -381,7 +399,7 @@ export function classifyRequest(rawText = '') {
   // 집 전체·복합 현장의 세부 포함 공종 — 욕실·부엌·도배·현관·철거·미장을 하나도 빠뜨리지 않는다
   if (/욕실|화장실/.test(t) || /욕실\s*\d/.test(t)) subScopes.push('bathroom');
   if (/부엌|주방|싱크|상부장|하부장/.test(t)) subScopes.push('kitchen');
-  if (/도배|벽지|장판|합지|실크/.test(t)) subScopes.push('wallpaper');
+  if (/도배|벽지|장판|마루|데코타일|합지|실크/.test(t)) subScopes.push('wallpaper');
   if (/현관|중문|신발장|현관\s*타일/.test(t)) subScopes.push('entrance');
   if (/철거|해체|원상복구/.test(t)) subScopes.push('demolition');
   if (/미장|몰탈|바닥\s*평탄/.test(t)) subScopes.push('plaster');
@@ -556,7 +574,7 @@ export function summarizeRequest(text, res) {
 
   // 요청사항 — 원문에서 핵심이 되는 첫 줄들만 짧게
   const wants = clean
-    .split(/[\n.]/)
+    .split(/\n|(?<!\d)\.(?!\d)/) // '2.5톤'의 소수점에서 문장을 끊지 않는다
     .map((s) => s.trim())
     .filter((s) => s.length >= 4)
     .slice(0, 2)

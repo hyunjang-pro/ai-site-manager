@@ -24,6 +24,7 @@ export const PARTIAL_ITEMS = {
   // v3.13 — 실제 현장 빈출 품목. '장판 제거'를 도배 시공으로 읽지 않는다.
   floor: { label: '장판·마루', unit: '평', skilled: 1, helper: 0, daysPer: 0.03, minDays: 0.5, wastePer: 0.3, tonsPer: 0.01, consum: 1, defaultQty: 10, hint: '장판·마루 뜯어 마대' },
   decoTile: { label: '데코타일', unit: '평', skilled: 1, helper: 0, daysPer: 0.05, minDays: 0.5, wastePer: 1.2, tonsPer: 0.03, consum: 1, defaultQty: 10, hint: '데코타일·카펫 뜯어 마대 (장판보다 무겁다)' },
+  woodFloor: { label: '마루', unit: '평', skilled: 1, helper: 0, daysPer: 0.05, minDays: 0.5, wastePer: 0.9, tonsPer: 0.02, consum: 1, defaultQty: 10, hint: '마루·합판 뜯어 마대 (못·본드 제거)' },
   wallpaper: { label: '벽지·도배지', unit: '평', skilled: 1, helper: 0, daysPer: 0.05, minDays: 0.5, wastePer: 1.2, tonsPer: 0.02, consum: 1, defaultQty: 15, hint: '벽지·초배지 긁어내기' },
   bathroom: { label: '욕실·화장실', unit: '칸', skilled: 2, helper: 1, daysPer: 0.35, minDays: 0.5, wastePer: 20, tonsPer: 0.4, consum: 2, defaultQty: 1, hint: '타일·도기·천장 해체' },
   shelf: { label: '선반·수납', unit: '개', skilled: 0, helper: 1, daysPer: 0.1, minDays: 0.25, wastePer: 3, tonsPer: 0.05, consum: 1, defaultQty: 1, hint: '벽 선반·수납장 분해' },
@@ -40,7 +41,8 @@ const ITEM_MATCHERS = [
   ['sink', /싱크대|씽크대|개수대|조리대/],
   ['bathroom', /욕실|화장실|욕조|샤워부스/],
   ['decoTile', /데코타일|카펫/],
-  ['floor', /장판|마루|바닥재/],
+  ['woodFloor', /마루/],
+  ['floor', /장판|바닥재/],
   ['wallpaper', /벽지|도배지|합지|실크/],
   ['window', /샷시|샤시|창호|창틀|유리창|미서기|붙박이창/],
   ['ceiling', /텍스|천장\s*재|천장\s*철거|천장\s*일부/],
@@ -109,7 +111,7 @@ export function detectPartial(rawText = '') {
   // 넘겨서 이런 현장이 '34평 전체 인테리어'·34평 철거 600만~1,000만원으로 계산됐다.
   // 다만 '25평 학원 칸막이 철거'처럼 장소+평수만 있고 공간 이름이 없으면 건물 전체 일이다.
   if (pyungVal >= 6 && !ROOM_WORDS.test(t)) {
-    const areaOnly = ids.every((id) => ['floor', 'wallpaper'].includes(id));
+    const areaOnly = ids.every((id) => ['floor', 'wallpaper', 'woodFloor', 'decoTile'].includes(id));
     if (!areaOnly) return { on: false };
   }
 
@@ -119,7 +121,7 @@ export function detectPartial(rawText = '') {
     const def = PARTIAL_ITEMS[h.id];
     const near = qtyNear(t, h.end, def.unit, h.len);
     // "34평 아파트 장판만 제거" — 장판·마루는 현장 평수를 그대로 쓴다(품목에 숫자가 없을 때만)
-    let qty = near || (h.id === 'floor' && pyungVal > 0 ? pyungVal : 0) || def.defaultQty || 1;
+    let qty = near || (['floor', 'woodFloor', 'decoTile'].includes(h.id) && pyungVal > 0 ? pyungVal : 0) || def.defaultQty || 1;
     // "거실·안방 샷시", "베란다 창호" — 창은 방·베란다마다 하나씩이므로 그 이름 수만큼 잡는다
     if (h.id === 'window' && near === 0) {
       const rooms = (t.match(/거실|안방|작은방|큰방|방\s*\d|베란다|발코니/g) || []).length;
@@ -128,7 +130,17 @@ export function detectPartial(rawText = '') {
     return { id: h.id, qty: Math.round(qty * 10) / 10, unit: def.unit };
   });
   // 같은 품목이 두 번 잡히지 않게, 실외기가 있으면 벽걸이는 따로 세지 않는다
-  const dedup = items.filter((it, i) => !(it.id === 'aircon' && items.some((o, j) => o.id === 'airconOutdoor' && j !== i)));
+  let dedup = items.filter((it, i) => !(it.id === 'aircon' && items.some((o, j) => o.id === 'airconOutdoor' && j !== i)));
+  // "장판 마루"·"장판 데코타일"은 바닥 하나를 두 이름으로 적은 것 — 두 배로 세지 않는다
+  const floorIds = ['floor', 'woodFloor', 'decoTile'];
+  const floorHits = dedup.filter((it) => floorIds.includes(it.id));
+  if (floorHits.length > 1) {
+    const keep = ['woodFloor', 'decoTile'].map((id) => floorHits.find((it) => it.id === id)).find(Boolean) || floorHits[0];
+    const qty = Math.max(...floorHits.map((it) => Number(it.qty) || 0));
+    dedup = dedup.filter((it) => !floorIds.includes(it.id));
+    dedup.push({ ...keep, qty: Math.round(qty * 10) / 10 });
+    dedup.sort((a, b) => floorIds.includes(a.id) ? 1 : -1);
+  }
   const exterior = dedup.some((it) => PARTIAL_ITEMS[it.id]?.exterior);
   return { on: true, items: dedup, access, exterior };
 }
