@@ -122,7 +122,12 @@ export function classifyRequest(rawText = '', opts = {}) {
   const sheet = opts.sheet || parseRequestSheet(text);
   const signals = requestSignals(sheet, text);
   // 라벨을 뺀 실제 내용 — 점의 의미 판단(공실/거주/누수 등)에 쓴다
-  const contentT = signals.hasForm ? signals.contentText.toLowerCase().replace(/\s+/g, ' ') : t;
+  // 라벨 단어는 내용이 아니다 — 한 줄로 붙여넣은 요청서('공실 상태: 짐 있음')에서
+  // '공실'이라는 라벨 때문에 공실 현장으로 읽히던 것을 막는다.
+  const LABEL_WORDS = /(공실|계약|입주)\s*상태|서비스\s*분야|공간\s*유형|공급\s*면적|문의\s*\/?\s*희망사항/g;
+  const contentT = signals.hasForm
+    ? signals.contentText.toLowerCase().replace(/\s+/g, ' ')
+    : t.replace(LABEL_WORDS, ' ').replace(/\s+/g, ' ');
   // "철거는 하지 마세요" — 부정된 철거를 동작으로 읽지 않는다
   const removalNegated = /(철거|해체|제거)\s*(?:는|은|를)?\s*(?:안\s*하|하지\s*마|하지\s*않|빼|제외|불필요)/.test(t);
   const removalIntent = signals.removal && !removalNegated;
@@ -296,7 +301,10 @@ export function classifyRequest(rawText = '', opts = {}) {
     t.match(/(한|두|세|네|다섯|여섯)\s*칸/) ||
     t.match(/(?:욕실|화장실)\s*(\d+|[한두세네]|다섯|여섯)\s*(?:개|칸|곳)?/);
   const KOR_NUM = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6 };
-  const budgetMatch = t.match(/예산\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/);
+  // '예산: 1,000만 원 이하'처럼 콜론이 붙어도 읽는다 (요청서 라벨은 콜론이 기본)
+  const budgetMatch =
+    t.match(/예산\s*[:：]?\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/) ||
+    (sheetValue(sheet, 'budget') || '').match(/([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/);
 
   let sizeValue = '';
   let sizeUnit = '';

@@ -600,6 +600,9 @@ export function isSoomgoCase(c) {
   const text = [c?.rawInput, c?.ocrRaw, c?.notes, c?.supplement, c?.title, c?.location]
     .filter(Boolean)
     .join(' ');
+  // 숨고 요청서 양식(서비스 분야 + 공급면적·공간 유형)은 숨고 글자가 지워져도 숨고 요청이다.
+  // 예전에 저장된 현장(source 없음)도 이 모양이면 숨고 멘트로 나간다.
+  if (/서비스\s*분야/.test(text) && /공급\s*면적|공간\s*유형/.test(text)) return true;
   return /숨고|순고|soomgo|SUMGGO|요청서|견적\s*보낸\s*고수|고수\s*\d+\s*명|채팅\s*하기/i.test(text);
 }
 
