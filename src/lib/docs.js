@@ -428,6 +428,10 @@ export function dispatchMessage(c, calc) {
     tilewaterproof: '타일·방수 시공',
     plaster: '바닥 미장·양생',
     window: '창호 철거·교체',
+    carpentry: '가벽·문틀 세우고 석고·마감',
+    electric: '배선·조명 설치',
+    plumbing: '배관·수전 교체',
+    film: '필름·시트지 시공',
     waste: '폐기물 수거·상차·운반',
     labor: '일용 인력 지원',
     repair: '부분 수선',
@@ -799,6 +803,15 @@ export function defaultCrew(trade, c, calc) {
   const size = parseFloat(c?.sizeValue) || 0;
   const unit = c?.sizeUnit || '평';
   const pyung = unit === '평' ? size : unit === '㎡' ? size / 3.3 : unit === '칸' ? size * 1.8 : size || 15;
+  // 가벽·칸막이(경량벽체) — '철거 기공·잡부'가 아니라 목수+보조가 나가는 현장이다
+  if (trade === 'carpentry' && c?.partition) {
+    const crew = Number(calc?.crewPlan?.crew) || 2;
+    return crew > 1 ? [{ role: '목수', count: 1 }, { role: '보조', count: crew - 1 }] : [{ role: '목수', count: 1 }];
+  }
+  if (trade === 'carpentry') return [{ role: '목수', count: 1 }, { role: '보조', count: 1 }];
+  if (trade === 'electric') return [{ role: '전기 기공', count: 1 }];
+  if (trade === 'plumbing') return [{ role: '설비 기공', count: 1 }];
+  if (trade === 'film') return [{ role: '필름 기공', count: 1 }];
   if (trade === 'bathroom') return [{ role: '타일 기공', count: 1 }, { role: '보조', count: 1 }];
   if (trade === 'kitchen') return [{ role: '설치 기공', count: 2 }];
   if (trade === 'wallpaper') return [{ role: '도배 기공', count: 1 }, { role: '보조', count: 1 }];
