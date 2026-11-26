@@ -1,5 +1,5 @@
 {
-  "collectedAt": "2026-11-25",
+  "collectedAt": "2026-11-26",
   "source": "나라장터 입찰공고(공고번호 원문 링크) · 경상북도 안동시/경북 시군 · 공공알림(gongong.kr) 공고 상세 미러",
   "notice": "가격은 공고 화면의 추정가격(예산) 기준입니다. 실제 투찰 전 나라장터 원문·공고문을 반드시 확인하세요.",
   "bids": [
@@ -770,6 +770,102 @@
       "url": "https://gongong.kr/notice/R26BK01848494",
       "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01848494&bidPbancOrd=000",
       "summary": "경상북도교육청 경상북도경산교육지원청 공고 · 삼성현중학교 별관동 화장실 개선공사 입찰 공고",
+      "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
+    },
+    {
+      "id": "R26BK01854825",
+      "noticeNo": "R26BK01854825",
+      "title": "울릉교육지원청 청사 본관 복도 및 계단실 환경개선 공사",
+      "org": "경상북도교육청 경상북도울릉교육지원청",
+      "region": "경북",
+      "regionKey": "gyeongbuk",
+      "site": "경상북도교육청 경상북도울릉교육지원청",
+      "price": 35530909,
+      "budget": 35530909,
+      "deadline": "2026-12-01T10:00:00+09:00",
+      "postedAt": "2026-11-26",
+      "trade": "실내건축·수선",
+      "workTypes": [
+        "interior"
+      ],
+      "licenses": [
+        "실내건축공사업"
+      ],
+      "licenseRequired": true,
+      "restricted": false,
+      "restrictionNote": "",
+      "preference": "",
+      "status": "open",
+      "result": null,
+      "competition": null,
+      "winRate": null,
+      "url": "https://gongong.kr/notice/R26BK01854825",
+      "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01854825&bidPbancOrd=000",
+      "summary": "경상북도교육청 경상북도울릉교육지원청 공고 · 울릉교육지원청 청사 본관 복도 및 계단실 환경개선 공사",
+      "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
+    },
+    {
+      "id": "R26BK01855049",
+      "noticeNo": "R26BK01855049",
+      "title": "삼달1리 마을회관 외부 화장실 보수공사",
+      "org": "경상북도 울진군",
+      "region": "울진군",
+      "regionKey": "gyeongbuk",
+      "site": "경상북도 울진군",
+      "price": 63880909,
+      "budget": 63880909,
+      "deadline": "2026-12-01T10:00:00+09:00",
+      "postedAt": "2026-11-26",
+      "trade": "실내건축·수선",
+      "workTypes": [
+        "interior"
+      ],
+      "licenses": [
+        "금속창호ㆍ지붕건축물조립공사업"
+      ],
+      "licenseRequired": true,
+      "restricted": false,
+      "restrictionNote": "",
+      "preference": "",
+      "status": "open",
+      "result": null,
+      "competition": null,
+      "winRate": null,
+      "url": "https://gongong.kr/notice/R26BK01855049",
+      "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01855049&bidPbancOrd=000",
+      "summary": "경상북도 울진군 공고 · 삼달1리 마을회관 외부 화장실 보수공사",
+      "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
+    },
+    {
+      "id": "R26BK01856519",
+      "noticeNo": "R26BK01856519",
+      "title": "현일고등학교 행정동 창호교체공사 소액수의견적공고",
+      "org": "경상북도교육청 현일고등학교",
+      "region": "경북",
+      "regionKey": "gyeongbuk",
+      "site": "경상북도교육청 현일고등학교",
+      "price": 113857870,
+      "budget": 113857870,
+      "deadline": "2026-12-01T11:00:00+09:00",
+      "postedAt": "2026-11-26",
+      "trade": "창호",
+      "workTypes": [
+        "window"
+      ],
+      "licenses": [
+        "금속창호ㆍ지붕건축물조립공사업"
+      ],
+      "licenseRequired": true,
+      "restricted": false,
+      "restrictionNote": "",
+      "preference": "",
+      "status": "open",
+      "result": null,
+      "competition": null,
+      "winRate": null,
+      "url": "https://gongong.kr/notice/R26BK01856519",
+      "g2b": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01856519&bidPbancOrd=000",
+      "summary": "경상북도교육청 현일고등학교 공고 · 현일고등학교 행정동 창호교체공사 소액수의견적공고",
       "note": "자동 수집. 투찰 전 나라장터 원문을 확인하세요."
     },
     {
