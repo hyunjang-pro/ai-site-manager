@@ -260,7 +260,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
               aria-label="받은 내용"
             />
             <p className="mt-1 text-2xs font-semibold leading-4 text-ink-3">
-              사진에서 읽은 내용은 시계·앱 버튼 같은 잡글자를 지우고 지역·면적·공종·요청만 남겨 넣습니다.
+              사진 글자에서 시계·앱 버튼 같은 잡글자만 지웁니다. 공간 유형·서비스 분야·공급면적·예산처럼 요청서에 적힌 항목은 원문 그대로 남습니다.
             </p>
             {c.ocrRaw ? (
               <Details label="사진에서 읽은 원문 보기 (정리 전)" className="mt-1.5">

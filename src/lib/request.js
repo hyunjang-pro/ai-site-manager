@@ -162,6 +162,8 @@ export function parseDimensions(text) {
 // 줄 앞에 붙은 OCR 부스러기('0 경북 안동시', '66 | 조대현', '? 경북 안동시') 제거
 function stripLineJunk(line) {
   return String(line || '')
+    // '66 | 조대현'처럼 앞에 붙은 OCR 부스러기(숫자 + 구분자)
+    .replace(/^[0-9]{1,3}\s*[|:•·>~]+\s*(?=[가-힣])/, '')
     .replace(/^[0-9?@•·*|~\-._:/\\]{1,3}\s+(?=[가-힣])/, '')
     .replace(/^[?@•·*|~_:>\\]{1,3}\s*(?=[가-힣])/, '')
     .trim();
@@ -231,8 +233,9 @@ export function parseRequestSheet(rawText = '') {
     // 라벨이 통째로 깨졌지만 값으로 알아보는 경우('MHA HOF 부분 인테리어') —
     // 앞쪽 잡글자에 한글이 없고 짧을 때만. (문장 중간에 '인테리어'가 있어도 여기 걸리지 않게)
     if (!matched) {
-      const head = line.match(/^([^가-힣]{2,10})\s*(.+)$/);
-      if (head && !/^\d+\s*만/.test(head[2])) {
+      // 앞쪽이 영문 잡글자일 때만 ('15평 …'처럼 숫자로 시작하는 정상 문장은 건드리지 않는다)
+      const head = line.match(/^([^가-힣]{2,12})\s*(.+)$/);
+      if (head && /[A-Za-z]/.test(head[1]) && !/\d/.test(head[1])) {
         const body = head[2].trim();
         const hit = VALUE_FIRST.find((v) => v.re.test(body));
         if (hit && body.length <= 30) matched = { def: byKey[hit.key], value: body, guessed: true };
