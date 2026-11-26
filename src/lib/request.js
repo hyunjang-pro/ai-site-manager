@@ -322,7 +322,17 @@ export function parseRequestSheet(rawText = '') {
   }
 
   const hasForm = unique.length >= 2;
-  return { fields: unique, others, noise, repairs, client, seq: seqOut, hasForm, raw: text };
+  // 어느 앱에서 온 요청인지 — 정리본에서 '숨고' UI 글자를 지우면 '숨고'라는 단어가 남지 않는다.
+  // 그래서 이름 대신 **양식 모양**(서비스 분야 + 공급면적 + 계약/공실 상태)으로도 알아본다 — 이 조합은 숨고 요청서에만 있다.
+  const keys = unique.map((f) => f.key);
+  const soomgoForm = keys.includes('service') && keys.includes('area') && (keys.includes('contract') || keys.includes('vacancy'));
+  const source =
+    /숨고|soomgo|SUMGGO|견적\s*보낸\s*고수|고수\s*\d+\s*명|요청서/i.test(text) || soomgoForm
+      ? 'soomgo'
+      : /카카오톡|카톡|톡\s*서랍/i.test(text)
+      ? 'kakao'
+      : '';
+  return { fields: unique, others, noise, repairs, client, seq: seqOut, hasForm, source, raw: text };
 }
 
 export function sheetValue(sheet, key) {

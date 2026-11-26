@@ -595,6 +595,8 @@ export function strengthLines(c, calc, completedCases = []) {
 // 숨고에서 온 요청인지 — 스샷 글자(ocrRaw)·원문·메모에 숨고 흔적이 실제로 있을 때만 숨고용 문구를 쓴다.
 // 카톡·전화·직접 입력으로 온 일반 문의는 숨고라고 부르면 안 된다(사용자 제보 #22480).
 export function isSoomgoCase(c) {
+  // 정리본에서 '숨고' UI 글자를 지워도 출처는 유지된다 (요청서 파서가 잡아 둔 source)
+  if (c?.source === 'soomgo') return true;
   const text = [c?.rawInput, c?.ocrRaw, c?.notes, c?.supplement, c?.title, c?.location]
     .filter(Boolean)
     .join(' ');
@@ -609,7 +611,7 @@ export function clientHonorific(c, calc) {
   const home = /아파트|오피스텔|빌라|원룸|투룸|기숙사|주택|단독|전원|농가|한옥|주거/i;
   const shopHouse = /상가주택|상가\s*건물|1층\s*상가|근린상가/i;
   if (home.test(text) && !shopHouse.test(text)) return '고객님';
-  const business = /상가|상점|점포|매장|가게|식당|음식점|분식|치킨|주점|호프|카페|커피|베이커리|제과|사무실|사무소|학원|병원|의원|약국|공장|창고|물류|간판|숍|상회|편의점|마트|미용실|네일|헤어|은행|관공서|교회|성당|빌딩/i;
+  const business = /상가|상점|점포|매장|가게|식당|음식점|외식|분식|치킨|주점|호프|카페|커피|베이커리|제과|사무실|사무소|학원|병원|의원|약국|공장|창고|물류|간판|숍|상회|편의점|마트|미용실|네일|헤어|은행|관공서|교회|성당|빌딩|상업\s*공간|근린/i;
   return business.test(text) ? '사장님' : '고객님';
 }
 

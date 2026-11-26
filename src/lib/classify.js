@@ -564,6 +564,7 @@ export function classifyRequest(rawText = '', opts = {}) {
     excludedScopes: Array.from(new Set(excludedScopes)),
     ...(partitionInfo ? { partition: partitionInfo } : {}),
     ...(signals.space ? { spaceType: signals.space } : {}),
+    ...(sheet.source ? { source: sheet.source } : {}),
     ...(signals.service ? { serviceType: signals.service } : {}),
     ...(signals.budget || budgetMatch ? { clientBudget: (budgetMatch || [])[1] ? `${budgetMatch[1]}만원${budgetMatch[2] || ''}` : '' } : {}),
   };
