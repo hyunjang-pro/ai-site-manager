@@ -8,3 +8,5 @@ screenshots/
 .tmp*
 
 .github/workflows/
+
+.deploy-gh/
