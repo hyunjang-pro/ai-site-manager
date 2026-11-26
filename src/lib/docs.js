@@ -195,7 +195,12 @@ export function buildQuote(c, calc, design, waste) {
     trade === 'combined' && Array.isArray(c?.subScopes) && c.subScopes.length
       ? combinedScopeSpecs(design?.presetId, c.subScopes, calc?.materialSet?.tier || '표준')
       : [];
-  const materialSpecs = (scopeSpecs.length ? scopeSpecs : calc?.materialSet?.spec?.length ? calc.materialSet.spec : design?.combo || []).slice(0, 10);
+  // 자재를 안 쓰는 현장(철거·폐기물·인력)에 "사용 자재: 데코타일 기본"이 적히면
+  // 손님은 자재까지 포함된 줄 읽는다 — 자재비가 잡힌 현장만 자재 목록을 넣는다.
+  const hasMaterials = (calc?.items || []).some((i) => i.category === '자재' && Number(i.amount) > 0);
+  const materialSpecs = hasMaterials
+    ? (scopeSpecs.length ? scopeSpecs : calc?.materialSet?.spec?.length ? calc.materialSet.spec : design?.combo || []).slice(0, 10)
+    : [];
 
   const clauses = [];
   clauses.push(

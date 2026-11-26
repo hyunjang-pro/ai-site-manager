@@ -352,7 +352,7 @@ export default function DocTab({ c, calc, design, waste, showToast, update, comp
         </p>
       </div>
 
-      {info.id === 'demolition' ? <SubsidyBlock c={c} showToast={showToast} /> : null}
+      {subsidyInfo(c).storeish ? <SubsidyBlock c={c} showToast={showToast} /> : null}
     </div>
   );
 }
