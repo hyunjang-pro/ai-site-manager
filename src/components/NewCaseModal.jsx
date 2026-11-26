@@ -7,7 +7,7 @@ import { computeEstimate } from '../lib/pricing.js';
 import { composeCase } from '../lib/storage.js';
 import { analyzeCaseWithGemini, getGeminiKey } from '../lib/gemini.js';
 import { ocrAnalyzeWithTimeout } from '../lib/ocr.js';
-import { fileToThumb } from '../lib/image.js';
+import { fileToThumb, THUMB_PHOTO, THUMB_SCREENSHOT } from '../lib/image.js';
 import { AlertCard, BigButton, Details, Modal, Pill, Select, SmallButton, TextArea, TradeIcon, cx } from './ui.jsx';
 
 export default function NewCaseModal({ open, onClose, onCreate, settings }) {
@@ -95,7 +95,7 @@ export default function NewCaseModal({ open, onClose, onCreate, settings }) {
     } else {
       setAttachNote('');
     }
-    const thumbs = await Promise.all(items.map((it) => fileToThumb(it.file)));
+    const thumbs = await Promise.all(items.map((it) => fileToThumb(it.file, kind === 'screenshot' ? THUMB_SCREENSHOT : THUMB_PHOTO)));
     setPhotos((prev) => prev.map((p) => {
       const i = items.findIndex((it) => it.id === p.id);
       return i >= 0 ? { ...p, thumb: thumbs[i] } : p;

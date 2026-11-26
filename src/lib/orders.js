@@ -234,6 +234,54 @@ export function buildOrderGroups(c, calc, design, mset) {
   const pyung = toPyung(sizeVal, unit, 15);
   const groups = [];
 
+  // 가벽·칸막이(경량벽체) — 문·몰딩 발주 목록이 나가면 목수에게 잘못 발주된다.
+  // 길이(m)·문 개수로 스터드·석고·도어·퍼티를 잡는다.
+  if (trade === 'carpentry' && c?.partition) {
+    const p = c.partition;
+    const meters = Math.max(0, num(p.meters));
+    const doors = Math.max(0, Math.round(num(p.doors ?? p.rooms)));
+    const bothSides = +(meters * 2.4 * 2).toFixed(1); // 벽 높이 2.4m × 양면
+    const sheets = ceil((bothSides * 1.1) / 2.16); // 석고 9.5T 1장 = 2.16㎡
+    const studs = ceil(meters * 2.2 + 4); // 0.45m 간격 + 러너
+    groups.push(
+      group(
+        'partition-frame',
+        '건재·철물상 (경량벽체)',
+        'amber',
+        [
+          { name: '경량스터드 65mm', spec: '3m', qty: `${studs}개` },
+          { name: '러너(상·하) 65mm', spec: '3m', qty: `${ceil(meters / 3) * 2 + 2}개` },
+          { name: '석고보드 9.5T', spec: '900×2400 (2겹·양면)', qty: `${sheets}장` },
+          { name: '우레탄 보드(방음)', spec: '30T', qty: `${ceil(bothSides / 1.62)}장` },
+          { name: '피스·조인트테이프·퍼티', qty: '1식' },
+          { name: '코너비드', spec: '2.4m', qty: `${Math.max(4, doors * 2)}개` },
+        ],
+        [
+          '스터드 간격은 450mm — 천장 슬라브에 타격앙카로 고정해야 진동에 안 흔들립니다.',
+          '석고는 2겹으로 붙여야 방 소리 새는 게 줄어듭니다(1겹은 방음 약함).',
+        ],
+        { footer: `가벽 ${meters || '?'}m 기준 · 착공 하루 전 반입` }
+      )
+    );
+    if (doors) {
+      groups.push(
+        group(
+          'partition-door',
+          '문·도어 업체',
+          'orange',
+          [
+            { name: '경량도어 세트(문틀 포함)', spec: '문 높이 2.0m 기준', qty: `${doors}세트` },
+            { name: '경첩·손잡이·도어스토퍼', qty: `${doors}세트` },
+            { name: '실리콘·마감재', qty: '1식' },
+          ],
+          ['문틀을 벽체 세우기 전에 미리 넣어야 나중에 뜯지 않습니다.', '도어는 개당 1~2주 걸리는 경우가 있어 먼저 주문하세요.'],
+          { footer: `문 ${doors}개 · 납기: 착공 5일 전` }
+        )
+      );
+    }
+    return groups;
+  }
+
   if (trade === 'bathroom') {
     const kans = unit === '칸' && sizeVal > 0 ? sizeVal : 1;
     const area = +(kans * 5.9).toFixed(1); // 1칸 ≈ 5.9㎡ (벽+바닥)

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Camera, Copy, Loader2, Trash2, Wand2 } from 'lucide-react';
 import { classifyChange } from '../../lib/parse.js';
 import { ocrAnalyzeWithTimeout } from '../../lib/ocr.js';
-import { fileToThumb } from '../../lib/image.js';
+import { fileToThumb, THUMB_PHOTO } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
 import { changeMessage } from '../../lib/docs.js';
 import { BigButton, Details, Field, Pill, SectionCard, SmallButton, TextArea, TextInput } from '../ui.jsx';
@@ -85,7 +85,7 @@ export function ChangeBlock({ c, update, showToast, num = '4' }) {
             aria-label="추가 공사 사진"
             onChange={async (e) => {
               const files = Array.from(e.target.files || []).slice(0, 6 - (c.photos?.length || 0));
-              const thumbs = await Promise.all(files.map(fileToThumb));
+              const thumbs = await Promise.all(files.map((f) => fileToThumb(f, THUMB_PHOTO)));
               update({ photos: [...(c.photos || []), ...thumbs].slice(0, 6) });
               showToast(`사진 ${thumbs.length}장을 붙였습니다`);
               e.target.value = '';

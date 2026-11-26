@@ -13,7 +13,7 @@ import { verifyEstimate } from '../../lib/verify.js';
 import { subsidyInfo, SUBSIDY_CHECKS, SUBSIDY_DOCS, SUBSIDY_AGENCY, subsidyLimitText } from '../../lib/subsidy.js';
 import { subsidyNotice, subsidyAgencyNotice, clientQuoteMessage, isSoomgoCase, clientHonorific } from '../../lib/docs.js';
 import { useCalledPrice } from '../../lib/useCalledPrice.js';
-import { fileToThumb } from '../../lib/image.js';
+import { fileToThumb, THUMB_PHOTO } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
 import { useSurveyGuide } from '../../lib/useSurveyGuide.js';
 import {
@@ -604,7 +604,7 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
                 aria-label="디테일 참고 사진"
                 onChange={async (e) => {
                   const files = Array.from(e.target.files || []).slice(0, 3 - (c.design?.refPhotos || []).length);
-                  const thumbs = await Promise.all(files.map(fileToThumb));
+                  const thumbs = await Promise.all(files.map((f) => fileToThumb(f, THUMB_PHOTO)));
                   update({ design: { ...(c.design || {}), refPhotos: [...(c.design?.refPhotos || []), ...thumbs].slice(0, 3) } });
                   showToast(`참고 사진 ${thumbs.length}장을 붙였습니다`);
                   e.target.value = '';

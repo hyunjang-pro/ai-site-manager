@@ -3,6 +3,7 @@
 // 읽은 글자는 바로 cleanOcrText로 후처리해서 폰 상단바·앱 UI 잡글자를 걸러낸다.
 // 글자가 없는 현장 사진(부엌·벽 등)은 사물·그림자를 글자로 오인하므로, 신뢰도·한글 단어 비율을 보고
 // 빈 문자열 + isScenePhoto 로 돌려보내 외계어가 '받은 내용'에 들어가지 않게 한다.
+import { isUiNoise } from './request.js';
 let workerPromise = null;
 let progressCb = null;
 
@@ -12,11 +13,21 @@ async function getWorker() {
   if (workerPromise) return workerPromise;
   workerPromise = (async () => {
     const { createWorker } = await import('tesseract.js');
-    return createWorker('kor+eng', 1, {
+    const worker = await createWorker('kor+eng', 1, {
       logger: (m) => {
         if (m.status === 'recognizing text' && progressCb) progressCb(Math.round((m.progress || 0) * 100));
       },
     });
+    // 폰 스샷은 왼쪽 라벨 / 오른쪽 값의 두 칸 레이아웃이다.
+    // 기본(PSM 3)은 이 두 칸을 위아래로 뒤집어 읽어 "공간 유형""서비스 분야"가 먼저 몰리고
+    // 값이 따로 떨어졌다(실측: '공실 상태 / 짐 있음'이 '콩실상태 / Hg'로 섞임).
+    // PSM 4(가변 크기 한 단) + 칸 사이 공백 보존으로 줄 순서와 '라벨  값' 짝을 지킨다.
+    try {
+      await worker.setParameters({ tessedit_pageseg_mode: '4', preserve_interword_spaces: '1' });
+    } catch (e) {
+      // 파라미터를 못 넣어도 기본 모드로 계속 읽는다
+    }
+    return worker;
   })();
   try {
     return await workerPromise;
@@ -103,6 +114,8 @@ function isNoiseLine(line) {
   return false;
 }
 
+// 스샷 글자에서 앱 UI 줄만 걷어낸다.
+// 요청서 라벨(서비스 분야·공급면적…)과 값, 라벨 없는 요청 제목은 걷어내지 않는다.
 export function cleanOcrText(raw) {
   const text = String(raw || '')
     .replace(/\r/g, '\n')
@@ -111,6 +124,7 @@ export function cleanOcrText(raw) {
   for (const rawLine of text.split('\n')) {
     const line = rawLine.replace(/[ \t]+/g, ' ').trim();
     if (!line) continue;
+    if (isUiNoise(line)) continue;
     if (isNoiseLine(line)) continue;
     if (out.length && out[out.length - 1] === line) continue;
     out.push(line);

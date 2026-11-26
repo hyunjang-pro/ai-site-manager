@@ -25,6 +25,9 @@ export const MATERIAL_RATES = {
   waste: { defaultTons: 1.5 },
   // 2026 실무 단가 — 노무는 '직종 일당 × 작업일수(하루 처리량 기준)'로 계산한다
   carpentry: { perM: 9, matPer: 4, perDay: 6, minimum: 25 },
+  // 가벽·칸막이(경량벽체) — 평이 아니라 길이(m)·칸·문 개수로 계산
+  //  스터드 65mm + 석고 9.5t 2겹(양면) + 단열·방음 + 피스·테이프·퍼티·도장(수성) 포함
+  partition: { wallPerM: 3.2, doorEach: 16, perDayM: 4, doorDays: 0.34, minDays: 2, wasteBase: 11, wastePerM: 0.5, consum: 5, height: 2.4 },
   electric: { trip: 15, perPoint: 8, matPer: 3.2, perDay: 6, minimum: 25 },
   plumbing: { trip: 15, perPoint: 12, matPer: 4.2, perDay: 3.5, minimum: 30 },
   film: { perSqm: 2.2, matPer: 1.2, perDay: 28, minimum: 25 },
@@ -719,6 +722,50 @@ export function computeEstimate(c) {
       items.push({ id: 'min_floor', category: '추가(현장)', name: '최소 출동비', detail: '이동·공구·마감', amount: gap });
       laborTotal += gap;
     }
+  } else if (trade === 'carpentry' && c?.partition) {
+    // 가벽·칸막이(경량벽체) — 8m 가벽으로 룸 3개를 나누는 현장.
+    // '평'으로 환산하면 6평 철거·폐기물로 튀니 길이(m)와 문 개수로만 계산한다.
+    const P = MATERIAL_RATES.partition;
+    const meters = Math.max(0, Number(c.partition.meters) || 0);
+    const doors = Math.max(0, Math.round(Number(c.partition.doors ?? c.partition.rooms) || 0));
+    const rooms = Math.max(0, Math.round(Number(c.partition.rooms) || 0));
+    const skilled = getRate(rates, ['labor', 'carpenter'], 30);
+    const helperRate = getRate(rates, ['labor', 'helper'], 19);
+    const mealPerHead = Math.max(0, getRate(rates, ['meal', 'perWorker'], 1));
+    const manDays = (meters > 0 ? meters / P.perDayM : 1) + doors * P.doorDays;
+    // 사람 수(1~3명) × 일수 조합 중 [인건비+식비]가 가장 적은 쪽 — 단 최소 2일(석고 퍼티·건조)
+    let best = null;
+    for (let crew = 1; crew <= 3; crew += 1) {
+      const days = Math.max(P.minDays, Math.ceil(manDays / crew));
+      const labor = days * (skilled + helperRate * (crew - 1));
+      const total = labor + days * crew * mealPerHead;
+      if (!best || total < best.total - 0.01) best = { crew, days, labor, total };
+    }
+    const days = best.days;
+    const laborCost = Math.round(best.labor);
+    const wallMat = Math.round(meters * P.wallPerM);
+    const doorMat = doors * P.doorEach;
+    const matCost = wallMat + doorMat;
+    const wasteCost = meters || doors ? Math.round(P.wasteBase + meters * P.wastePerM) : 0;
+    const consum = meters || doors ? P.consum : 0;
+    crewDays += days * best.crew;
+    laborTotal += laborCost;
+    materialTotal += matCost;
+    wasteTotal += wasteCost;
+    equipTotal += consum;
+    workDays = days;
+    plannedCrew = {
+      crew: best.crew,
+      days,
+      manDays: Math.round(manDays * 10) / 10,
+      why: `가벽 ${meters || '?'}m${doors ? ` + 문 ${doors}개` : ''} — 목수 ${best.crew === 1 ? '1명' : `${best.crew}명(목수+보조)`} ${days}일이 원가 최소`,
+    };
+    targetSummary = `${meters ? `경량벽체 ${meters}m` : '가벽 길이 확인 필요'}${rooms ? ` · 룸 ${rooms}개` : ''}${doors ? ` · 문 ${doors}개` : ''} — 스터드·석고 2겹 + 퍼티·도장`;
+    if (laborCost) items.push({ id: 'labor', category: '노무', name: `목공 인건비 (${days}일)`, detail: `목수 ${skilled}만 + 보조 ${best.crew > 1 ? `${best.crew - 1}명 ${helperRate}만` : '없음'} × ${days}일`, amount: laborCost });
+    if (wallMat) items.push({ id: 'mat', category: '자재', name: `경량벽체 자재 (${meters}m)`, detail: `스터드·석고 2겹(양면)·단열·피스·테이프 · m당 ${P.wallPerM}만`, amount: wallMat });
+    if (doorMat) items.push({ id: 'mat_door', category: '자재', name: `경량 도어·문틀 (${doors}개)`, detail: `도어 세트·경첩·손잡이 · 개당 ${P.doorEach}만`, amount: doorMat });
+    if (wasteCost) items.push({ id: 'waste', category: '폐기물', name: '자재 자투리·포장재 반출', detail: `마대 2~3개 · ${wasteCost}만`, amount: wasteCost });
+    if (consum) items.push({ id: 'equip', category: '장비', name: '소모품·공구', detail: '마대·피스·커터·보호구', amount: consum });
   } else if (trade === 'carpentry') {
     const C = MATERIAL_RATES.carpentry;
     const meters =
@@ -999,7 +1046,9 @@ export function computeEstimate(c) {
       wasteTotal += wasteIn;
       targetSummary = `${label} · 인부 ${ppl}명×${days}일(일당 ${wage}만) + 자재 ${materialIn}만 + 장비 ${equipIn}만 + 폐기물 ${wasteIn}만`;
     } else {
-      const pyung = toPyung(sizeVal, sizeUnit, 15);
+      // 규모를 모르는 '직접 입력' 현장 — 사무실·상가라는 말만 보고 15평을 잡으면 큰 금액이 나간다.
+      // 한 공간 기준(6평)으로 작게 잡고, 화면에 '규모·범위 확인 필요'를 같이 쓴다.
+      const pyung = toPyung(sizeVal, sizeUnit, defaultPyungOf(c, 15));
       const laborCost = Math.round(50 + pyung * 6);
       crewDays += Math.max(1, Math.round((pyung / 8) * 10) / 10);
       const matCost = Math.round(60 + pyung * 8);

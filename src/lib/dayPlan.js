@@ -164,6 +164,32 @@ const PHASES = {
       prep: ['청소도구', '촬영용 휴대폰'],
     },
   ],
+  // 가벽·칸막이(경량벽체) — 목공 일정은 '철거'가 아니라 스터드·석고·퍼티·도장 순서다.
+  // (예전에는 목공 현장도 5단계 브리핑이 '보양·분진막 / 마감 철거'로 나왔다)
+  carpentry: [
+    {
+      label: '골조·석고',
+      work: ['먹줄·수평 잡기', '스터드·문틀 세우기', '석고 2겹 붙이기'],
+      prep: ['경량스터드·러너', '석고보드 9.5T', '문틀·도어', '레이저 수평기', '전동드릴'],
+    },
+    {
+      label: '퍼티·도장·검수',
+      work: ['테이프·퍼티·코너비드', '수성 도장', '문·손잡이 조정', '현장 정리·준공 사진'],
+      prep: ['퍼티·조인트테이프', '수성페인트', '샌더', '청소도구'],
+    },
+  ],
+  doorMoldings: [
+    {
+      label: '문·몰딩',
+      work: ['문틀·몰딩 설치', '경첩·손잡이 조정'],
+      prep: ['문·몰딩 자재', '전동드릴'],
+    },
+    {
+      label: '마감·검수',
+      work: ['도장·마감 상태 확인', '현장 정리', '준공 사진'],
+      prep: ['도장재', '청소도구', '촬영용 휴대폰'],
+    },
+  ],
 };
 
 const SCOPE_PHASE = {
@@ -222,6 +248,7 @@ export function fitPhases(phases, days) {
 
 function phasesOf(c, calc) {
   const trade = calc?.trade || c?.trade;
+  if (trade === 'carpentry') return c?.partition ? PHASES.carpentry : PHASES.doorMoldings;
   if (PHASES[trade]) return PHASES[trade];
   if (trade === 'combined') {
     const scopes = Array.isArray(c?.subScopes) && c.subScopes.length ? c.subScopes : [];

@@ -3,7 +3,7 @@ import { Camera, Check, Copy, Loader2, ScanText, Sparkles, Trash2, Wand2 } from 
 import { BATHROOM_METHODS, DEMOLITION_SCOPES, SIZE_UNITS, TRADES, TRADE_LIST } from '../../lib/constants.js';
 import { classifyRequest, summarizeRequest, autoCaseTitle } from '../../lib/classify.js';
 import { ocrAnalyzeWithTimeout } from '../../lib/ocr.js';
-import { fileToThumb } from '../../lib/image.js';
+import { fileToThumb, THUMB_PHOTO, THUMB_SCREENSHOT } from '../../lib/image.js';
 import {
   BigButton,
   Card,
@@ -75,6 +75,9 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
       aiAnalysis: a,
       subScopes: a.includedScopes?.length ? a.includedScopes : c.subScopes || [],
       excludedScopes: a.excludedScopes || c.excludedScopes || [],
+      // AI가 가벽·칸막이를 읽었으면 길이·칸 수를 같이 넘긴다 (평으로 환산하지 않는다)
+      ...(a.partition ? { partition: a.partition } : {}),
+      ...(a.clientBudget ? { clientBudget: a.clientBudget } : {}),
       ...(a.wishText && !String(c.rawInput || '').includes(a.wishText.slice(0, 12)) ? { rawInput: `${a.wishText}\n${c.rawInput || ''}`.trim() } : {}),
       ...(a.missingCosts?.length
         ? {
@@ -208,7 +211,7 @@ export default function InfoTab({ c, update, calc, showToast, onGoEstimate }) {
       showToast('사진은 6장까지 올릴 수 있습니다 — 한 장 지우고 올려주세요');
       return;
     }
-    const thumbs = await Promise.all(list.map(fileToThumb));
+    const thumbs = await Promise.all(list.map((f) => fileToThumb(f, kind === 'screenshot' ? THUMB_SCREENSHOT : THUMB_PHOTO)));
     const tagged = thumbs.map((t) => ({ ...t, kind }));
     update({ photos: [...(c.photos || []), ...tagged].slice(0, 6) });
     showToast(

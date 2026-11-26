@@ -655,6 +655,14 @@ export function clientScopeText(c, calc) {
     const m = c?.sizeUnit === 'm' ? c.sizeValue : '3.2';
     return `싱크대 ${m}m를 새로 설치하는 작업`;
   }
+  if (trade === 'carpentry' && c?.partition) {
+    const p = c.partition;
+    const wall = p.meters ? `가벽(경량벽체) ${p.meters}m를 세우고` : '가벽을 세우고';
+    const rooms = p.rooms ? ` 룸 ${p.rooms}개` : ' 칸막이 공간';
+    const doors = p.doors ? `문 ${p.doors}개` : '문';
+    return `${wall}${rooms}로 나누고 ${doors}를 다는 작업`;
+  }
+  if (trade === 'carpentry') return `${pyung ? `${pyung}평 ` : ''}문·몰딩·목공 작업`;
   if (trade === 'waste') return `폐기물 ${c?.sizeValue || ''}${c?.sizeUnit === '톤' ? '톤' : ''}을 수거해 처리하는 작업`;
   if (trade === 'wallpaper') return `${pyung || ''}평 도배·장판 작업`;
   if (trade === 'labor') return `인력 ${c?.sizeValue || 1}명을 ${c?.laborDays || 1}일 보내는 일`;
@@ -677,6 +685,7 @@ export function clientQuoteMessage(c, calc) {
   const who = soomgo ? '고객님' : clientHonorific(c, calc);
   const fullLabel = tradeLabelOf(c, calc);
   let label = fullLabel === '상가·주택 철거' ? '철거' : fullLabel;
+  if (calc?.trade === 'carpentry' && c?.partition) label = '가벽(파티션)';
   const trade = calc?.trade;
   const scope = clientScopeText(c, calc);
   const isDemoJob = /시공 없음/.test(calc?.targetSummary || '');
@@ -715,8 +724,12 @@ export function clientQuoteMessage(c, calc) {
   }
   lines.push('', tentativePriceNotice(c));
   lines.push(`편하실 때 ${ask} 연락 주시면 현장 한번 뵙고 실측해서 정확한 금액으로 다시 말씀드리겠습니다. 방문 견적은 비용 안 받습니다.`);
-  if (['demolition', 'bathroom', 'kitchen'].includes(trade)) {
+  if (['demolition', 'bathroom'].includes(trade) || /시공 없음/.test(calc?.targetSummary || '')) {
     lines.push('철거 도중에 나오는 가전·가구 같은 생활폐기물이나 석면은 상황 봐서 미리 말씀드리고 따로 처리합니다.');
+  }
+  // 범위가 자세히 없는 요청(부분 인테리어만 적힘) — 금액을 확정한 것처럼 쓰지 않는다
+  if (c?.needsCheck) {
+    lines.push('요청서에 시공 범위가 자세히 안 적혀 있어서, 무엇을 어디까지 하는지 확인한 뒤 정확한 금액으로 다시 말씀드리겠습니다.');
   }
   if ((trade === 'bathroom' || trade === 'tilewaterproof') && !/시공 없음/.test(calc?.targetSummary || '')) {
     lines.push('방수는 물 채워서 누수 확인까지 하고 타일을 올립니다.');

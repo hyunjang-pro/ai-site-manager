@@ -9,6 +9,8 @@
 //     후보 목록의 다음 모델로 넘어가 재시도한다(IMG_1548).
 // 성공한 모델 이름은 이 탭(sessionStorage)과 메모리에 기억해 다음부터 바로 쓴다.
 // 잠깐 막힌 모델은 10분 동안 후보 뒤로 미뤄, 다시 눌렀을 때 같은 503 모델에서 또 멈추지 않게 한다.
+import { classifyRequest } from './classify.js';
+
 const API_ROOT = 'https://generativelanguage.googleapis.com';
 const API_VERSION = 'v1beta';
 const API_VERSIONS = ['v1beta', 'v1'];
@@ -626,19 +628,22 @@ export const GEMINI_KNOWLEDGE = `
 const CASE_PROMPT = `너는 경북 안동의 철거·인테리어 현장 매니저를 돕는 분석가다.
 고객 문의 글과 현장 사진을 보고, 아래 JSON만 답한다. 설명 문장은 넣지 않는다.
 
-{"trade":"공종ID","tradeName":"공종이 목록에 없을 때만 한글 이름","title":"현장 제목(지역+규모+공종)","sizeValue":"숫자 문자열 또는 빈 문자열","sizeUnit":"평|㎡|m|칸|개|개소|톤|명|모름","floor":"숫자 문자열 또는 빈 문자열","elevator":"yes|no|unknown","siteCondition":"사진·글로 본 현장 상태(노후 싱크대, 누수 흔적 등)","materials":["필요 자재 3~6개, 규격 포함"],"crew":[{"role":"역할","count":숫자}],"priceRange":{"min":숫자,"max":숫자},"surveyChecks":[{"label":"답사에서 확인할 것","why":"놓치면 생기는 일","how":"어떻게 확인하는지","amount":예상 추가비 만원 숫자}],"clientName":"고객 이름 — 글에 있을 때만, 없으면 \"\"","clientPhone":"고객 연락처 — 글에 있을 때만, 없으면 \"\"","distanceKm":"사무실에서 현장까지 편도 거리(km) — 글에 없으면 \"\"","wishText":"문의/희망사항 전문 그대로","firstCallQuestions":["이 현장을 위해 첫 통화에 고객에게 물어볼 것 3개 — 사장님이 그대로 읽을 수 있는 말투, 현장·공종에 맞춤"],"missingCosts":[{"label":"빠뜨리기 쉬운 비용","range":"참고 5~12만","amount":8,"why":"왜 필요한지"}],"materialOrders":[{"vendor":"발주처(예: 벽지 도매상·골재상·철물점)","items":[{"name":"품명","spec":"규격","qty":"수량"}],"tip":"이 업체에서 사는 요령 한 줄","footer":"납기·받는 곳"}],"costBreakdown":[{"label":"인건비","detail":"기공 2명 × 27만 × 2일 + 보조 1명 × 19만 × 2일","amount":108}],"signal":{"level":"green|yellow|red","title":"판정 한 줄","reason":"근거 한 줄"},"buildPlan":{"phases":[{"label":"전날 · 준비","items":["할 일","할 일"]},{"label":"당일 · 시공","items":[]},{"label":"완료 · 정산","items":[]}],"checks":[{"label":"현장에서 확인할 것","why":"왜"}],"tell":"인부에게 이렇게 말하세요","notes":["이 현장 특이사항"]}},"includedScopes":["bathroom|kitchen|wallpaper|entrance|demolition|plaster|carpentry|electric|plumbing|film|window"],"excludedScopes":["window 등 고객이 빼라고 한 공종"],"summary":"한 문장 요약","warnings":["놓치면 손해 보는 점 0~3개"]}
+{"trade":"공종ID","tradeName":"공종이 목록에 없을 때만 한글 이름","title":"현장 제목(지역+규모+공종)","sizeValue":"숫자 문자열 또는 빈 문자열","sizeUnit":"평|㎡|m|칸|개|개소|톤|명|모름","floor":"숫자 문자열 또는 빈 문자열","elevator":"yes|no|unknown","siteCondition":"사진·글로 본 현장 상태(노후 싱크대, 누수 흔적 등)","keyFacts":[{"label":"요청서 라벨 그대로(공간 유형·서비스 분야·공급면적·공실 상태·계약 상태·예산·문의사항)","value":"값 그대로"}],"workItems":["이 현장에서 실제로 하는 작업(가벽 8m 세우기, 룸 3개 만들기 등)"],"materials":["필요 자재 3~6개, 규격 포함"],"crew":[{"role":"역할","count":숫자}],"priceRange":{"min":숫자,"max":숫자},"surveyChecks":[{"label":"답사에서 확인할 것","why":"놓치면 생기는 일","how":"어떻게 확인하는지","amount":예상 추가비 만원 숫자}],"clientName":"고객 이름 — 글에 있을 때만, 없으면 \"\"","clientPhone":"고객 연락처 — 글에 있을 때만, 없으면 \"\"","distanceKm":"사무실에서 현장까지 편도 거리(km) — 글에 없으면 \"\"","wishText":"문의/희망사항 전문 그대로","firstCallQuestions":["이 현장을 위해 첫 통화에 고객에게 물어볼 것 3개 — 사장님이 그대로 읽을 수 있는 말투, 현장·공종에 맞춤"],"missingCosts":[{"label":"빠뜨리기 쉬운 비용","range":"참고 5~12만","amount":8,"why":"왜 필요한지"}],"materialOrders":[{"vendor":"발주처(예: 벽지 도매상·골재상·철물점)","items":[{"name":"품명","spec":"규격","qty":"수량"}],"tip":"이 업체에서 사는 요령 한 줄","footer":"납기·받는 곳"}],"costBreakdown":[{"label":"인건비","detail":"기공 2명 × 27만 × 2일 + 보조 1명 × 19만 × 2일","amount":108}],"signal":{"level":"green|yellow|red","title":"판정 한 줄","reason":"근거 한 줄"},"buildPlan":{"phases":[{"label":"전날 · 준비","items":["할 일","할 일"]},{"label":"당일 · 시공","items":[]},{"label":"완료 · 정산","items":[]}],"checks":[{"label":"현장에서 확인할 것","why":"왜"}],"tell":"인부에게 이렇게 말하세요","notes":["이 현장 특이사항"]}},"includedScopes":["bathroom|kitchen|wallpaper|entrance|demolition|plaster|carpentry|electric|plumbing|film|window"],"excludedScopes":["window 등 고객이 빼라고 한 공종"],"summary":"한 문장 요약","warnings":["놓치면 손해 보는 점 0~3개"]}
 
 공종ID 목록(반드시 이 중 하나): ${GEMINI_TRADES.join(', ')}
-- 목공/문·몰딩·가구·데크=carpentry, 전기·조명·콘센트=electric, 배관·수도·보일러=plumbing, 필름·시트지=film, 맨땅·터파기·기초·토목=groundwork
+- 목공/문·몰딩·가구·데크·가벽·칸막이·경량벽체=carpentry, 전기·조명·콘센트=electric, 배관·수도·보일러=plumbing, 필름·시트지=film, 맨땅·터파기·기초·토목=groundwork
 - 주방(부엌·싱크대·상부장·하부장·후드)=kitchen, 욕실=bathroom, 도배·장판=wallpaper, 철거=demolition, 폐기물=waste, 인력=labor
-- 두 공종 이상 섞인 전체 인테리어=combined, 정말 모르면 custom
+- 두 공종 이상을 새로 시공하는 전체 인테리어=combined, 정말 모르면 custom
 
-[철거·폐기물·인테리어 구분 — 가장 중요]
-- 고객이 '철거·제거·뜯기·빼기·반출'만 말하고 '설치·교체·시공·도배·타일 시공·리모델링·올수리'를 말하지 않았으면 **trade는 demolition**이다. includedScopes에도 demolition만 넣는다.
-- 그래서 "장판 제거, 화장실 2개, 베란다 샷시, 부엌 선반과 싱크대 철거"는 combined가 아니라 demolition(부분 철거)이다. 장판·욕실·샷시·싱크대가 나와도 '제거·철거'면 시공비(타일·도기·벽지·싱크대 교체)를 넣지 않는다.
-- 가구·집기·비품만 버리거나 수거하는 요청은 waste. 철거가 섞여 있으면 demolition.
-- 철거만인데 sizeUnit이 없으면 평을 지어내지 말고 sizeUnit을 "모름"으로 둔다.
-- 인테리어로 볼 수 있는 것은 '시공·설치·교체'를 실제로 요청한 경우뿐이다. 애매하면 demolition 쪽으로 판단한다.
+[공종 판단 순서 — 위가 우선한다. 아래 규칙이 예전 '애매하면 철거' 규칙을 대신한다]
+1. 요청서에 적힌 공사 종류가 가장 우선이다. '상업공간 인테리어'·'부분 인테리어'·'도배'·'철거'처럼 **서비스 분야나 요청 제목에 적힌 말**을 먼저 따른다. 인테리어라고 적혀 있는데 철거로 바꾸지 않는다.
+2. 철거(demolition)는 '철거·해체·제거·뜯기·반출·원상복구'가 **실제로 적혀 있을 때만**이다. 재료 이름(가벽·경량벽체·데코타일·텍스·싱크대)만으로는 철거가 아니다.
+3. 가벽·칸막이·룸(방) 만들기·파티션은 **carpentry(목공·경량벽체)** 다. '8m 가벽 룸3개 만들기' = carpentry, sizeValue 8, sizeUnit m.
+4. '만들기·설치·교체·시공·도배'가 있으면 그 공종이다(철거 아님). '철거 후 새로'는 시공 공종, '철거만'이면 demolition.
+5. 한 공간만(욕실·주방·창호) 새로 하면 그 공종, 여러 공종을 새로 하면 combined. '부분 인테리어'는 combined가 아니다 — 실제 작업이 하나면 그 공종이다.
+6. 무엇을 하는지 정말 모르면 custom으로 두고 firstCallQuestions로 물어보게 한다. **면적·금액을 지어내지 않는다**(sizeUnit "모름").
+- 규격이 m·개로 적혀 있으면 그 단위를 그대로 쓴다(평으로 환산하지 않는다).
+- keyFacts에는 요청서 라벨·값을 **그대로** 옮겨 적는다. 사진에서 못 읽은 값은 넣지 않는다. 이 값은 앱의 정리본과 대조해 누락을 잡는 데 쓰인다.
 priceRange는 부가세 별도, 만원 단위의 보수적 범위다.
 materialOrders는 이 현장 공종에 실제로 필요한 자재만 2~5개 업체로 나눈다. 예) 철거=마대·보양재·집게차/덤프, 기초·정지=쇄석·시멘트·메쉬·굴삭기·다짐기·잔토 반출, 도배=벽지·풀·초배지·장판, 욕실=타일·도기·방수재, 주방=싱크대·상판·수전.
 - 현장에 없는 공종 자재(예: 철거+정지 현장의 합지·포세린·도기)는 절대 넣지 않는다.
@@ -653,10 +658,50 @@ export async function analyzeCaseWithGemini({ apiKey, text = '', photos = [], tr
   ];
   try {
     const { json, raw } = await callGemini({ apiKey: key, parts });
-    return { ok: true, data: normalizeCaseAnalysis(json), raw };
+    const data = normalizeCaseAnalysis(json);
+    // AI 답도 규칙 게이트를 통과해야 한다 — 명시된 서비스 분야와 어긋나는 공종은 고친다.
+    const { data: fixed, notes } = reconcileWithRules(data, text);
+    return { ok: true, data: fixed, raw, ruleNotes: notes };
   } catch (e) {
     return { ok: false, reason: e?.message || 'gemini_failed' };
   }
+}
+
+// AI가 '요청서에 적힌 공사 종류'와 다른 공종을 골랐을 때 바로잡는다.
+// (실제 사고: 서비스 분야 '부분 인테리어' + '8m 가벽 룸3개 만들기'를 AI가 철거로 판단)
+// 규칙 엔진은 라벨을 그대로 읽으므로, **명시된 서비스가 있을 때만** AI를 덮어쓴다.
+
+export function reconcileWithRules(data, text) {
+  const notes = [];
+  const next = { ...data };
+  const src = String(text || '').trim();
+  if (!src) return { data: next, notes };
+  let rule = null;
+  try {
+    rule = classifyRequest(src);
+  } catch (e) {
+    return { data: next, notes };
+  }
+  if (!rule || !rule.trade || rule.trade === 'unclassified') return { data: next, notes };
+  const sig = rule.signals || {};
+  const declaredService = `${rule.patch?.serviceType || ''} ${sig.headline || ''}`.trim();
+  const explicit = sig.hasForm ? !!rule.patch?.serviceType : /인테리어|리모델링|올\s*수리/.test(src);
+  const conflicts = next.trade !== rule.trade;
+  if (explicit && conflicts && next.trade === 'demolition' && !sig.removal && rule.trade !== 'demolition') {
+    notes.push(`요청서에 '${declaredService || '인테리어'}'라고 적혀 있어 철거가 아니라 ${rule.trade}로 잡았습니다`);
+    next.trade = rule.trade;
+    next.tradeName = '';
+    next.priceRange = { min: 0, max: 0 };
+  }
+  if (rule.patch?.partition && (next.trade === 'carpentry' || next.trade === rule.trade)) {
+    next.partition = rule.patch.partition;
+    if (!next.sizeValue || next.sizeUnit !== 'm') {
+      next.sizeValue = rule.patch.partition.meters ? String(rule.patch.partition.meters) : '';
+      next.sizeUnit = 'm';
+    }
+  }
+  if (rule.patch?.clientBudget && !next.clientBudget) next.clientBudget = rule.patch.clientBudget;
+  return { data: next, notes };
 }
 
 function numOrBlank(v) {
@@ -685,6 +730,13 @@ export function normalizeCaseAnalysis(data = {}) {
       min: Math.max(0, Math.round(parseFloat(data?.priceRange?.min) || 0)),
       max: Math.max(0, Math.round(parseFloat(data?.priceRange?.max) || 0)),
     },
+    keyFacts: Array.isArray(data.keyFacts)
+      ? data.keyFacts
+          .map((x) => ({ label: String(x?.label || '').slice(0, 24), value: String(x?.value || '').slice(0, 120) }))
+          .filter((x) => x.label && x.value)
+          .slice(0, 12)
+      : [],
+    workItems: Array.isArray(data.workItems) ? data.workItems.map((x) => String(x || '').slice(0, 60)).filter(Boolean).slice(0, 10) : [],
     clientName: String(data.clientName || '').slice(0, 30),
     clientPhone: String(data.clientPhone || '').slice(0, 20),
     distanceKm: numOrBlank(data.distanceKm),

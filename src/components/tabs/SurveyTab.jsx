@@ -10,7 +10,7 @@ import { parseAdjustment, parseAdjustments, PROCESS_KEYWORDS, PROCESS_TO_SURVEY,
 import { analyzeSurveyWithGemini, getGeminiKey } from '../../lib/gemini.js';
 import { useSurveyGuide } from '../../lib/useSurveyGuide.js';
 import { ocrAnalyzeWithTimeout } from '../../lib/ocr.js';
-import { fileToThumb } from '../../lib/image.js';
+import { fileToThumb, THUMB_PHOTO } from '../../lib/image.js';
 import { copyText } from '../../lib/clipboard.js';
 import {
   AlertCard,
@@ -560,7 +560,7 @@ function ChangeQuick({ c, update, calc, showToast }) {
               aria-label="현장 답사 사진"
               onChange={async (e) => {
                 const files = Array.from(e.target.files || []).slice(0, 6 - (c.photos?.length || 0));
-                const thumbs = await Promise.all(files.map(fileToThumb));
+                const thumbs = await Promise.all(files.map((f) => fileToThumb(f, THUMB_PHOTO)));
                 update({ photos: [...(c.photos || []), ...thumbs].slice(0, 6) });
                 setPhoto(true);
                 showToast(`현장 사진 ${thumbs.length}장을 붙였습니다 — 글 없이 버튼만 눌러도 읽습니다`);
