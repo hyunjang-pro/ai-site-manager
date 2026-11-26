@@ -449,6 +449,12 @@ export function classifyRequest(rawText = '') {
     suggestTitle = partialTitle(partial.items, { region, pyung: sitePyung });
   }
 
+  // 뜯기만 하는 현장(철거·폐기물·인력)에 '도배·장판·욕실·주방 포함' 칩이 켜지면
+  // 화면에서는 시공까지 하는 현장처럼 보인다 — 철거 현장은 철거(·정지)만 포함으로 남긴다.
+  const scopeIds = Array.from(new Set(subScopes));
+  const finalScopes =
+    ['demolition', 'waste', 'labor'].includes(trade) ? scopeIds.filter((s) => ['demolition', 'groundwork'].includes(s)) : scopeIds;
+
   const patch = {
     trade,
     sizeValue: sizeValue === '' ? '' : String(sizeValue),
@@ -460,7 +466,7 @@ export function classifyRequest(rawText = '') {
     lifting: { floor: floorMatch ? parseInt(floorMatch[1], 10) : '', elevator },
     extraWorks,
     excludedWorks,
-    subScopes: Array.from(new Set(subScopes)),
+    subScopes: finalScopes,
     excludedScopes: Array.from(new Set(excludedScopes)),
   };
   // 규모를 안 적은 요청 — 무엇이든 15평으로 잡으면 "데코타일 철거"가 461만원이 된다.
