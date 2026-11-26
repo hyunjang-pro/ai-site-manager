@@ -1003,7 +1003,7 @@ async function main() {
     record('수익: 열면 절감 대안 표시', tOpen.includes('가격을 맞추려면 이렇게 줄이세요'));
     record('수익: 마감 공종 대안', tOpen.includes('자재 등급 한 단계 낮추기') || tOpen.includes('준공 청소는 손님이 직접'));
     record('수익: −0만 없음(대안)', !/[-−]0만/.test(tOpen));
-    record('수익: 항목별 산출 근거', t.includes('항목별 산출 근거') && t.includes('인건비') && /다섯 줄을 더하면 보수적 원가 [\d,]+만원/.test(t));
+    record('수익: 항목별 산출 근거', t.includes('항목별 산출 근거') && t.includes('인건비') && /(위 항목을 더하면|다섯 줄을 더하면) 보수적 원가 [\d,]+만원/.test(t));
     record('수익: Before/After 카드', t.includes('BEFORE') && t.includes('AFTER (예상)'));
     record(
       '수익: 무료 방법 1·2·3 안내',

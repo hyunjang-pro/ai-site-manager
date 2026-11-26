@@ -2,8 +2,45 @@
 // 규칙 기반(오프라인 100%) — 사진은 ocr.js가 읽은 글자를 여기에 넘긴다.
 import { REGIONS, TRADES } from './constants.js';
 import { detectPartial, partialOf, PARTIAL_ITEMS } from './partial.js';
+import { isDemoOnlyText } from './scope.js';
 
 const PARTIAL_LABEL = Object.fromEntries(Object.entries(PARTIAL_ITEMS).map(([id, def]) => [id, def.label]));
+
+// 머리글에 쓰는 짧은 이름 — '장판·마루 34평 + 욕실·화장실 2칸 …'처럼 길면 폰에서 안 읽힌다.
+const PARTIAL_SHORT = {
+  sign: '간판',
+  sink: '싱크대',
+  builtin: '붙박이',
+  aircon: '에어컨',
+  airconOutdoor: '실외기',
+  partition: '가벽',
+  window: '샷시',
+  ceiling: '텍스',
+  deck: '데크',
+  furniture: '가구',
+  floor: '장판',
+  decoTile: '데코타일',
+  wallpaper: '벽지',
+  bathroom: '욕실',
+  shelf: '선반',
+  door: '문짝',
+};
+
+// 부분 철거 제목 — "안동 34평 장판·욕실2·샷시·싱크대 철거"처럼 무엇을 뜯는지 바로 보이게
+export function partialTitle(items = [], { region = '', pyung = 0 } = {}) {
+  const names = items.map((it) => {
+    const label = PARTIAL_SHORT[it.id] || PARTIAL_LABEL[it.id] || '철거';
+    const qty = Number(it.qty) || 1;
+    // 현장 평수를 이미 제목에 넣었으면 장판 34평을 또 붙이지 않는다
+    if (it.unit === '평' && pyung) return label;
+    if (qty > 1) return `${label}${qty}${it.unit === 'm' ? 'm' : ''}`;
+    return label;
+  });
+  const cap = names.join('·').length <= 18 ? names.length : 4;
+  const head = names.slice(0, cap).join('·');
+  const rest = names.length > cap ? ` 외 ${names.length - cap}` : '';
+  return [region, pyung ? `${pyung}평` : '', `${head}${rest} 철거`].filter(Boolean).join(' ');
+}
 
 const num = (v) => {
   const n = parseFloat(v);
@@ -59,10 +96,8 @@ export function autoCaseTitle(c, tradeOverride, scopesOverride) {
   // 부분 철거는 '2개 철거' 대신 '간판 2개 철거' — 무엇을 뜯는지 제목에 남긴다
   const partial = trade === 'demolition' ? partialOf(c) : { on: false };
   if (partial.on && Array.isArray(partial.items) && partial.items.length) {
-    const what = partial.items
-      .map((it) => `${PARTIAL_LABEL[it.id] || '철거물'} ${it.qty}${it.unit}`)
-      .join(' + ');
-    return [region, `${what} 철거`].filter(Boolean).join(' ');
+    const pyung = parseFloat(c?.sizeValue) || 0;
+    return partialTitle(partial.items, { region, pyung: c?.sizeUnit === '평' ? pyung : 0 });
   }
   const label = trade === 'combined' ? combinedTitle(scopes) : TRADE_TITLE[trade] || TRADES[trade]?.short || '현장';
   return [region, size, label].filter(Boolean).join(' ') || '새 현장';
@@ -158,7 +193,7 @@ export function classifyRequest(rawText = '') {
   if (trade === 'waste' && /철거|해체/.test(t)) trade = 'demolition';
   // "샷시 철거 후 새로 설치"·"장판 철거하고 새 장판"처럼 철거 뒤 시공까지 말했으면
   // 철거가 아니라 그 공종(창호·도배·욕실·주방) 현장이다.
-  if (!fullInterior && ['demolition', 'combined'].includes(trade) && /설치|교체|새로|시공|깔아/.test(t)) {
+  if (!fullInterior && ['demolition', 'combined'].includes(trade) && /설치|교체|새로|새\s*(장판|벽지|타일|샷시|창|문|도기|싱크대|마루|바닥)|시공|깔아/.test(t)) {
     const finishIds = ids.filter((id) => ['wallpaper', 'bathroom', 'kitchen', 'window', 'tilewaterproof', 'carpentry', 'electric', 'plumbing', 'film', 'plaster'].includes(id));
     if (finishIds.length === 1) trade = finishIds[0];
     else if (ids.includes('window') && /(샷시|샤시|창호)[^\n]{0,12}(설치|교체)/.test(t)) trade = 'window';
@@ -174,6 +209,13 @@ export function classifyRequest(rawText = '') {
   ) {
     trade = 'waste';
   }
+
+  // ── 뜯기만 하는 요청은, 공간 이름(장판·화장실·샷시·부엌)이 여러 개 나와도 인테리어가 아니다 ──
+  // ("32평 올철거 장판 마루 씽크대 화장실2 샷시", "34평 아파트 장판만 제거 …")
+  // '시공·설치·교체·도배' 같은 새로 만드는 말이 한 개도 없으면 복합 인테리어로 올리지 않는다.
+  // 단 '철거 + 부지 정지·전기·배관'처럼 다른 공종이 진짜 같이 있는 현장은 복합 그대로 둔다.
+  const otherTrades = ids.some((id) => ['groundwork', 'electric', 'plumbing', 'plaster', 'film'].includes(id));
+  if (trade === 'combined' && ids.includes('demolition') && !otherTrades && isDemoOnlyText(t)) trade = 'demolition';
 
   // ── 소형·부분 철거(개수 단위) ──
   // "간판 두개 철거", "싱크대 철거"를 15평 전체 철거로 계산하면 400~500만원이 나온다.
@@ -210,11 +252,16 @@ export function classifyRequest(rawText = '') {
   let sizeValue = '';
   let sizeUnit = '';
   const livingWaste = trade === 'waste' && /생활\s*폐기물/.test(t);
+  const sitePyung = parseFloat((t.match(/(\d+(?:\.\d+)?)\s*평/) || [])[1] || 0);
   if (partial.on) {
-    // 부분 철거는 품목 수량이 곸 규모다 (간판 2개 · 샷시 2짝 · 가벽 3m).
+    // 부분 철거는 품목 수량이 곧 규모다 (간판 2개 · 샷시 2짝 · 가벽 3m).
     // 단위가 섞여 있으면 숫자를 합치지 않는다 (장판 15평 + 욕실 2칸 = 17? 뜻이 없다).
     const units = Array.from(new Set(partial.items.map((it) => it.unit)));
-    if (units.length === 1) {
+    if (sitePyung > 0) {
+      // "34평 아파트 장판만 제거 …" — 평수는 현장 넓이로만 쓰고 금액은 품목 단위로 계산한다
+      sizeValue = String(sitePyung);
+      sizeUnit = '평';
+    } else if (units.length === 1) {
       const total = partial.items.reduce((sum, it) => sum + (Number(it.qty) || 1), 0);
       sizeValue = String(Math.round(total * 10) / 10);
       sizeUnit = units[0];
@@ -399,10 +446,7 @@ export function classifyRequest(rawText = '') {
   // 부분 철거는 '2개 철거'가 아니라 '간판 2개 철거'로 — 무엇을 뜯는지 제목에 보이게
   let suggestTitle = trade === 'unclassified' ? '새 현장' : titleParts.join(' ');
   if (partial.on) {
-    const what = partial.items
-      .map((it) => `${PARTIAL_LABEL[it.id] || '철거물'} ${it.qty}${it.unit}`)
-      .join(' + ');
-    suggestTitle = [region, `${what} 철거`].filter(Boolean).join(' ');
+    suggestTitle = partialTitle(partial.items, { region, pyung: sitePyung });
   }
 
   const patch = {

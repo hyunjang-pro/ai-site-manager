@@ -35,6 +35,7 @@ import {
   cx,
 } from '../ui.jsx';
 import WasteVehicleSwitch from '../WasteVehicleSwitch.jsx';
+import CostFlow from '../CostFlow.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import { quoteSignal, parseBudget, aiSignalOf } from '../../lib/budget.js';
 
@@ -126,16 +127,18 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           가견적 (답사 전 예상)
         </p>
         <span className="text-2xs font-bold text-ink-3">
-          {calc.hasCalledPrice ? '내가 부를 금액 기준' : hasSurvey ? '답사 반영 전 금액' : '지금 계산된 견적 · 변동 가능'}
+          {calc.hasCalledPrice ? '내가 부를 금액 기준' : hasSurvey ? '답사 변동 반영 금액' : '지금 계산된 견적 · 변동 가능'}
         </span>
       </div>
       <Hero
-        eyebrow="1차 가견적 (답사 전 · 변동 가능)"
-        value={Math.round(hasSurvey && !calc.hasCalledPrice ? calc.baseClientPrice : calc.clientPrice).toLocaleString('ko-KR')}
+        eyebrow={hasSurvey ? '1차 가견적 (답사 변동까지 반영)' : '1차 가견적 (답사 전 · 변동 가능)'}
+        value={Math.round(calc.hasCalledPrice ? calc.clientPrice : calc.appClientPrice).toLocaleString('ko-KR')}
         unit="만원"
         sub={
           calc.hasCalledPrice
             ? `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 내가 부를 금액 기준 · 앱 계산가 ${Math.round(calc.appClientPrice).toLocaleString('ko-KR')}만`
+            : hasSurvey
+            ? `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 답사 변동 ${calc.adjustmentTotal > 0 ? '+' : ''}${Math.round(calc.adjustmentTotal).toLocaleString('ko-KR')}만 반영 · 예비비 ${calc.bufferRate}% 포함`
             : `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 실측 후 확정 · 예비비 ${calc.bufferRate}% 포함`
         }
         badge={
@@ -166,6 +169,9 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           기본 원가 {Math.round(calc.totalDirectCost).toLocaleString('ko-KR')}만 + 예비비 {Math.round(calc.costBuffer).toLocaleString('ko-KR')}만({calc.bufferRate}%)을 미리 넣었습니다
         </p>
       </Hero>
+
+      {/* 원가가 어떻게 나왔는지 — 답사 전에도 바로 읽히게 (2·4단계 같은 모양) */}
+      <CostFlow calc={calc} />
 
       {/* 내가 부를 가견적 — 숨고·카톡에 보낼 금액. 4단계 '내가 부른 금액'과 같은 값 */}
       <Card className="p-3.5">

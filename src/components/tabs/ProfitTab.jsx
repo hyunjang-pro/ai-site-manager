@@ -8,6 +8,7 @@ import { resolveSurvey } from '../../lib/site.js';
 import { estimateWorkDays } from '../../lib/schedule.js';
 import AfterPreview, { PREVIEW_TRADES } from '../AfterPreview.jsx';
 import SignalBanner from '../SignalBanner.jsx';
+import CostFlow from '../CostFlow.jsx';
 import { finalSignal, aiSignalOf } from '../../lib/budget.js';
 import { clientHonorific } from '../../lib/docs.js';
 import { materialSetFor, materialSetsFor } from '../../lib/materials.js';
@@ -71,6 +72,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
     { id: 'waste', label: '폐기물·운반', value: Math.round(calc.wasteTotal + calc.equipTotal), tone: 'bg-amber-500' },
     { id: 'material', label: '자재', value: Math.round(calc.materialTotal), tone: 'bg-cyan-500' },
     { id: 'site', label: '현장·규제', value: Math.round(calc.surchargeExtra || 0), tone: 'bg-violet-500' },
+    { id: 'adjust', label: '답사 변동', value: Math.round(calc.adjustTotal || 0), tone: Math.round(calc.adjustTotal || 0) < 0 ? 'bg-emerald-500' : 'bg-rose-500' },
     { id: 'buffer', label: `예비비 ${calc.bufferRate}%`, value: Math.round(calc.costBuffer), tone: 'bg-slate-400' },
   ].filter((p) => p.value > 0);
   const partsTotal = Math.max(1, parts.reduce((s, p) => s + Math.max(0, p.value), 0));
@@ -326,6 +328,9 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
               최소 방어선({pers(defense)}만)보다 낮습니다. 이 아래로 계약하면 내 일당·유류비도 못 건지는 선입니다.
             </p>
           ) : null}
+
+          {/* 원가가 어떻게 나왔는지 — 기본 원가 + 답사 변동 = 최종 원가 흐름 (2단계와 같은 모양) */}
+          <CostFlow calc={calc} className="mt-3" title="이 원가는 이렇게 나왔어요" />
 
           {/* 이 금액이 어디로 나가는지 — 수금 분할과 손님 문서 총액 */}
           <div className="mt-3 grid grid-cols-3 gap-1.5">
@@ -609,6 +614,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
               ['폐기물·운반', calc.wasteTotal + calc.equipTotal],
               ['자재', calc.materialTotal],
               ['현장·규제', calc.surchargeExtra || 0],
+              ['답사 변동', calc.adjustTotal || 0],
             ]
               .filter(([, v]) => Math.round(v) > 0)
               .map(([label, v]) => `${label} ${pers(v)}`)
@@ -660,7 +666,7 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
                 </div>
               ))}
             <p className="text-2xs font-semibold leading-4 text-ink-3">
-              위 다섯 줄을 더하면 보수적 원가 {pers(cost)}만원입니다 (기본 원가 {pers(baseCost)} + 예비비 {pers(calc.costBuffer)})
+              위 항목을 더하면 보수적 원가 {pers(cost)}만원입니다 (기본 원가 {pers(baseCost)} + 예비비 {pers(calc.costBuffer)})
             </p>
           </div>
 

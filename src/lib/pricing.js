@@ -9,6 +9,7 @@ import { resolveSurvey } from './site.js';
 import { materialSetFor } from './materials.js';
 import { detailRowsFor, detailTotals } from './details.js';
 import { bathroomDemoOnly, kitchenDemoOnly, isDemoOnlyText } from './scope.js';
+import { estimateWorkDays } from './schedule.js';
 
 export const MAN = 10000; // 원 → 만원
 
@@ -299,7 +300,9 @@ export function computeLifting(c, ratesIn) {
 
 export function computeEstimate(c) {
   const rawTrade = getTrade(c);
-  const notes = `${c?.title || ''} ${c?.notes || ''} ${c?.location || ''} ${c?.supplement || ''}`.toLowerCase();
+  // 앱이 자동으로 붙인 제목('24평 도배·장판')은 손님이 쓴 글이 아니다 — 판단은 손님 글(notes·rawInput)로만 한다.
+  // 제목을 섞으면 '장판만'이라도 제목의 '도배'가 벽지 값을 붙여 견적이 이유 없이 올라간다.
+  const notes = `${c?.notes || ''} ${c?.rawInput || ''} ${c?.location || ''} ${c?.supplement || ''}`.toLowerCase();
   // AI·스샷으로 들어온 요청이 '철거·제거'만인데 복합 인테리어로 분류되면
   // 시공값(도배·타일·싱크대)이 붙어 1,000만원이 넘는다. 계산 단계에서 한 번 더 막는다.
   const removalOnly =
@@ -328,6 +331,7 @@ export function computeEstimate(c) {
   let targetSummary = '';
   let smallJob = false; // 개수·품목 단위 소형 현장 — 최소 공사비 하한을 낮게 본다
   let workDays = 0; // 화면·문서가 같은 공사일수를 쓰게 한다
+  let plannedCrew = null; // 추천 인원 × 일수 — '2명 1일'처럼 원가가 가장 적은 조합을 화면에 보여 준다
 
   if (trade === 'demolition') {
     const partial = partialPlan(c, rates);
@@ -341,14 +345,16 @@ export function computeEstimate(c) {
       partial.items.forEach((it) => items.push(it));
       targetSummary = `${!sizeVal || sizeUnit === '모름' ? '규모 미입력 — 실측 필요 · ' : ''}${partial.summary}${partial.info.access === 'sky' ? ' (고소작업차 포함)' : ''}`;
       workDays = partial.days || 1;
+      plannedCrew = partial.crewPlan || null;
     } else {
     const pyung = toPyung(sizeVal, sizeUnit, defaultPyungOf(c, 15));
-    const scope = c?.demolition?.scope === 'partial' ? 'partial' : 'restore';
-    // '데코타일 철거'·'천장 텍스 철거'처럼 마감재 한 가지만 뜯는 현장은
+    const scope = c?.demolition?.scope === 'partial' ? 'partial' : 'restore';    // '데코타일 철거'·'천장 텍스 철거'처럼 마감재 한 가지만 뜯는 현장은
     // 원상복구(천장·벽체·바닥 전부)와 인력·폐기물·장비가 다르다.
     const finishOnly =
       /데코타일|텍스|장판|마루|벽지|도배|몰딩|걸레받이|칠판|거울/.test(notes) &&
-      !/조적|콘크리트|철골|벽체|가벽|전체|원상복구|전부/.test(notes);
+      !/조적|콘크리트|철골|벽체|가벽|전체|원상복구|전부|올\s*철거/.test(notes);
+    // '올철거·전체 철거'는 마감재만이 아니라 천장·벽체·바닥을 다 뜯는 원상복구 현장이다
+    const wholeStrip = /올\s*철거|전체\s*철거|전부\s*철거|원상복구/.test(notes);
     const skilled = getRate(rates, ['labor', 'demolition'], 25);
     const helper = getRate(rates, ['labor', 'helper'], 17);
     // 집·건물을 통째로 뜯는 현장(구옥·단독주택·창고 전체 철거)은 마감 철거와 인력·폐기물 양이 다르다.
@@ -361,7 +367,7 @@ export function computeEstimate(c) {
     // 순수 철거(마감만)는 4.5평, 마감재 한 가지만 뜯는 일은 8평,
     // 건물 전체 해체는 잔재 처리·장비 대기가 붙어 1인 1일 1.5평.
     // 예전 '평 ÷ 6일'은 24평을 4일×3명(연인원 12)으로 잡아 실제 2~3일 현장보다 인건비가 30~40% 부풀었다.
-    const perManDay = structural ? 1.5 : finishOnly ? 8 : scope === 'restore' ? 3.5 : 4.5;
+    const perManDay = structural ? 1.5 : finishOnly ? 8 : scope === 'restore' || wholeStrip ? 3.5 : 4.5;
     const manDays = pyung / perManDay;
     const rawDays = manDays / crewSize;
     const days = Math.max(finishOnly ? 0.5 : 1, Math.min(14, finishOnly ? Math.ceil(rawDays * 2) / 2 : Math.ceil(rawDays)));
@@ -388,6 +394,14 @@ export function computeEstimate(c) {
     targetSummary =
       `${sizeNote}${pyung}평 ${structural ? '건물 전체 철거·해체' : finishOnly ? '마감재(천장·바닥) 철거' : scope === 'restore' ? '철거 + 원상복구(천장·벽체·바닥)' : '순수 철거(마감 제외)'} · 약 ${days}일 공정`;
     workDays = days;
+    plannedCrew = {
+      crew: crewSize,
+      days,
+      manDays: Math.round(manDays * 10) / 10,
+      why: structural
+        ? `콘크리트·벽체 파쇄와 반출량이 커서 ${crewSize}명이 ${days}일 나가는 게 원가 최소`
+        : `${pyung}평 ${finishOnly ? '마감재 철거' : '철거'} — ${crewSize}명이 ${days}일 나가는 게 원가 최소`,
+    };
     items.push(
       {
         id: 'labor',
@@ -426,19 +440,45 @@ export function computeEstimate(c) {
     const wallRate = getRate(rates, ['labor', 'wallpaper'], 30);
     const floorRate = getRate(rates, ['labor', 'floor'], 28);
     const laborDays = +(wallDays + floorDays).toFixed(1);
-    const laborCost = Math.round(wallDays * wallRate + floorDays * floorRate);
-    crewDays += laborDays;
+    // "장판만", "벽지(도배)만"처럼 한 가지만 말했으면 다른 자재·노무는 넣지 않는다
+    // (벽지만 하겠다는 사람에게 24평 장판 61만원을 꺼워 넣으면 견적이 이유 없이 올라간다)
+    const wantWall = /도배|벽지|합지|실크|초배/.test(notes);
+    const wantFloor = /장판|마루|바닥|카펫/.test(notes);
+    const bothOrNone = !wantWall && !wantFloor;
+    const useWall = bothOrNone || wantWall;
+    const useFloor = bothOrNone || wantFloor;
+    const wallCostUse = useWall ? wallCost : 0;
+    const floorCostUse = useFloor ? floorCost : 0;
+    const subMatUse = useWall && useFloor ? subMat : Math.round(subMat * 0.6);
+    const wallDaysUse = useWall ? wallDays : 0;
+    const floorDaysUse = useFloor ? floorDays : 0;
+    const laborDaysUse = +(wallDaysUse + floorDaysUse).toFixed(1);
+    const laborCost = Math.round(wallDaysUse * wallRate + floorDaysUse * floorRate);
+    crewDays += laborDaysUse;
 
-    materialTotal += wallCost + floorCost + subMat;
+    materialTotal += wallCostUse + floorCostUse + subMatUse;
     laborTotal += laborCost;
+    // "장판 철거 후 새 장판" — 기존 마감을 뜯는 몫이 빠지면 그 돈은 사장님이 떠안는다.
+    if (/철거|제거|뜯|까\s*내|까내/.test(notes)) {
+      const stripDays = Math.max(0.5, Math.round((pyung / 30) * 2) / 2);
+      const stripCost = Math.round(stripDays * getRate(rates, ['labor', 'helper'], 19));
+      if (stripCost > 0) {
+        laborTotal += stripCost;
+        crewDays += stripDays;
+        items.push({ id: 'strip', category: '노무', name: `기존 마감 철거 (${stripDays}일)`, detail: '장판·벽지 뜯기 + 마대', amount: stripCost });
+      }
+    }
 
-    targetSummary = `${pyung}평 ${silk ? '실크' : '합지'} 도배(벽 ${wallPyung}평/${rolls}롤) + ${is22 ? '2.2T' : '1.8T'} 장판(${floorSqm}㎡)`;
-    items.push(
-      { id: 'wallpaper', category: '자재', name: `${silk ? '실크' : '합지'} 벽지 (${rolls}롤)`, detail: `벽 ${wallPyung}평 ÷ 5평/롤 × 1.15(손실) × ${rollUnit}만`, amount: wallCost },
-      { id: 'floor', category: '자재', name: `${is22 ? '2.2T' : '1.8T'} 장판 (${floorSqm}㎡)`, detail: `${pyung}평 × 2.3 = ${floorSqm}㎡ × ${floorUnit}만`, amount: floorCost },
-      { id: 'submat', category: '자재', name: '도배·장판 부자재', detail: '친환경 풀·초배지·장판본드·실리콘', amount: subMat },
-      { id: 'labor', category: '노무', name: `도배·장판 노무 (${laborDays}일)`, detail: `도배 ${wallDays}일 × ${wallRate}만 + 장판·마루 ${floorDays}일 × ${floorRate}만`, amount: laborCost }
-    );
+    targetSummary = [
+      useWall ? `${pyung}평 ${silk ? '실크' : '합지'} 도배(벽 ${wallPyung}평/${rolls}롤)` : '',
+      useFloor ? `${is22 ? '2.2T' : '1.8T'} 장판(${floorSqm}㎡)` : '',
+    ]
+      .filter(Boolean)
+      .join(' + ');
+    if (useWall) items.push({ id: 'wallpaper', category: '자재', name: `${silk ? '실크' : '합지'} 벽지 (${rolls}롤)`, detail: `벽 ${wallPyung}평 ÷ 5평/롤 × 1.15(손실) × ${rollUnit}만`, amount: wallCost });
+    if (useFloor) items.push({ id: 'floor', category: '자재', name: `${is22 ? '2.2T' : '1.8T'} 장판 (${floorSqm}㎡)`, detail: `${pyung}평 × 2.3 = ${floorSqm}㎡ × ${floorUnit}만`, amount: floorCost });
+    items.push({ id: 'submat', category: '자재', name: '도배·장판 부자재', detail: '친환경 풀·초배지·장판본드·실리콘', amount: subMatUse });
+    items.push({ id: 'labor', category: '노무', name: `도배·장판 노무 (${laborDaysUse}일)`, detail: `도배 ${wallDaysUse}일 × ${wallRate}만 + 장판·마루 ${floorDaysUse}일 × ${floorRate}만`, amount: laborCost });
   } else if (trade === 'bathroom') {
     const kans = sizeUnit === '칸' && sizeVal > 0 ? sizeVal : 1;
     const is600 = /600각|포세린/.test(notes);
@@ -474,8 +514,8 @@ export function computeEstimate(c) {
     const laborCost = Math.round(laborDays * getRate(rates, ['labor', 'bathroom'], 35) * kans);
     crewDays += laborDays * kans;
 
-    materialTotal += Math.round((B.tilePer + fixturePer + waterproofPer + demolitionPer) * kans);
-    laborTotal += laborCost;
+    materialTotal += Math.round((B.tilePer + fixturePer + waterproofPer) * kans);
+    laborTotal += laborCost + Math.round(demolitionPer * kans);
     wasteTotal += Math.round(wastePer * kans);
 
     const methodLabel = method === 'overlay' ? '덧방' : method === 'ubr' ? 'UBR 조립식 철거' : '전체 철거';
@@ -527,7 +567,11 @@ export function computeEstimate(c) {
   } else if (trade === 'waste') {
     // 차량 1탭 선택(반차·1톤 1차·2.5톤)이 톤수·차량비를 정한다. 생활폐기물 '한차'는 1톤 1차.
     const vehicle = wasteVehicle(c);
-    const tons = vehicle.tons;
+    // '5톤'처럼 탭(반차·1톤·2.5톤)보다 큰 톤수를 직접 적었으면 그 톤수로 계산한다.
+    // 예전에는 모두 2.5톤으로 깎여서 5톤 폐기물이 2.5톤 금액(113만)으로 나갔다.
+    const explicitTons = c?.sizeUnit === '톤' ? Math.max(0, parseFloat(c?.sizeValue) || 0) : 0;
+    const tons = Math.max(vehicle.tons, explicitTons);
+    const truckLabel = explicitTons > vehicle.tons + 0.01 ? `${explicitTons}톤 차량` : vehicle.label;
     const perTon = getRate(rates, ['waste', 'perTon'], 32);
     // 톤당 단가(32만)는 중간처리 + 수집운반 + 상차 인건비를 모두 포함한 통합 단가다.
     // 차량비·상차 인부를 따로 또 더하면 1톤 한차가 90만원대로 부풀려진다.
@@ -538,9 +582,9 @@ export function computeEstimate(c) {
 
     wasteTotal += disposal;
     equipTotal += ticket;
-    targetSummary = `폐기물 약 ${tons}톤 수거·상차·운반·처리 (${vehicle.label} · 톤당 ${perTon}만)`;
+    targetSummary = `폐기물 약 ${tons}톤 수거·상차·운반·처리 (${truckLabel} · 톤당 ${perTon}만)`;
     items.push(
-      { id: 'waste_disposal', category: '폐기물', name: `${vehicle.label} 폐기물 수거·처리 (${tons}톤)`, detail: `${tons}톤 × ${perTon}만 (2026 성상별 단가 · 차량·상차 인부 포함)`, amount: disposal },
+      { id: 'waste_disposal', category: '폐기물', name: `${truckLabel} 폐기물 수거·처리 (${tons}톤)`, detail: `${tons}톤 × ${perTon}만 (2026 성상별 단가 · 차량·상차 인부 포함)`, amount: disposal },
       { id: 'ticket', category: '장비', name: '처리확인서·올바로 등록', detail: '행정 처리', amount: Math.round(ticket) }
     );
   } else if (trade === 'labor') {
@@ -1097,13 +1141,45 @@ export function computeEstimate(c) {
     });
   }
 
+  // ---- 답사 변동(3단계) — 견적가뿐 아니라 원가·공사일수에도 그대로 반영한다 ----
+  // 예전에는 답사에서 금액을 빼도 원가가 그대로라 4단계가 '보수적 원가 243만보다 100만 적자'처럼
+  // 실제로는 남는 현장을 적자로 보여 줬다. 변동은 '그 일이 빠지거나 붙은 것'이므로 원가도 같이 움직인다.
+  const changeLogs = Array.isArray(c?.changeLogs) ? c.changeLogs : [];
+  const signOf = (log) => (log?.type === 'decrease' ? -1 : 1);
+  const priceDeltaOf = (log) => signOf(log) * (Number(log?.amount) || 0);
+  // 원가 변동: 항목에 적힌 costAmount가 있으면 그 값을, 없으면 견적 변동액과 같은 만큼 본다.
+  // costFree(값만 깎기·협상)면 원가는 그대로 — 순수한 가격 흥정은 남는 돈이 줄어드는 게 맞다.
+  const costDeltaOf = (log) => {
+    if (log?.costFree) return 0;
+    const raw = log?.costAmount;
+    const explicit = raw !== null && raw !== undefined && String(raw).trim() !== '' ? Number(raw) : null;
+    return signOf(log) * (Number.isFinite(explicit) ? explicit : Number(log?.amount) || 0);
+  };
+  const adjustmentTotal = Math.round(changeLogs.reduce((sum, l) => sum + priceDeltaOf(l), 0));
+  const adjustTotal = Math.round(changeLogs.reduce((sum, l) => sum + costDeltaOf(l), 0));
+  const adjustDays = Math.round(changeLogs.reduce((sum, l) => sum + Math.max(0, Number(l?.days) || 0), 0) * 10) / 10;
+  if (adjustTotal !== 0) {
+    const grew = adjustTotal > 0;
+    items.push({
+      id: 'survey_adjust',
+      category: '답사 변동',
+      name: `답사 변동 ${changeLogs.length}건 ${grew ? '추가' : '감소'} (${grew ? '+' : ''}${adjustTotal}만)`,
+      detail: changeLogs
+        .filter((l) => costDeltaOf(l) !== 0)
+        .map((l) => `${l.item || '변동'} ${costDeltaOf(l) > 0 ? '+' : ''}${costDeltaOf(l)}만`)
+        .join(' · '),
+      amount: adjustTotal,
+      isAdjust: true,
+    });
+  }
+
   // ---- 교통비·식비 — 현장 거리와 총 연인원(명·일)으로 자동 계산 ----
   // 기준 거리(기본 15km)를 넘으면 (거리 ÷ 기준거리, 내림) × 연인원 × 1인당 추가금이 붙는다.
   const distanceKm = Math.max(0, toNum(c?.distanceKm));
   const baseKm = Math.max(1, getRate(rates, ['travel', 'baseKm'], 15));
   const travelPer = Math.max(0, getRate(rates, ['travel', 'perWorker'], 1));
   const mealPer = Math.max(0, getRate(rates, ['meal', 'perWorker'], 1));
-  const crewDayCount = Math.max(0, Math.round(crewDays * 10) / 10);
+  const crewDayCount = Math.max(0, Math.round((crewDays + adjustDays) * 10) / 10);
   const travelUnits = distanceKm >= baseKm ? Math.floor(distanceKm / baseKm) : 0;
   const travelCost = Math.round(travelUnits * crewDayCount * travelPer);
   const mealCost = Math.round(crewDayCount * mealPer);
@@ -1170,10 +1246,13 @@ export function computeEstimate(c) {
     .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   // 소형·부품 현장은 원가 바닥도 낮춘다 (에어컨 1대 철거가 30만원으로 보이지 않게)
   const costFloor = smallJob ? 12 : 30;
-  let totalDirectCost = Math.max(
+  // 실지 원가(변동 전) — 견적가는 이 값으로 잡고, 답사 변동은 금액·원가에 각각 한 번씩만 더한다.
+  // (변동을 원가에도 넣은 뒤 그 원가로 다시 가격을 계산하면 -40만이 -90만으로 두 번 빠진다)
+  let baseDirectCost = Math.max(
     costFloor,
     Math.round(laborTotal + materialTotal + wasteTotal + equipTotal + surchargeExtra - excludedAmount)
   );
+  let totalDirectCost = Math.max(costFloor, baseDirectCost + adjustTotal);
 
   // ---- 관공서 공고: 설계내역서 확인 전까지 실행원가를 수주금액의 80%로 보수적으로 잡는다 ----
   // (일반 15평 공식으로 두면 2,720만짜리 공고가 원가 338만으로 보여 '남는 돈 +2,382만' 착시가 생긴다)
@@ -1191,6 +1270,7 @@ export function computeEstimate(c) {
       isAdjust: true,
     });
     totalDirectCost += gap;
+    baseDirectCost += gap;
   }
   // 공고 원가 메모는 내부 값(bidNote)으로만 둔다 — 손님 문서·이웃 안내문에 새면 안 된다
   const bidNote = isBid ? `공고 수주금액 ${bidPriceMan.toLocaleString('ko-KR')}만의 80%를 실행원가 하한으로 반영` : '';
@@ -1223,7 +1303,7 @@ export function computeEstimate(c) {
 
   const minJobBase = getRate(rates, ['minimumJob'], 40);
   const minJob = smallJob ? Math.min(20, minJobBase) : minJobBase;
-  let suggestedPrice = Math.round(costWithBuffer / (1 - safeMargin / 100));
+  let suggestedPrice = Math.round((baseDirectCost * (1 + bufferRate / 100)) / (1 - safeMargin / 100));
   const minApplied = minJob > 0 && suggestedPrice < minJob;
   if (minApplied) suggestedPrice = minJob;   // 자동 청구 단가(인력 지원)는 사람 수 × 일수 × 청구단가가 자연히 맞는다
   let quotedLabor = null;
@@ -1234,11 +1314,7 @@ export function computeEstimate(c) {
   }
   const baseClientPrice = customPrice !== null ? Math.max(customPrice, 0) : quotedLabor !== null ? quotedLabor : suggestedPrice;
 
-  // 현장 변동(추가·감소) 누적 — 견적서 금액에 그대로 더한다
-  const changeLogs = Array.isArray(c?.changeLogs) ? c.changeLogs : [];
-  const adjustmentTotal = Math.round(
-    changeLogs.reduce((sum, l) => sum + (l?.type === 'decrease' ? -1 : 1) * (Number(l?.amount) || 0), 0)
-  );
+  // 현장 변동(추가·감소) 누적 — 위에서 뽑은 값을 그대로 쓴다 (견적가에만 더하지 않고 원가에도 반영했다)
 
   // 앱이 계산한 최종 견적(참고용) — 단가·변동을 모두 반영한 값
   const appClientPrice = Math.max(0, baseClientPrice + adjustmentTotal);
@@ -1288,6 +1364,28 @@ export function computeEstimate(c) {
   if (!isPartialJob && !lifting.floor && !/\d+층/.test(notes)) missingInfos.push('층수·엘베');
   if (trade === 'unclassified') missingInfos.push('공종');
 
+  // 공사일수 — 앞 단계(가견적·최종·시공·문서)가 모두 같은 하루를 쓰도록 최종값을 하나로 정한다.
+  // 답사에서 일정이 늘거나 줄면(예: '하루 더 걸림 +1일') 그만큼 반영한다.
+  const baseWorkDays = workDays > 0 ? workDays : estimateWorkDays(c, { trade });
+  workDays = Math.max(0.5, Math.round((baseWorkDays + adjustDays) * 10) / 10);
+
+  // 인원 × 일수 추천 — 철거는 위에서 계산했고, 나머지 공종은 실제 투입 인원이 정해져 있다
+  if (!plannedCrew) {
+    const team = { wallpaper: 2, bathroom: 2, kitchen: 2, tilewaterproof: 2, plaster: 2, window: 2, combined: 3, carpentry: 1, electric: 1, plumbing: 1, film: 1, repair: 1, waste: 1, labor: 1, groundwork: 2 }[trade] || 1;
+    plannedCrew = {
+      crew: team,
+      days: workDays,
+      why: team > 1 ? `${TRADES[trade]?.short || '시공'}은 ${team}명이 나눠 맡는 게 원가 최소` : `1명이 ${workDays}일 처리`,
+    };
+  } else if (plannedCrew.days !== workDays) {
+    // 답사에서 일정이 늘었으면 추천 일수도 같이 맞춘다 (한 화면에 4일·5일이 섞이면 안 된다)
+    plannedCrew = {
+      ...plannedCrew,
+      days: workDays,
+      why: adjustDays > 0 ? `답사에서 일정이 늘어 ${plannedCrew.crew}명 × ${workDays}일로 잡았습니다` : plannedCrew.why,
+    };
+  }
+
   return {
     trade,
     tradeLabel,
@@ -1329,6 +1427,9 @@ export function computeEstimate(c) {
     calledPrice,
     hasCalledPrice,
     adjustmentTotal,
+    adjustTotal,
+    adjustDays,
+    crewPlan: plannedCrew,
     changeLogs,
     clientPrice,
     customPrice,

@@ -30,6 +30,15 @@ export function estimateWorkDays(c, calc, designDays = 0) {
     case 'window':
       days = 2;
       break;
+    case 'electric':
+    case 'plumbing':
+    case 'film':
+      // 콘센트·수전·필름은 한 번 방문해 하루에 끝나는 일이 대부분이다
+      days = 1;
+      break;
+    case 'carpentry':
+      days = Math.max(1, Math.ceil((size || 1) / 8));
+      break;
     case 'waste':
       days = 1;
       break;

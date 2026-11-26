@@ -392,12 +392,15 @@ function ChangeQuick({ c, update, calc, showToast }) {
 
   const runApply = (text, provided) => {
     if (manualReady) {
+      // '값만 깎기·네고'는 원가가 그대로다 — 범위가 바뀐 답사 변동과 구분해 적는다
+      const priceOnly = /깎|깍|네고|할인|에누리|맞춰|맞춤/.test(memo);
       const log = {
         id: `chg-${Date.now()}`,
         item: memo.trim(),
         reason: memo.trim(),
         amount: amountNum,
         type,
+        costFree: priceOnly,
         days: Number(days) || 0,
         photo,
         agreed: false,
@@ -681,6 +684,12 @@ function ChangeQuick({ c, update, calc, showToast }) {
             가견적 {Math.round(calc.baseClientPrice).toLocaleString('ko-KR')}만 → 최종 견적{' '}
             {Math.round(calc.clientPrice).toLocaleString('ko-KR')}만 ({calc.adjustmentTotal > 0 ? '+' : ''}
             {calc.adjustmentTotal}만)
+            {calc.adjustTotal ? (
+              <span className="mt-0.5 block text-2xs font-bold text-brand">
+                원가도 {Math.round(calc.totalDirectCost - calc.adjustTotal).toLocaleString('ko-KR')}만 →{' '}
+                {Math.round(calc.totalDirectCost).toLocaleString('ko-KR')}만으로 같이 바뀝니다
+              </span>
+            ) : null}
           </p>
         </div>
       ) : null}
