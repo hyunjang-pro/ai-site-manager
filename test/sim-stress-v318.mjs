@@ -193,6 +193,41 @@ for (const [text, trades, range, cond] of CASES) {
   }
 }
 
+// ── UI가 만드는 실제 형태 — notes(손님 글) + rawInput(앱 정리본)이 섞여도 판단이 흔들리지 않아야 한다 ──
+// 정리본에는 '공종: 욕실 리모델링' 같은 앱 요약이 붙는다. 예전엔 이 '리모델링' 때문에 "타일만 교체"가 올수리 538만으로 돌아갔다.
+const UI_SHAPED = [
+  {
+    text: '욕실 1칸 타일만 교체',
+    trade: 'bathroom',
+    patch: {
+      trade: 'bathroom',
+      notes: '욕실 1칸 타일만 교체',
+      rawInput: '면적: 1칸 \n공간: 욕실 \n공종: 욕실 리모델링 \n포함: 욕실 \n추가: 타일 \n요청: 욕실 1칸 타일만 교체 ※ 자동 분류: 욕실 리모델링 · 1칸',
+      sizeValue: '1',
+      sizeUnit: '칸',
+    },
+    range: [250, 400],
+    noFixture: true,
+  },
+  {
+    text: '방충망 8짝 교체',
+    trade: 'repair',
+    patch: { trade: 'repair', notes: '방충망 8짝 교체', rawInput: '공종: 부분 수선 \n요청: 방충망 8짝 교체', sizeValue: '8', sizeUnit: '개소' },
+    range: [40, 140],
+    noSink: true,
+  },
+];
+for (const U of UI_SHAPED) {
+  const c = composeCase({ trade: U.trade, patch: U.patch });
+  const calc = computeEstimate(c);
+  const price = Math.round(calc.clientPrice);
+  const items = (calc.items || []).filter((i) => Number(i.amount) > 0 && !i.excluded);
+  rows.push({ text: `[UI형태] ${U.text}`, trade: calc.trade, size: `${c.sizeValue}${c.sizeUnit}`, price, cost: Math.round(calc.totalDirectCost), days: calc.workDays, crew: calc.crewPlan?.crew ?? null, margin: calc.marginPercent, summary: calc.targetSummary });
+  if (price < U.range[0] || price > U.range[1]) errors.push(`[UI형태] ${U.text} — 견적 ${price}만 (기대 ${U.range[0]}~${U.range[1]}만)`);
+  if (U.noFixture && items.some((i) => /도기|수전/.test(i.name) && Number(i.amount) > 0)) errors.push(`[UI형태] ${U.text} — 타일만인데 도기·수전 교체가 붙음`);
+  if (U.noSink && items.some((i) => /싱크대/.test(i.name))) errors.push(`[UI형태] ${U.text} — 싱크대 항목이 붙음`);
+}
+
 // ── H. 관공서 공고 — 예정가 800 / 2,200 / 4,500만: 80% 실행원가 하한 + 수주금액 고정 + 손님 문서 차단 ──
 const BIDS = [
   { text: '안동시 동네 체육시설 창고 철거공사', budget: 800, trade: 'demolition', workTypes: ['demolition'] },

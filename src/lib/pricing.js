@@ -313,6 +313,9 @@ export function computeEstimate(c) {
   // 앱이 자동으로 붙인 제목('24평 도배·장판')은 손님이 쓴 글이 아니다 — 판단은 손님 글(notes·rawInput)로만 한다.
   // 제목을 섞으면 '장판만'이라도 제목의 '도배'가 벽지 값을 붙여 견적이 이유 없이 올라간다.
   const notes = `${c?.notes || ''} ${c?.rawInput || ''} ${c?.location || ''} ${c?.supplement || ''}`.toLowerCase();
+  // 손님이 쓴 말 — 정리본(rawInput)에는 앱이 붙인 '공종: 욕실 리모델링' 같은 요약이 섞여 있다.
+  // "타일만 교체" 같은 판단은 손님 글(notes)로만 해야 한다 (정리본의 '리모델링' 때문에 올수리로 돌아가던 것)
+  const ownNotes = `${c?.notes || ''} ${c?.supplement || ''}`.toLowerCase().trim() || notes;
   // AI·스샷으로 들어온 요청이 '철거·제거'만인데 복합 인테리어로 분류되면
   // 시공값(도배·타일·싱크대)이 붙어 1,000만원이 넘는다. 계산 단계에서 한 번 더 막는다.
   const removalOnly =
@@ -529,14 +532,14 @@ export function computeEstimate(c) {
     // (예전엔 전체 철거+방수+도기까지 붙어 1칸 553만 — 시세 250~400)
     const tileOnly =
       !c?.tileRemain &&
-      /타일\s*(?:만|만\s*교체|교체\s*만)|타일만/.test(notes) &&
-      !/도기|양변기|세면대|수전|욕조|샤워|올수리|리모델링|전체\s*철거|전체\s*교체/.test(notes);
+      /타일\s*(?:만|만\s*교체|교체\s*만)|타일만/.test(ownNotes) &&
+      !/도기|양변기|세면대|수전|욕조|샤워|올수리|리모델링|전체\s*철거|전체\s*교체/.test(ownNotes);
     // "하나는 타일만, 하나는 올수리" — 한 현장에서 두 가지를 같이 하는 경우
-    const mixedBath = /하나는[^\n]{0,24}타일/.test(notes) && /올수리|올\s*수리|전체/.test(notes) && !tileOnly;
+    const mixedBath = /하나는[^\n]{0,24}타일/.test(ownNotes) && /올수리|올\s*수리|전체/.test(ownNotes) && !tileOnly;
     // 도기·수전 교체는 손님이 그 말을 했을 때만 넣는다 — "타일 철거+방수"에
     // 도기·수전 50만원을 꺼워 넣으면 견적이 이유 없이 올라간다.
     const anyFinish = /타일|도기|양변기|세면대|수전|욕조|샤워|방수|덧방|포세린|600각|교체|시공|설치|올수리|리모델링|인테리어|전체/.test(notes);
-    const wantFixture = !tileOnly && (!anyFinish || /도기|양변기|세면대|수전|욕조|샤워|올수리|리모델링|인테리어|전체\s*(교체|철거)/.test(notes));
+    const wantFixture = !tileOnly && (!anyFinish || /도기|양변기|세면대|수전|욕조|샤워|올수리|리모델링|인테리어|전체\s*(교체|철거)/.test(ownNotes));
     const fixturePer = wantFixture ? B.fixturePer : 0;
     const fullKans = mixedBath ? 1 : tileOnly ? 0 : kans;
     const tileKans = mixedBath ? Math.max(0, kans - 1) : tileOnly ? kans : 0;
@@ -606,9 +609,9 @@ export function computeEstimate(c) {
     const K = MATERIAL_RATES.kitchen;
     // 상판만 교체 — 싱크대 상·하부장은 그대로 두고 상판값(60만/m)을 넣으면 541만이 나간다
     const counterOnly =
-      /상판/.test(notes) &&
-      /교체|갈아|바꾸|새/.test(notes) &&
-      !/상판까지|상판도|상판\s*포함|상부장|하부장|싱크대\s*(전체|통째)|싱크대.{0,6}전부/.test(notes);
+      /상판/.test(ownNotes) &&
+      /교체|갈아|바꾸|새/.test(ownNotes) &&
+      !/상판까지|상판도|상판\s*포함|상부장|하부장|싱크대\s*(전체|통째)|싱크대.{0,6}전부/.test(ownNotes);
     const sink = counterOnly ? 0 : Math.round(meters * K.sinkPerM);
     const top = Math.round(meters * K.topPerM);
     const laborDays = counterOnly ? 1 : K.laborDays;
@@ -787,9 +790,9 @@ export function computeEstimate(c) {
     const laborCost = Math.round(repairDays * repairRate);
     const matCost = Math.round(spots * R.materialPer);
     // 방충망 교체는 창호 교체가 아니다 — 짝당 3.5만 + 반나절
-    const mosquito = /방충망/.test(notes);
+    const mosquito = /방충망/.test(ownNotes);
     // 중문(3연동)·방화문 설치는 문 자체가 자재다 (5만/개소로 잡으면 57만, 실제 45~60만 자재)
-    const middleDoor = /중문|3연동|삼연동|방화문/.test(notes) && /설치|교체|갈아|바꾸/.test(notes);
+    const middleDoor = /중문|3연동|삼연동|방화문/.test(ownNotes) && /설치|교체|갈아|바꾸/.test(ownNotes);
     if (mosquito || middleDoor) {
       const qty = mosquito ? Math.max(1, spots) : 1;
       const mat = mosquito ? Math.round(qty * 3.5) : 45;
