@@ -29,9 +29,11 @@ export const MARKET_BANDS = {
     nameOf: (kind) =>
       kind === 'partial' ? '철거' : kind === 'finish' ? '마감 철거' : kind === 'structural' ? '건물 전체 철거' : '철거·원상복구',
     basis: '경북 상가 원상복구 평당 18~28만 · 주거 마감 철거 평당 3~12만 · 품목 철거는 개수 기준',
-    range: ({ n, kind }) => {
+    // 품목·수량 단위 철거는 개수로 범위가 커진다 (간판 1개 25~120 · 5품목 110~475)
+    range: ({ n, kind, units }) => {
       const p = n;
-      if (kind === 'partial') return { min: 15, low: 25, high: 130, max: 320 };
+      const k = Math.max(1, Number(units) || 1);
+      if (kind === 'partial') return { min: atLeast(15, 12, k), low: atLeast(25, 22, k), high: atLeast(120, 95, k), max: atLeast(320, 150, k) };
       if (kind === 'finish') return { min: atLeast(20, 1.5, p), low: atLeast(40, 3.5, p), high: atLeast(120, 9, p), max: atLeast(220, 18, p) };
       if (kind === 'structural') return { min: atLeast(150, 10, p), low: atLeast(300, 22, p), high: atLeast(600, 45, p), max: atLeast(900, 70, p) };
       return { min: atLeast(40, 3, p), low: atLeast(80, 7, p), high: atLeast(300, 26, p), max: atLeast(520, 38, p) };
@@ -245,7 +247,7 @@ export function marketBand(ctx = {}) {
   const trade = MARKET_BANDS[ctx.trade] ? ctx.trade : 'custom';
   const table = MARKET_BANDS[trade];
   const scale = bandScale(trade, ctx);
-  const r = table.range({ n: scale.n, kind: ctx.kind || scale.kind }, ctx);
+  const r = table.range({ n: scale.n, kind: ctx.kind || scale.kind, units: ctx.units }, ctx);
   const kind = ctx.kind || scale.kind;
   // 화면에 읽어 주는 보통 시세는 5만원 단위로 둔다 (어머님이 읽기 쉽게)
   const to5 = (v) => Math.max(0, Math.round(v / 5) * 5);

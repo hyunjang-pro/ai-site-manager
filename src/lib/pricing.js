@@ -329,6 +329,7 @@ export function computeEstimate(c) {
   let smallJob = false; // 개수·품목 단위 소형 현장 — 최소 공사비 하한을 낮게 본다
   // 시세 검증(engine/sanity.js)에 넘길 현장 사실 — 공종 안에서만 알 수 있는 값들
   let demolitionKind = ''; // partial · finish · structural · restore
+  let demolitionUnits = 0; // 품목 철거일 때 품목 수 (시세 범위가 개수만큼 커진다)
   let wasteTons = 0;
   let wasteVehicleCost = 0;
   let wasteTicket = 0;
@@ -344,6 +345,7 @@ export function computeEstimate(c) {
       // "간판 2개 철거"처럼 개수·품목 단위 현장 — 평수 전체 철거 단가를 쓰지 않는다.
       smallJob = true;
       demolitionKind = 'partial';
+      demolitionUnits = (partial.info?.items || []).length || 1;
       laborTotal += partial.labor;
       wasteTotal += partial.waste;
       equipTotal += partial.equip;
@@ -1674,6 +1676,7 @@ export function computeEstimate(c) {
   let sanity = marketSanity({
     trade,
     kind: demolitionKind,
+    units: demolitionUnits,
     sizeValue: sizeVal,
     sizeUnit,
     notes,

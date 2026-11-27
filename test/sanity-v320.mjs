@@ -165,6 +165,14 @@ ok('규모 표기: 톤', bandScale('waste', { sizeValue: '2.5', sizeUnit: '톤' 
 ok('규모 표기: 평 환산', bandScale('demolition', { sizeValue: '99', sizeUnit: '㎡' }).label === '30평', bandScale('demolition', { sizeValue: '99', sizeUnit: '㎡' }).label);
 ok('규모 표기: 인력', bandScale('labor', { people: 3, days: 2 }).label === '3명 2일', bandScale('labor', { people: 3, days: 2 }).label);
 
+// 품목 철거는 품목 수만큼 범위가 커진다 (3품목 374만은 '시세 상한'이 아니라 '조금 높음')
+const multi = marketBand({ trade: 'demolition', kind: 'partial', sizeValue: '15', sizeUnit: '평', units: 3 });
+const single = marketBand({ trade: 'demolition', kind: 'partial', sizeValue: '2', sizeUnit: '개', units: 1 });
+ok('품목 철거: 개수만큼 범위가 커짐', multi.high > single.high && multi.max > single.max, `${single.high}/${single.max} → ${multi.high}/${multi.max}`);
+ok('품목 철거: 1품목은 최소 15만부터', single.min <= 20 && single.max >= 200, `${single.min}~${single.max}`);
+const multiCase = priceOf('천장 텍스 5평, 가벽 칠막이 3m, 데코타일 10평 철거', () => {});
+ok('품목 철거: 다품목 견적은 범위 안', multiCase.sanity.adjusted === false && multiCase.price <= multiCase.sanity.band.max, `${multiCase.price}만 · ${multiCase.sanity.position}`);
+
 fs.writeFileSync(OUT, JSON.stringify({ generatedAt: new Date().toISOString(), count: rows.length, errors, rows }, null, 2));
 console.log('시세 검증', rows.length, '건 · 문제', errors.length, '건');
 errors.forEach((e) => console.log('  ✗ ' + e));
