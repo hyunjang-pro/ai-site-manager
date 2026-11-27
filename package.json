@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview --port 4173 --strictPort"
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "node test/engine-v319.mjs && node test/sim-holdout-v319.mjs && node test/sim-stress-v318.mjs && node test/audit-v314.mjs && node test/quote-sim-v313.mjs && node test/quote-sim.mjs && node test/sim-extra-v317.mjs && node test/sim-v315.mjs && node test/request-sheet-v316.mjs",
+    "test:engine": "node test/engine-v319.mjs",
+    "test:holdout": "node test/sim-holdout-v319.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.462.0",
