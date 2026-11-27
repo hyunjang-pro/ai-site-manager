@@ -220,7 +220,7 @@ npm run preview  # 빌드 결과 확인 (4173)
 # 이 작업 공간에는 Node와 Chromium이 숨김 폴더에 설치되어 있습니다.
 export PATH=/workspace/.tools/node-v20.18.0-linux-x64/bin:$PATH
 export LD_LIBRARY_PATH=/workspace/.tmp/sysroot/usr/lib/x86_64-linux-gnu
-node test/e2e.mjs        # 클릭 E2E 551개
+node test/e2e.mjs        # 클릭 E2E 552개
 node test/quote-sim.mjs  # 숨고 요청 30건 가격·분류·부대비용 전수 시뮬
 node test/quote-sim-v313.mjs  # 실제 요청문 59건 — 시세·분류·폐기물 중복·재계산 검사
 node test/persona-sim.mjs     # 직군별 가상 테스터 32명 크리틱
@@ -250,13 +250,31 @@ G2B_API_KEY=... node scripts/fetch-bids.mjs  # 공공데이터포털 키가 있�
 
 GitHub Actions(`.github/workflows/refresh-bids.yml`)가 4시간마다 실행합니다. 저장소 Settings → Secrets에 `G2B_API_KEY`를 넣으면 수집 범위가 넓어집니다(없어도 동작).
 
+## 견적 엔진 구조 (v3.19)
+
+문장은 **절 → 품목·동작·수량 → 일감 명세 → 4축 적산** 순서로 흐릅니다. 자세한 설명은
+[`docs/engine-v319.md`](docs/engine-v319.md)에 있습니다.
+
+- 낱말은 `src/lib/engine/lexicon.js` 한 곳에만 있습니다 (공종마다 정규식을 다시 훑지 않습니다).
+- 금액은 **한 줄에 한 축**(자재·인건비·장비·폐기물)만 갖고, 합계는 줄에서 다시 셉니다.
+  같은 돈이 두 축에 겹쳐 들어갈 수 없습니다.
+- 현장 조건(층수·야간·주말·외곽·장비)은 `engine/surcharge.js` 규칙표 하나로 적용됩니다.
+
 ## 폴더 구조
 
 ```
 src/
   App.jsx                 상태·저장·잠금·라우팅
   lib/
-    pricing.js            견적 엔진(단가·범위·변동·제외)
+    engine/
+      lexicon.js          품목·장소·동작 낱말 사전 (SSOT)
+      text.js             절 나누기·한글 수사·숫자+단위 추출
+      parse.js            절 안에서 품목·동작·수량 짝짓기 (인접어 파서)
+      jobspec.js          의도 모드 4가지 → 공종 → 규모 → 세부 공종
+      rate-book.js        품목 단가표 — 자재·인건비·장비·폐기물 4축으로 쪼갬
+      ledger.js           줄마다 한 축, 합계는 줄에서 재계산 (중복 계상 방지)
+      surcharge.js        현장 조건 할증 규칙표(층수·시간·거리·장비·규제)
+    pricing.js            견적 엔진(위 명세로 줄을 만들고 마진·가격·일수 계산)
     rates.js              기본 단가표·설정 필드·스냅샷 병합
     waste.js              폐기물 성상별 분리 계산(2026 고시 단가)
     partial.js            소형·부분 철거(간판·싱크대·붙박이장 등) 개수 단가
@@ -270,10 +288,12 @@ src/
     auth.js               가족 PIN
   components/             화면·UI (HomeScreen, Workspace, tabs/*, LockScreen …)
   data/bids.json          실제 공고 데이터(스크립트가 갱신)
-test/e2e.mjs              Playwright 클릭 테스트(515개)
+test/e2e.mjs              Playwright 클릭 테스트(552개)
 test/quote-sim.mjs        숨고 요청 30건 가격·분류 시뮬레이션
 test/quote-sim-v313.mjs   실제 요청문 59건 정밀 시뮬(시세·중복·재계산)
 test/persona-sim.mjs      가상 테스터 32명 크리틱
+test/sim-holdout-v319.mjs 미지의 실전 문장 90건 홀드아웃(엔진 개발에 쓰지 않은 문장)
+test/engine-v319.mjs      엔진 불변식(모드·공종·4축 합계·단가표 SSOT)
 test/ocr.mjs              숨고 스크린샷 OCR 검증
 scripts/fetch-bids.mjs    공고 수집 스크립트
 docs/rates-2026.md        2026 단가·공고 근거

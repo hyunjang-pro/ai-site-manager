@@ -1,9 +1,15 @@
 // 숨고·카톡·메모·스크린샷 글자를 붙여넣으면 공종과 변수를 먼저 잡아준다.
-// 규칙 기반(오프라인 100%) — 사진은 ocr.js가 읽은 글자를 여기에 넘긴다.
+// ─────────────────────────────────────────────────────────────
+// v3.19 — 분류는 더 이상 이 파일의 if 사슬이 하지 않는다.
+//   문장 해석은 engine/parse.js(절·품목·동작·수량),
+//   의도·공종 결정은 engine/jobspec.js(4가지 모드 → 공종 → 규모)가 맡고,
+//   여기서는 그 명세를 **화면·저장이 쓰는 patch 모양**으로 옮기고 안내 문구만 만든다.
+//   (예전: 공종마다 정규식을 다시 훑는 if 사슬 → 새 문장이 오면 한 낱말이 공종을 독식)
 import { REGIONS, TRADES } from './constants.js';
 import { detectPartial, partialOf, PARTIAL_ITEMS } from './partial.js';
-import { isDemoOnlyText } from './scope.js';
 import { parseRequestSheet, sheetToText, requestSignals, preservationGate, sheetValue } from './request.js';
+import { buildJobSpec } from './engine/jobspec.js';
+import { itemById } from './engine/lexicon.js';
 
 const PARTIAL_LABEL = Object.fromEntries(Object.entries(PARTIAL_ITEMS).map(([id, def]) => [id, def.label]));
 
@@ -44,11 +50,6 @@ export function partialTitle(items = [], { region = '', pyung = 0 } = {}) {
   return [region, pyung ? `${pyung}평` : '', `${head}${rest} 철거`].filter(Boolean).join(' ');
 }
 
-const num = (v) => {
-  const n = parseFloat(v);
-  return Number.isFinite(n) ? n : 0;
-};
-
 const TRADE_TITLE = {
   demolition: '철거',
   wallpaper: '도배·장판',
@@ -82,6 +83,8 @@ const SCOPE_TITLE = {
   plaster: '바닥 미장',
   carpentry: '문·몰딩',
   electric: '전기·조명',
+  window: '창호',
+  film: '필름',
 };
 export function combinedTitle(scopes = []) {
   const names = scopes.filter((s) => SCOPE_TITLE[s]).map((s) => SCOPE_TITLE[s]);
@@ -117,438 +120,70 @@ export function classifyRequest(rawText = '', opts = {}) {
     .replace(/\r/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .trim();
-  const t = text.toLowerCase().replace(/\s+/g, ' ');
   // 요청서(숨고·카톡 양식)면 라벨과 값을 나눠 읽는다.
-  //  - 라벨은 라벨이고 값만 내용이다 ("공실 상태"라는 라벨 때문에 '공실'로 읽히던 것 방지)
-  //  - 서비스 분야·공간 유형·공급면적처러 명시된 값을 추론보다 우선한다
   const sheet = opts.sheet || parseRequestSheet(text);
   const signals = requestSignals(sheet, text);
   // 라벨을 뺀 실제 내용 — 점의 의미 판단(공실/거주/누수 등)에 쓴다
-  // 라벨 단어는 내용이 아니다 — 한 줄로 붙여넣은 요청서('공실 상태: 짐 있음')에서
-  // '공실'이라는 라벨 때문에 공실 현장으로 읽히던 것을 막는다.
   const LABEL_WORDS = /(공실|계약|입주)\s*상태|서비스\s*분야|공간\s*유형|공급\s*면적|문의\s*\/?\s*희망사항/g;
   const contentT = signals.hasForm
     ? signals.contentText.toLowerCase().replace(/\s+/g, ' ')
-    : t.replace(LABEL_WORDS, ' ').replace(/\s+/g, ' ');
-  // "철거는 하지 마세요" — 부정된 철거를 동작으로 읽지 않는다
-  const removalNegated = /(철거|해체|제거)\s*(?:는|은|를)?\s*(?:안\s*하|하지\s*마|하지\s*않|빼|제외|불필요)/.test(t);
-  const removalIntent = signals.removal && !removalNegated;
+    : text.toLowerCase().replace(LABEL_WORDS, ' ').replace(/\s+/g, ' ');
 
-  const excludedWorks = [];
-  const extraWorks = [];
-  const subScopes = [];
-  const excludedScopes = [];
-  if (removalNegated) excludedWorks.push('철거');
-  const windowExcluded = /창호.{0,45}(안\s*해|안해|안\s*하|제외|불필요|빼|하지\s*않)/.test(t) || /창호\s*제외/.test(t);
-  if (windowExcluded) excludedWorks.push('창호');
-  if (/바닥.{0,8}미장|미장.{0,8}필요|평평하지\s*않/.test(t)) extraWorks.push('바닥 미장');
-  if (/난방/.test(t)) extraWorks.push('난방 보강');
-  if (/타일/.test(t)) extraWorks.push('타일');
+  // ── 문장 해석 + 의도·공종 결정 (구조화 엔진) ──────────────
+  const spec = buildJobSpec(text, { sheet, signals });
+  const parsed = spec.parsed;
+  const facts = spec.facts;
+  const t = parsed.text;
 
-  const hits = [];
-  const push = (id, re, strong = false) => {
-    if (re.test(t)) hits.push({ id, strong });
-  };
-  // '철거'는 **동작어가 있을 때만**이다. 예전에는 재료 이름(가벽·경량벽체·데코타일)까지 철거로 쳐서
-  // "8m 가벽 룸3개 만들기"(만들기)가 '상가·주택 철거 6평'으로 계산됐다.
-  if (removalIntent) hits.push({ id: 'demolition', strong: false });
-  push('wallpaper', /도배|벽지|합지|실크|장판|마루|초배/);
-  push('bathroom', /욕실|화장실|양변기|세면대|샤워|욕조/);
-  // 부엌·싱크·상부장·하부장·후드까지 주방으로 읽는다 ("부엌을 전면 인테리어" → 주방)
-  push('kitchen', /주방|부엌|싱크|씽크|상판|후드|수납장|상부장|하부장|조리대|아일랜드|식기세척기/);
-  push('tilewaterproof', /타일|방수|줄눈|담수|에폭시/);
-  push('plaster', /미장|몰탈|엑셀관|바닥미장|바닥 미장/, true);
-  push('window', windowExcluded ? /__none__/ : /창호|샤시|샷시|폴딩도어|발코니|중문|방충망|유리|블라인드/);
-  push('waste', /폐기물|쓰레기|수거|배출|반출|마대|처리장|한\s*차/);
-  push('labor', /인부|일용|인력|인력사무소|잠부|사람.{0,6}(구해|필요)/);
-  push('repair', /수선|보수|교체|문짝|몰딩|도장|도색|페인트|탄성\s*코트|탄성코트|발수|코팅|걸레받이|경첩|손잡이|실리콘|코킹/);
-  // 가벽·칸막이·경량벽체는 **목공(경량벽체) 작업**이다 — 뜯는 말이 함께 있을 때만 철거(부분 철거)로 내려간다
-  push('carpentry', /목공|문틀|문짝|몰딩|가구|데크|선반|파티션|합판|가벽|경량\s*벽체|경량벽체|칸막이|판넬\s*벽|신발장|붙박이\s*장|이보드|단열\s*보드|결로/);
-  // 소문자로 비교하므로 'led'로 적는다 — 예전 'LED'(대문자)는 'LED 등기구'를 못 잡아
-  // "34평 LED 등기구 전체 교체"가 주방(주방·싱크대 626만)으로 떨어졌다.
-  push('electric', /전기\s*(공사|배선|증설)|콘센트|조명|스위치|분전반|분전함|누전|형광등|led|배선|차단기|등기구|다운라이트/);
-  push('plumbing', /배관|급수|배수|수도|보일러|하수구|막힘|수전|세면기|변기\s*(막힘|교체)/);
-  push('film', /필름|시트지|래핑|유리\s*필름/);
-  push('groundwork', /토목|터파기|기초\s*(공사|타설|콘크리트)|맨땅|콘크리트\s*타설|배수로|정원\s*공사|포장\s*공사|성토|절토|굴삭기|포크레인|아스콘|옹벽|부지\s*정지|정지\s*(작업|공사)|땅\s*고르|지반\s*(공사|복구)|노면\s*복구|부지\s*(정리|고르|공사)/);
-
-  const ids = hits.map((h) => h.id);
-  // '전체 인테리어·올수리' — 다만 "욕실 올수리", "주방 전체 교체"처럼 한 공간만 새로 하는 일은 전체가 아니다.
-  // (라벨 '공간 유형: 아파트'를 '아파트 인테리어'로 읽어 욕실 올수리를 복합 인테리어 1,476만으로 만들던 것)
-  const fullPhrase = /집\s*전체|아파트\s*인테리어|전체\s*인테리어|전체\s*공사|전체를|풀\s*인테리어|올\s*리모델링/.test(contentT);
-  const fullWord =
-    fullPhrase ||
-    (/올\s*수리|올수리|리모델링/.test(contentT) && !/욕실|화장실|주방|부엌|현관|베란다|샷시|도배/.test(contentT));
-  const fullInterior = !!fullWord;
-  if (fullInterior) {
-    // '전체 인테리어'면 철거·도배·장판·욕실·주방·현관·미장이 기본 포함이다.
-    subScopes.push('demolition', 'wallpaper', 'floor', 'bathroom', 'kitchen', 'entrance', 'plaster');
-  }
-  const core = ids.filter((id) => ['demolition', 'wallpaper', 'bathroom', 'kitchen'].includes(id));
-  // '철거 + 정지'처럼 두 가지 일이 한 현장에 같이 오면 한 공종만 고르면 나머지가 견적에서 빠진다.
-  const withGroundwork =
-    ids.includes('groundwork') && ids.some((id) => ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster'].includes(id));
-
-  // ── 인력 지원 요청 ─────────────────────────────────────────────
-  // "사람 3명만 보내줘", "철거 인력 3명 2일", "타일공 2명 3일 지원"은
-  // 철거·타일 현장이 아니라 인력사무소가 사람을 보내는 일이다.
-  // 예전에는 '철거'라는 말 하나로 15평 철거 325만이 나갔다.
-  const peopleNum = t.match(/(\d+|한|두|세|네|다섯|여섯)\s*명/);
-  const crewTradeWord = /인부|일용|인력|사람|잡부|기공|철거공|타일공|목수|미장공|용접공|설비공|전기공|도배공|보조/.test(t);
-  const areaUnitAny = /(\d+(?:\.\d+)?)\s*(?:평|㎡|m2|제곱미터|칸)/.test(t);
-  const supportVerb = /지원|보내|파견|구해|필요|대기|일당|사람만/.test(t);
-  const dayPair =
-    /(\d+|한|두|세|네|다섯)\s*명[^\n]{0,12}(\d+)\s*일/.test(t) || /(\d+)\s*일[^\n]{0,8}(\d+|한|두|세|네)\s*명/.test(t);
-  const laborSupport = !!peopleNum && crewTradeWord && (supportVerb || dayPair) && !areaUnitAny;
-
-  let trade = 'unclassified';
-  const partitionJob = signals.partition && !removalIntent;
-  // 욕실·주방 하나만 철거·교체하는 현장은 복합이 아니라 그 공종이다 (철거는 그 공정 안에 포함)
-  const pyungNum = parseFloat((t.match(/(\d+(?:\.\d+)?)\s*평/) || [])[1] || 0);
-  // 방 하나(욕실 1칸·주방)를 뜯는 일은 큰 현장이 아니다 — "음식점 25평 철거"와 구분한다
-  const roomUnit = /(욕실|화장실)\s*\d*\s*칸/.test(t) || (/욕실|화장실|주방|부엌/.test(t) && pyungNum > 0 && pyungNum < 8);
-  const bigPlaceJob =
-    !roomUnit &&
-    (pyungNum >= 8 || /원상복구|전체\s*철거|전부\s*철거|폐업|매장|음식점|식당|카페|사무실|공장/.test(t));
-  const oneRoom =
-    !bigPlaceJob &&
-    ((ids.includes('bathroom') && !ids.includes('wallpaper') && !ids.includes('kitchen')) ||
-      (ids.includes('kitchen') && !ids.includes('wallpaper') && !ids.includes('bathroom')));
-  if (laborSupport) trade = 'labor';
-  else if (fullInterior) trade = 'combined';
-  else if (withGroundwork) trade = 'combined';
-  else if (oneRoom && (ids.includes('demolition') || ids.includes('tilewaterproof'))) trade = ids.includes('bathroom') ? 'bathroom' : 'kitchen';
-  else if (core.length >= 2) trade = 'combined';
-  else if (ids.includes('demolition')) trade = 'demolition';
-  else if (ids.includes('labor')) trade = 'labor';
-  else if (ids.includes('waste')) trade = 'waste';
-  else if (ids.includes('plaster')) trade = 'plaster';
-  else if (ids.includes('groundwork')) trade = 'groundwork';
-  else if (ids.includes('carpentry')) trade = 'carpentry';
-  else if (ids.includes('electric')) trade = 'electric';
-  else if (ids.includes('plumbing')) trade = 'plumbing';
-  else if (ids.includes('film')) trade = 'film';
-  else if (ids.includes('bathroom') && ids.includes('tilewaterproof')) trade = 'bathroom';
-  else if (ids.includes('window')) trade = 'window';
-  else if (ids.includes('bathroom')) trade = 'bathroom';
-  else if (ids.includes('kitchen')) trade = 'kitchen';
-  else if (ids.includes('wallpaper')) trade = 'wallpaper';
-  else if (ids.includes('tilewaterproof')) trade = 'tilewaterproof';
-  else if (ids.includes('repair')) trade = 'repair';
-  else if (ids.length === 1) trade = ids[0];
-
-  // ── 명시된 요청을 추론보다 우선한다 ─────────────────────────────
-  // '서비스 분야: 부분 인테리어' + '가벽 룸3개 만들기' = 목공(경량벽체) 현장이다.
-  // 뜯는 말이 없는데 철거로 내려가면 6평 철거·폐기물 멘트가 나간다.
-  if (partitionJob && ['unclassified', 'demolition', 'carpentry'].includes(trade)) trade = 'carpentry';
-  // 필름·시트지 리폼은 샷시·문짝·싱크대 이름이 같이 나와도 **필름 현장**이다.
-  // (예전 "아파트 34평 샷시 문짝 싱크대 필름 리폼"이 목공 741만으로 계산됐다)
-  if (
-    ids.includes('film') &&
-    !partitionJob &&
-    /필름|시트지|래핑/.test(t) &&
-    // "화장실 2칸 올수리 + 중문 필름"처럼 필름이 곁가지인 현장은 필름 단독이 아니다
-    !/올수리|올\s*수리|리모델링|전체\s*철거|전체\s*인테리어/.test(t) &&
-    !/가벽|칸막이|경량벽체|문틀\s*(제작|시공)|목공\s*(제작|시공)/.test(t) &&
-    ['carpentry', 'kitchen', 'bathroom', 'repair', 'window', 'electric', 'plumbing', 'wallpaper', 'tilewaterproof', 'custom', 'unclassified'].includes(trade)
-  ) {
-    trade = 'film';
-  }
-  // "화장실 누수 방수"·"베란다 방수"는 욕실 올수리(612만)가 아니라 방수 공사다.
-  if (
-    trade === 'bathroom' &&
-    ids.includes('tilewaterproof') &&
-    /방수|누수/.test(t) &&
-    !/타일|도기|양변기|세면대|수전|올\s*수리|올수리|리모델링|인테리어|전체\s*(교체|철거)/.test(t)
-  ) {
-    trade = 'tilewaterproof';
-  }
-  // 도장·페인트는 문틀·샷시 이름이 같이 나와도 **도장 현장**이다
-  // ("문짝 도장"이 목공 65만, "베란다 샷시 도장"이 창호 교체 302만으로 나가던 것)
-  const paintJob = /도장|도색|페인트|탄성\s*코트|탄성코트|발수/.test(t);
-  if (
-    paintJob &&
-    !/(가벽|칸막이|경량벽체|문틀\s*제작|설치|교체|철거|해체)/.test(t) &&
-    !['demolition', 'combined', 'waste', 'labor', 'groundwork', 'tilewaterproof'].includes(trade)
-  ) {
-    trade = 'repair';
-  }
-  // 창호는 "교체·설치" 현장이다 — 단열·코킹·틈막이만 말했으면 보수 현장으로
-  if (trade === 'window' && !/교체|설치|확장|새\s*창/.test(t) && /단열|보강|코킹|실리콘|틈|바람/.test(t)) {
-    trade = 'repair';
-  }
-  // '인테리어'라고 적혀 있는데 안에 뭐가 있는지 못 찾았으면 — 철거로 기울지 말고 '직접 확인' 현장으로
+  let trade = spec.trade;
   if (trade === 'unclassified' && signals.interiorDeclared) trade = 'custom';
 
-  // 폐기물 + 철거가 같이 있으면 실제 주작업(철거)으로
-  if (trade === 'waste' && /철거|해체/.test(t)) trade = 'demolition';
-  // "샷시 철거 후 새로 설치"·"장판 철거하고 새 장판"처럼 철거 뒤 시공까지 말했으면
-  // 철거가 아니라 그 공종(창호·도배·욕실·주방) 현장이다.
-  if (!fullInterior && ['demolition', 'combined'].includes(trade) && /설치|교체|새로|새\s*(장판|벽지|타일|샷시|창|문|도기|싱크대|마루|바닥)|시공|깔아/.test(t)) {
-    const finishIds = ids.filter((id) => ['wallpaper', 'bathroom', 'kitchen', 'window', 'tilewaterproof', 'carpentry', 'electric', 'plumbing', 'film', 'plaster'].includes(id));
-    if (finishIds.length === 1) trade = finishIds[0];
-    else if (ids.includes('window') && /(샷시|샤시|창호)[^\n]{0,12}(설치|교체)/.test(t)) trade = 'window';
-  }
-  // "발코니 방수"는 창호가 아니라 타일·방수
-  if (trade === 'window' && /방수|누수/.test(t) && !/창호|샤시|폴딩|중문/.test(t)) trade = 'tilewaterproof';
-  // 상가 폐업 집기·비품 정리는 철거가 아니라 폐기물 수거 현장이다
-  if ((/집기|비품/.test(t) || (/폐업/.test(t) && /정리|수거/.test(t))) && !/원상복구/.test(t)) trade = 'waste';
-  // '수거·폐기만' 하는 요청 (이사 후 가구 정리 등) — 시공이 들어가면 해당 없다
-  if (
-    /폐기물|쓰레기|수거|집기|비품|버리|치우/.test(t) &&
-    !/철거|해체|원상복구|설치|교체|제작|보수|시공|만들/.test(t)
-  ) {
-    trade = 'waste';
-  }
-
-  // "화장실 2칸 올수리 중문·필름"처럼 다른 일이 붙은 욕실은 복합으로 묶는다
-  // (필름 단독으로 떨어져 83만이 나오던 것)
-  const bathPlus =
-    /욕실|화장실/.test(t) &&
-    /올수리|올\s*수리|리모델링|전체\s*(교체|철거)/.test(t) &&
-    /중문|필름|시트지|도배|장판|주방|부엌|샷시|창호|조명|전기/.test(t);
-  if (bathPlus && ['bathroom', 'film', 'window', 'kitchen', 'repair'].includes(trade)) trade = 'combined';
-
-  // ── 뜯기만 하는 요청은, 공간 이름(장판·화장실·샷시·부엌)이 여러 개 나와도 인테리어가 아니다 ──
-  // ("32평 올철거 장판 마루 씽크대 화장실2 샷시", "34평 아파트 장판만 제거 …")
-  // '시공·설치·교체·도배' 같은 새로 만드는 말이 한 개도 없으면 복합 인테리어로 올리지 않는다.
-  // 단 '철거 + 부지 정지·전기·배관'처럼 다른 공종이 진짜 같이 있는 현장은 복합 그대로 둔다.
-  const otherTrades = ids.some((id) => ['groundwork', 'electric', 'plumbing', 'plaster', 'film'].includes(id));
-  if (trade === 'combined' && ids.includes('demolition') && !otherTrades && isDemoOnlyText(t)) trade = 'demolition';
-  // 바닥재(데코타일·장판·마루)를 새로 까는 현장은 복합이 아니라 바닥 공사다.
-  // 단 장판·마루만 뜯는 경우만 — "상가 15평 철거 후 바닥 데코타일"은 건물 철거 복합현장이다.
-  const floorStripOnly = /(?:데코타일|장판|마루|강마루)[^\n]{0,4}(?:철거|제거|뜯|까)/.test(t);
-  const floorOnlyJob =
-    floorStripOnly &&
-    /데코타일|장판|강마루|마루/.test(t) &&
-    !/도배|벽지|합지|실크|욕실|화장실|주방|부엌|벽\s*타일|인테리어|전체|올수리/.test(t) &&
-    !ids.some((id) => ['bathroom', 'kitchen', 'repair', 'electric', 'plumbing', 'window', 'film', 'groundwork', 'plaster'].includes(id));
-  if (trade === 'combined' && floorOnlyJob) trade = 'wallpaper';
-  // 철거 + 도장 + 바닥(데코타일·장판) = 원상복구 마감까지 하는 복합 현장이다
-  const finishAfterDemo =
-    ids.includes('demolition') && /도장|페인트|도색/.test(t) && /바닥|장판|데코타일|마루/.test(t) && !/욕실|화장실/.test(t);
-  if (finishAfterDemo && ['demolition', 'repair'].includes(trade)) trade = 'combined';
-
-  // ── '하나만 갈아 끼우는' 수선은 올수리·창호 교체가 아니다 ──
-  // "학교 화장실 변기 1개 교체"가 욕실 올수리 566만으로 나가면 안 된다.
-  const fixtureOnly =
-    /변기|양변기|세면대|수전|샤워기|도기/.test(t) &&
-    /교체|갈아|바꾸/.test(t) &&
-    !/타일|방수|철거|올수리|전체\s*교체|리모델링|인테리어/.test(t);
-  if (fixtureOnly && trade === 'bathroom') trade = 'repair';
-  if (/중문|방화문|문짝|도어/.test(t) && /교체|설치|갈아/.test(t) && !/창호|샷시|샤시/.test(t) && ['window', 'bathroom'].includes(trade)) trade = 'repair';
-  // 바닥 데코타일 시공은 타일·방수(㎡)가 아니라 장판과 같은 평당 바닥 공사다.
-  // 단 '상가 15평 철거 후 데코타일'처럼 건물 전체 철거·원상복구가 앞에 있으면 복합으로 묶어 둔다.
-  if (/데코타일/.test(t) && /시공|깔|교체|새/.test(t) && !/원상복구|올수리|전체/.test(t)) {
-    const stripNearFloor = /데코타일[^\n]{0,4}(?:철거|제거|뜯)/.test(t);
-    if (!stripNearFloor && /철거|제거/.test(t) && (pyungNum >= 8 || /상가|사무실|매장|카페|식당|학원|병원/.test(t))) trade = 'combined';
-    else if (['tilewaterproof', 'demolition', 'combined'].includes(trade)) trade = 'wallpaper';
-  }
-  // "장판만 제거"·"벽지 뜯기" — '제거'만 적힌 마감재는 도배 시공이 아니라 철거 현장이다
-  if (trade === 'wallpaper' && /제거|철거|뜯|까\s*내/.test(t) && isDemoOnlyText(t)) trade = 'demolition';
-
-  // ── 소형·부분 철거(개수 단위) ──
-  // "간판 두개 철거", "싱크대 철거"를 15평 전체 철거로 계산하면 400~500만원이 나온다.
-  const partial = detectPartial(t);
-  if (partial.on) {
-    // 품목이 하나뿐인 욕실·주방 철거는 그 공종에서 '철거만'으로 계산한다
-    const only = partial.items.length === 1 ? partial.items[0].id : '';
-    trade = only === 'bathroom' ? 'bathroom' : only === 'sink' && /주방|부엌/.test(t) ? 'kitchen' : 'demolition';
-  }
-
-  // ── 주방 벽타일은 주방(싱크대) 공사가 아니라 타일 공사다 ──
-  // "주방 벽 타일 15㎡"가 3.2m 싱크대 교체(563만)로 나가던 것.
-  const kitchenTileJob =
-    /타일/.test(t) &&
-    /주방|부엌|조리/.test(t) &&
-    // 주방과 타일이 한 문장 안에 붙어 있어야 한다 (전체 인테리어의 "부엌 1 / 현관 타일"과 구분)
-    /(?:주방|부엌)[^\n]{0,10}타일|타일[^\n]{0,10}(?:주방|부엌)/.test(t) &&
-    !/싱크대[^\n]{0,8}(교체|설치|전체|새로|새\s)|상판[^\n]{0,8}(교체|갈|바꾸)|상부장|하부장/.test(t) &&
-    !/전체\s*인테리어|올수리|올\s*수리|리모델링|아파트\s*전체|전체\s*(?:공사|철거)/.test(t);
-  if (kitchenTileJob && ['kitchen', 'combined', 'bathroom', 'tilewaterproof'].includes(trade)) trade = 'tilewaterproof';
-  // ── 방충망 교체는 창호 교체가 아니라 수선이다 (8짝 302만 → 90만) ──
-  if (/방충망/.test(t) && !/샷시|샤시|창호|유리|발코니|폴딩/.test(t) && ['window', 'repair'].includes(trade)) trade = 'repair';
-  // ── "물 새서 천장 뜯어야"는 15평 철거가 아니라 누수 보수 현장이다 ──
-  const leakCeiling =
-    /누수|물\s*(?:이|가|좀)?\s*새|물이\s*샘/.test(t) && /천장/.test(t) && !/방수|타일/.test(t) && !/(\d+(?:\.\d+)?)\s*(?:평|㎡|m2|제곱미터)/.test(t);
-  if (leakCeiling && ['demolition', 'combined', 'repair'].includes(trade)) trade = 'repair';
-
-  // "욕실 타일 20㎡"는 욕실 리모델링이 아니라 타일·방수 면적 공사다.
-  const explicitSqm = t.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m2|제곱미터)/);
-  if (trade === 'bathroom' && ids.includes('tilewaterproof') && explicitSqm && !/올수리|리모델링|인테리어|전체\s*교체/.test(t)) {
-    trade = 'tilewaterproof';
-  }
-
-  const floorMatch = t.match(/(\d+)\s*층/);
-  const tonMatch = t.match(/(\d+(?:\.\d+)?)\s*톤/);
-  const loadMatch = t.match(/(한|두|세|네)\s*차/);
-  const peopleMatch = t.match(/(\d+)\s*명/);
-  const dayMatch = t.match(/(\d+)\s*일/);
-  const pyung = t.match(/(\d+(?:\.\d+)?)\s*평(?:대)?/);
-  const sqm = t.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m2|제곱미터)/);
-  const meter = t.match(/(\d+(?:\.\d+)?)\s*(?:m|미터)(?!\s*2)/);
-  const spot = t.match(/(\d+(?:\.\d+)?)\s*(?:개소|군데|곳|개)/);
-  const kan = t.match(/(\d+(?:\.\d+)?)\s*칸/);
-  // "욕실 하나", "화장실 두 칸"처럼 숫자를 한글로 적는 경우가 많다
-  const kanWord =
-    t.match(/(한|두|세|네|다섯|여섯)\s*칸/) ||
-    t.match(/(?:욕실|화장실)\s*(\d+|[한두세네]|다섯|여섯)\s*(?:개|칸|곳)?/) ||
-    // "화장실이 두갠데"처럼 구어체로 적는 경우
-    t.match(/(?:욕실|화장실)[^\d\n]{0,3}?(한|두|세|네|다섯|여섯)\s*[갠개]/);
-  const KOR_NUM = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6 };
-  // '예산: 1,000만 원 이하'처럼 콜론이 붙어도 읽는다 (요청서 라벨은 콜론이 기본)
-  const budgetMatch =
-    t.match(/예산\s*[:：]?\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/) ||
-    (sheetValue(sheet, 'budget') || '').match(/([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/);
-
-  let sizeValue = '';
-  let sizeUnit = '';
-  // 집기·비품은 살림 폐기물(1톤)이 아니라 상가 폐업 정리(2.5톤)다.
-  const livingWaste = trade === 'waste' && /생활\s*폐기물|가구|침대|소파|장롱|냉장고|세탁기|이사|살림|가전/.test(t);
-  const sitePyung = parseFloat((t.match(/(\d+(?:\.\d+)?)\s*평/) || [])[1] || 0);
-  if (partial.on) {
-    // 부분 철거는 품목 수량이 곧 규모다 (간판 2개 · 샷시 2짝 · 가벽 3m).
-    // 단위가 섞여 있으면 숫자를 합치지 않는다 (장판 15평 + 욕실 2칸 = 17? 뜻이 없다).
-    const units = Array.from(new Set(partial.items.map((it) => it.unit)));
-    if (sitePyung > 0) {
-      // "34평 아파트 장판만 제거 …" — 평수는 현장 넓이로만 쓰고 금액은 품목 단위로 계산한다
-      sizeValue = String(sitePyung);
-      sizeUnit = '평';
-    } else if (units.length === 1) {
-      const total = partial.items.reduce((sum, it) => sum + (Number(it.qty) || 1), 0);
-      sizeValue = String(Math.round(total * 10) / 10);
-      sizeUnit = units[0];
-    } else {
-      sizeValue = '';
-      sizeUnit = '모름';
-    }
-  } else if (trade === 'waste') {
-    if (tonMatch) {
-      sizeValue = num(tonMatch[1]);
-    } else if (loadMatch) {
-      // 생활폐기물 '한차'는 1톤 트럭 1차가 기본 (2.5톤 아님). 상가·공장 철거 한차는 2.5톤.
-      const n = { 한: 1, 두: 2, 세: 3, 네: 4 }[loadMatch[1]] || 1;
-      sizeValue = livingWaste ? n : n === 1 ? 2.5 : n * 2.5;
-    } else if (livingWaste) {
-      sizeValue = 1;
-    }
-    sizeUnit = '톤';
-  } else if (trade === 'labor') {
-    const korPeople = { 한: 1, 두: 2, 세: 3, 네: 4, 다섯: 5, 여섯: 6 };
-    const p = peopleMatch ? parseInt(peopleMatch[1], 10) : peopleNum ? korPeople[peopleNum[1]] || 1 : '';
-    sizeValue = p;
-    sizeUnit = '명';
-  } else if (trade === 'bathroom') {
-    sizeValue = kan ? num(kan[1]) : kanWord ? Number(kanWord[1]) || KOR_NUM[kanWord[1]] || 1 : 1;
-    sizeUnit = '칸';
-  } else if (trade === 'kitchen' && meter) {
-    sizeValue = num(meter[1]);
-    sizeUnit = 'm';
-  } else if (['carpentry', 'electric', 'plumbing'].includes(trade)) {
-    if (partitionJob && signals.dims.meters) {
-      // 가벽·칸막이는 길이(m)가 규모다 ('룸3개'를 3개소로 읽지 않는다)
-      sizeValue = signals.dims.meters;
-      sizeUnit = 'm';
-    } else if (spot) {
-      sizeValue = num(spot[1]);
-      sizeUnit = '개소';
-    } else if (meter && (trade === 'carpentry' || trade === 'plumbing')) {
-      sizeValue = num(meter[1]);
-      sizeUnit = 'm';
-    } else if (pyung) {
-      sizeValue = num(pyung[1]);
-      sizeUnit = '평';
-    } else if (trade === 'electric' || trade === 'plumbing') {
-      // 콘센트·분전함·수전 1개 교체 — 금액도 1개소로 계산하므로 규모도 1개소로 보여 준다
-      sizeValue = 1;
-      sizeUnit = '개소';
-    }
-  } else if (['tilewaterproof', 'window', 'plaster', 'film', 'groundwork'].includes(trade)) {
-    if (sqm) {
-      sizeValue = num(sqm[1]);
-      sizeUnit = '㎡';
-    } else if (pyung) {
-      sizeValue = num(pyung[1]);
-      sizeUnit = '평';
-    } else if (trade === 'tilewaterproof' && /주방|부엌/.test(t)) {
-      // 주방 벽타일 1면 — 면적을 안 적었으면 약 12㎡로 본다
-      sizeValue = 12;
-      sizeUnit = '㎡';
-    } else if (trade === 'groundwork' && /포크레인|굴삭기|미니\s*굴삭/.test(t)) {
-      // "포크레인 1일"은 장비 하루 작업량(약 20㎡)이다
-      sizeValue = 20;
-      sizeUnit = '㎡';
-    }
-  } else if (trade === 'repair') {
-    // 도장·페인트는 개소가 아니라 면적으로 견적하는 현장이 많다 — 평·㎡를 살린다
-    const paintWord = /페인트|도장|도색|탄성|발수|코팅/.test(t);
-    const doorSpots = Number((t.match(/(?:문|도어)\s*(\d+)\s*(?:짝|개|틀)/) || [])[1] || 0);
-    const meshSpots = Number((t.match(/방충망\s*(\d+)\s*(?:짝|개)/) || [])[1] || 0);
-    if (meshSpots > 0) {
-      sizeValue = meshSpots;
-      sizeUnit = '개소';
-    } else if (paintWord && !spot && pyung) {
-      sizeValue = num(pyung[1]);
-      sizeUnit = '평';
-    } else if (paintWord && !spot && sqm) {
-      sizeValue = num(sqm[1]);
-      sizeUnit = '㎡';
-    } else if (paintWord && !spot && doorSpots) {
-      sizeValue = doorSpots;
-      sizeUnit = '개소';
-    } else {
-      sizeValue = spot ? num(spot[1]) : 1;
-      sizeUnit = '개소';
-    }
-  } else if (pyung) {
-    sizeValue = num(pyung[1]);
-    sizeUnit = '평';
-  } else if (sqm) {
-    sizeValue = num(sqm[1]);
-    sizeUnit = '㎡';
-  } else if (meter) {
-    sizeValue = num(meter[1]);
-    sizeUnit = 'm';
-  } else if (kan) {
-    sizeValue = num(kan[1]);
-    sizeUnit = '칸';
-  }
-
-  // 지역·현장 위치
-  let region = '';
-  for (const r of REGIONS) {
-    if (r !== '기타' && t.includes(r.toLowerCase())) {
-      region = r;
-      break;
-    }
-  }
-  const locMatch = text.match(/(?:경북|경상북도)\s*([가-힣]+시)(?:\s*([가-힣0-9]+(?:동|읍|면)))?/);
-  const location = locMatch ? `경북 ${locMatch[1]}${locMatch[2] ? ` ${locMatch[2]}` : ''}` : '';
-  // 글에 적힌 연락처 — 숨고 요청서·카톡에 같이 오는 경우가 많다 (없으면 빈칸 = 사용자가 채운다)
-  const phoneMatch = text.match(/(01[016789])[-.\s]?(\d{3,4})[-.\s]?(\d{4})/);
-
-  // 엘리베이터 — "엘리베이터로 운반/사용"은 있음, "엘리베이터 없음"만 없음으로 읽는다.
-  // (문장 어딘가의 '불가·no'를 엘베로 오인하지 않게 엘베 단어 뒤 8자만 본다)
-  const elevatorWord = /엘(?:베|리베이터|레베이터|리베이타)|승강기/.test(t);
-  const elevatorNo = /엘(?:베|리베이터|레베이터|리베이타)[^\n]{0,10}?(?:없|불가|미사용|안\s*씀)|승강기[^\n]{0,10}?없/.test(t);
-  const elevatorYes =
-    /엘(?:베|리베이터|레베이터|리베이타)[^\n]{0,12}?(?:운반|사용|이용|있|가능)|승강기[^\n]{0,10}?(?:사용|운반|있)/.test(t);
-  const elevator = elevatorNo ? 'no' : elevatorYes ? 'yes' : elevatorWord ? 'unknown' : 'unknown';
   const hints = [];
+  const extraWorks = [];
+  const excludedWorks = [];
+  const excludedScopes = Array.from(new Set(parsed.excluded.scopes || []));
+  if (parsed.excluded.removal) excludedWorks.push('철거');
+  if (excludedScopes.includes('window')) excludedWorks.push('창호');
+  if (/바닥.{0,8}미장|미장.{0,8}필요|평평하지\s*않/.test(t)) extraWorks.push('바닥 미장');
+  if (/난방/.test(t)) extraWorks.push('난방 보강');
+  if (/타일/.test(t) && trade === 'plaster') extraWorks.push('타일');
+
+  // ── 규모 ────────────────────────────────────────────────
+  let sizeValue = spec.size.value === '' ? '' : spec.size.value;
+  let sizeUnit = spec.size.unit || TRADES[trade]?.defaultUnit || '평';
+  if (sizeValue === '' || sizeValue === 0) {
+    sizeValue = '';
+    // 길이·개소로 계산하는 공종은 평 기본값을 쓰지 않는다
+    if (['carpentry', 'electric', 'plumbing', 'repair'].includes(trade)) {
+      sizeUnit = TRADES[trade]?.defaultUnit || '모름';
+    }
+  }
+  // 부분 철거에서 평수가 있으면 현장 넓이로 남긴다
+  const partial = trade === 'demolition' && spec.partial.length ? { on: true, items: spec.partial, access: facts.access, exterior: spec.partial.some((i) => PARTIAL_ITEMS[i.id]?.exterior) } : { on: false };
+  if (partial.on && sizeValue && sizeUnit !== '평') {
+    // 품목 단위가 섞였으면 숫자를 합치지 않는다
+  }
+
+  // ── 현장 조건 ───────────────────────────────────────────
+  const floor = facts.floor || 0;
+  const basement = !!facts.basement;
+  const elevator = facts.elevator;
+
   const survey = {};
   if (/텍스|슬레이트/.test(contentT)) {
     hints.push('천장 텍스·슬레이트 — 석면 조사 대상인지 확인하세요.');
     survey.asbestosRisk = true;
   }
-  if (/누수|물이\s*샘|곰팡이/.test(contentT)) {
+  if (/누수|물이\s*샘|곰팡이|물\s*(?:이|가|좀)?\s*새/.test(contentT)) {
     hints.push('누수·곰팡이 — 방수 범위와 아래층 피해를 먼저 확인하세요.');
     survey.existingLeak = true;
   }
   if (elevator === 'no') hints.push('엘리베이터 없음 — 계단 운반비가 붙습니다.');
   if (elevator === 'yes') hints.push('엘리베이터 운반 가능 — 양중비를 낮출 수 있습니다.');
-  if (/급한|빨리|내일|이번\s*주/.test(t)) hints.push('일정이 급함 — 인력·자재 수급부터 확인하세요.');
-  // 입주·공실은 **라벨이 아니라 값**으로 판단한다 ('공실 상태: 짐 있음 / 계약 상태: 현재 입주 중')
-  const occupiedNow = signals.hasForm ? signals.occupied : /거주|살고|사람이\s*삼|입주\s*중|영업\s*중/.test(contentT);
-  const vacantNow = signals.hasForm ? signals.vacant : /공실|빈집|비어\s*있/.test(contentT);
+  if (facts.urgent) hints.push('일정이 급함 — 인력·자재 수급부터 확인하세요.');
+  // 입주·공실은 라벨이 아니라 값으로 판단한다
+  const occupiedNow = signals.hasForm ? signals.occupied : facts.occupied;
+  const vacantNow = signals.hasForm ? signals.vacant : facts.vacant;
   if (occupiedNow) {
     hints.push(
       signals.commercial
@@ -562,49 +197,42 @@ export function classifyRequest(rawText = '', opts = {}) {
   if (/보양|먼지막이|가림/.test(t)) survey.protectLevel = true;
   if (/폐기물|마대|반출/.test(t)) survey.wasteIncluded = true;
   if (/혼합\s*폐기물|섞어|섞어서/.test(t)) survey.wasteMixed = true;
-  if (/주말|공휴일/.test(t)) survey.noWeekend = true;
-  // 야간·심야 작업은 인건비 할증이 붙는다 (survey.workTimeLimit → +20만)
-  if (/야간|심야|밤\s*작업|철야/.test(t)) survey.workTimeLimit = true;
-  // "물 새서"·"물이 새는" 구어체도 누수로 읽는다 (아래층 피해·방수 범위 확인)
-  if (/물\s*(?:이|가|좀)?\s*새|물이\s*샘/.test(contentT)) survey.existingLeak = true;
-  // 요청서에 이미 적힌 조건은 처음부터 체크해 둔다 (사용자가 다시 누를 필요 없게)
-  // 단, 간판·폐기물처럼 공용부를 쓰지 않는 현장에는 보양·관리소 신고를 붙이지 않는다.
+  if (facts.weekend) survey.noWeekend = true;
+  if (facts.night) survey.workTimeLimit = true;
   const noSiteCare = partial.on || ['waste', 'labor', 'groundwork'].includes(trade);
-  if (!noSiteCare && /아파트|오피스텔/.test(contentT)) {
-    survey.protectLevel = true;
-    survey.adminDeposit = true;
-  } else if (!noSiteCare && /빌라|상가|사무실/.test(contentT)) {
+  if (!noSiteCare && /아파트|오피스텔|상가|사무실/.test(contentT)) {
     survey.protectLevel = true;
   }
+  if (!noSiteCare && /아파트|오피스텔|관리사무소/.test(contentT)) survey.adminDeposit = true;
   if (vacantNow) survey.residential = false;
   if (elevator === 'yes') survey.materialLift = false;
-  // 집 전체·복합 현장의 세부 포함 공종 — 욕실·부엌·도배·현관·철거·미장을 하나도 빠뜨리지 않는다
-  if (/욕실|화장실/.test(t) || /욕실\s*\d/.test(t)) subScopes.push('bathroom');
-  if (/부엌|주방|싱크|상부장|하부장/.test(t)) subScopes.push('kitchen');
-  if (/도배|벽지|합지|실크/.test(t)) subScopes.push('wallpaper');
-  if (/장판|마루|데코타일|바닥\s*마감|바닥(?!\s*미장)/.test(t)) subScopes.push('floor');
-  if (/현관|중문|신발장|현관\s*타일/.test(t)) subScopes.push('entrance');
-  if (/철거|해체|원상복구/.test(t)) subScopes.push('demolition');
-  if (/도장|페인트|도색|탄성\s*코트|탄성코트|발수/.test(t)) subScopes.push('paint');
-  if (/조명|전기\s*(공사|배선|증설)|콘센트|등기구|led|스위치/.test(t)) subScopes.push('electric');
-  if (/필름|시트지|래핑/.test(t)) subScopes.push('film');
-  // 바닥재만 새로 까는 경우(데코타일·장판·강마루)는 'floor'로 따로 넣는다
-  if (/데코타일|장판|강마루|마루/.test(t) && !/도배|벽지|합지|실크/.test(t)) subScopes.push('floor');
-  if (/미장|몰탈|바닥\s*평탄/.test(t)) subScopes.push('plaster');
-  if (/토목|터파기|정지|성토|절토|굴삭기|포크레인|기초|배수로|옹벽|아스콘|맨땅/.test(t)) subScopes.push('groundwork');
-  if (/창호|샤시|샷시|유리|중문/.test(t) && /(안\s*해|안해|안\s*하|제외|불필요|빼|기존\s*유지|그대로)/.test(t)) excludedScopes.push('window');
+
+  // 세부 공종 (복합)
+  const subScopes = Array.from(new Set(trade === 'combined' ? spec.subScopes : []));
+  if (trade === 'combined' && !subScopes.length && facts.fullInterior) {
+    subScopes.push('demolition', 'wallpaper', 'floor', 'bathroom', 'kitchen', 'entrance', 'plaster');
+  }
+  // 뜯기만 하는 현장은 철거(·정지)만 포함으로 남긴다
+  const finalScopes =
+    ['demolition', 'waste', 'labor'].includes(trade) ? subScopes.filter((s) => ['demolition', 'groundwork'].includes(s)) : subScopes;
+
   if (excludedScopes.length) hints.push(`${excludedScopes.join(', ')} 제외 — 견적에서 빼고 손님에게 확인하세요.`);
   if (excludedWorks.length) hints.push(`${excludedWorks.join(', ')} 제외 — 견적에서 빼고 손님에게 확인하세요.`);
   if (extraWorks.includes('바닥 미장')) hints.push('바닥 미장 추가 — 미장·양생 일수를 공정에 넣으세요.');
+
+  const budgetMatch =
+    t.match(/예산\s*[:：]?\s*([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/) ||
+    (sheetValue(sheet, 'budget') || '').match(/([\d,]+)\s*만\s*원?\s*(미만|이하|내외)?/);
   if (budgetMatch) hints.push(`손님 예산 ${budgetMatch[1]}만원${budgetMatch[2] || ''} — 이 안에서 범위를 잡으세요.`);
   if (/방\s*\d|욕실\s*\d|부엌|현관/.test(t)) hints.push('공간 구성이 적혀 있습니다 — 실측 때 방·욕실·주방 수를 확인하세요.');
-  // 가벽·칸막이(경량벽체) — 면적(평)이 아니라 길이(m)와 칸 수로 견적하는 현장이다
+
+  // 가벽·칸막이(경량벽체) — 면적이 아니라 길이(m)와 칸 수로 견적한다
   const partitionInfo =
-    partitionJob && (signals.dims.meters || signals.dims.rooms)
+    spec.partition && (spec.partition.meters || spec.partition.rooms || signals.dims?.meters || signals.dims?.rooms)
       ? {
-          meters: signals.dims.meters,
-          rooms: signals.dims.rooms,
-          doors: signals.dims.doors || signals.dims.rooms,
+          meters: spec.partition.meters || signals.dims?.meters || 0,
+          rooms: spec.partition.rooms || signals.dims?.rooms || 0,
+          doors: spec.partition.doors || signals.dims?.doors || spec.partition.rooms || signals.dims?.rooms || 0,
           height: 2.4,
         }
       : null;
@@ -618,36 +246,43 @@ export function classifyRequest(rawText = '', opts = {}) {
     hints.push(`사진 글자 보정: ${sheet.repairs.map((r) => `${r.label} ${r.notes.join(', ')}`).join(' / ')} — 원본과 한 번 맞춰 보세요.`);
   }
 
-  const mode = trade === 'tilewaterproof' ? (/방수/.test(t) && /타일/.test(t) ? 'both' : /방수|누수/.test(t) ? 'waterproof' : 'tile') : undefined;
+  // ── 지역 ───────────────────────────────────────────────
+  let region = '';
+  for (const r of REGIONS) {
+    if (r !== '기타' && t.includes(r.toLowerCase())) {
+      region = r;
+      break;
+    }
+  }
+  const locMatch = text.match(/(?:경북|경상북도)\s*([가-힣]+시)(?:\s*([가-힣0-9]+(?:동|읍|면)))?/);
+  const location = locMatch ? `경북 ${locMatch[1]}${locMatch[2] ? ` ${locMatch[2]}` : ''}` : '';
+  const phoneMatch = text.match(/(01[016789])[-.\s]?(\d{3,4})[-.\s]?(\d{4})/);
 
-  // 폐기물 차량 — 1톤 1차가 기본, 2.5톤 명시나 상가·공장 철거 한차만 2.5톤
-  const hasHalfWord = /반\s*차|반차량/.test(t);
+  // ── 타일·방수 모드 / 미장 ────────────────────────────────
+  const tileMode = trade === 'tilewaterproof' ? (/방수/.test(t) && /타일/.test(t) ? 'both' : /방수|누수/.test(t) ? 'waterproof' : 'tile') : undefined;
+
+  // ── 폐기물 차량 ─────────────────────────────────────────
+  const livingWaste = trade === 'waste' && /생활\s*폐기물|가구|침대|소파|장롱|냉장고|세탁기|이사|살림|가전/.test(t);
   const storeCleanout = /집기|비품|폐업/.test(t) && /상가|매장|음식점|식당|카페|사무실|공장|가게|점포|상점|마트|편의점|학원/.test(t);
-  const wasteVehicleId =
-    trade === 'waste'
-      ? hasHalfWord
-        ? 'half'
-        : sizeValue === '' || sizeValue === undefined || sizeValue === '0'
-        ? storeCleanout
-          ? 'ton25'
-          : 'ton1'
-        : num(sizeValue) <= 0.7
-        ? 'half'
-        : num(sizeValue) <= 1.5
-        ? 'ton1'
-        : 'ton25'
-      : '';
-  if (trade === 'waste' && hasHalfWord) {
-    sizeValue = '0.5';
-    sizeUnit = '톤';
+  let wasteVehicle = 'ton1';
+  if (trade === 'waste') {
+    if (facts.halfTruck) wasteVehicle = 'half';
+    else if (Number(sizeValue) > 1.5) wasteVehicle = 'ton25';
+    else if (Number(sizeValue) > 0.7) wasteVehicle = 'ton1';
+    else if (sizeValue === '' || Number(sizeValue) === 0) wasteVehicle = storeCleanout ? 'ton25' : 'ton1';
+    else wasteVehicle = 'half';
+    if (facts.halfTruck) {
+      sizeValue = '0.5';
+      sizeUnit = '톤';
+    }
+    if (!sizeValue || Number(sizeValue) === 0) {
+      sizeValue = String({ half: 0.5, ton1: 1, ton25: 2.5 }[wasteVehicle] || 1);
+      sizeUnit = '톤';
+    }
   }
-  // 규모를 안 적은 폐기물 현장도 차량 톤수를 규모로 보여 준다 ('톤'만 남지 않게)
-  if (trade === 'waste' && (!sizeValue || sizeValue === '0')) {
-    sizeValue = String({ half: 0.5, ton1: 1, ton25: 2.5 }[wasteVehicleId] || 1);
-    sizeUnit = '톤';
-  }
-  const wasteVehicleLabel = { half: '반차(0.5톤)', ton1: '1톤 1차', ton25: '2.5톤' }[wasteVehicleId] || '';
+  const wasteVehicleLabel = { half: '반차(0.5톤)', ton1: '1톤 1차', ton25: '2.5톤' }[wasteVehicle] || '';
 
+  // ── 안내 행 ────────────────────────────────────────────
   const rows = [
     {
       label: '공종',
@@ -664,17 +299,17 @@ export function classifyRequest(rawText = '', opts = {}) {
   if (signals.space) rows.push({ label: '공간', value: signals.space });
   if (signals.service) rows.push({ label: '요청', value: signals.service });
   if (region || location) rows.push({ label: '지역', value: location || region });
-  if (floorMatch) rows.push({ label: '층 / 엘베', value: `${floorMatch[1]}층 · ${elevator === 'no' ? '없음' : elevator === 'yes' ? '있음' : '확인 필요'}` });
+  if (floor) rows.push({ label: '층 / 엘베', value: `${floor}층 · ${elevator === 'no' ? '없음' : elevator === 'yes' ? '있음' : '확인 필요'}` });
   if (trade === 'waste') rows.push({ label: '처리', value: `${wasteVehicleLabel || '1톤 1차'} · 톤당 32만(차량·상차 포함)` });
   if (trade === 'labor') rows.push({ label: '청구 기준', value: '1명 1일 26만원(원가 19만)' });
   if (trade === 'plaster' && extraWorks.length) rows.push({ label: '추가', value: extraWorks.join(' · ') });
   if (excludedWorks.length) rows.push({ label: '제외', value: excludedWorks.join(' · ') });
 
+  // ── 제목 ───────────────────────────────────────────────
   const titleParts = [];
   if (region) titleParts.push(region);
   else if (locMatch?.[2]) titleParts.push(locMatch[2]);
   if (sizeValue) titleParts.push(`${sizeValue}${sizeUnit}`);
-  // 복합이면 실제로 켠 세부 공종으로 제목을 만든다 (철거+정지는 '전체 인테리어'가 아니다)
   titleParts.push(
     partitionInfo
       ? `가벽${partitionInfo.rooms ? `·룸${partitionInfo.rooms}` : ''} 목공`
@@ -682,20 +317,10 @@ export function classifyRequest(rawText = '', opts = {}) {
       ? combinedTitle(Array.from(new Set(subScopes)))
       : TRADE_TITLE[trade] || '현장'
   );
-  // 부분 철거는 '2개 철거'가 아니라 '간판 2개 철거'로 — 무엇을 뜯는지 제목에 보이게
   let suggestTitle = trade === 'unclassified' ? '새 현장' : titleParts.join(' ');
-  if (partial.on) {
-    suggestTitle = partialTitle(partial.items, { region, pyung: sitePyung });
-  }
+  if (partial.on) suggestTitle = partialTitle(partial.items, { region, pyung: sizeUnit === '평' ? parseFloat(sizeValue) || 0 : 0 });
 
-  // 뜯기만 하는 현장(철거·폐기물·인력)에 '도배·장판·욕실·주방 포함' 칩이 켜지면
-  // 화면에서는 시공까지 하는 현장처럼 보인다 — 철거 현장은 철거(·정지)만 포함으로 남긴다.
-  const scopeIds = Array.from(new Set(subScopes));
-  const finalScopes =
-    ['demolition', 'waste', 'labor'].includes(trade) ? scopeIds.filter((s) => ['demolition', 'groundwork'].includes(s)) : scopeIds;
-
-  // 지하·반지하는 엘베가 없으면 계단으로 내려/올려야 한다 — 양중 옵션을 켠다
-  const basement = /지하\s*\d?\s*층|반지하|B1|비1층/.test(t);
+  // ── patch ─────────────────────────────────────────────
   const patch = {
     trade,
     sizeValue: sizeValue === '' ? '' : String(sizeValue),
@@ -704,25 +329,39 @@ export function classifyRequest(rawText = '', opts = {}) {
     notes: text,
     parseHints: hints,
     survey,
-    lifting: { floor: floorMatch ? parseInt(floorMatch[1], 10) : '', elevator, ...(basement ? { basement: true } : {}) },
+    lifting: { floor: floor || '', elevator, ...(basement ? { basement: true } : {}) },
     extraWorks,
     excludedWorks,
     subScopes: finalScopes,
-    excludedScopes: Array.from(new Set(excludedScopes)),
+    excludedScopes,
     ...(partitionInfo ? { partition: partitionInfo } : {}),
     ...(signals.space ? { spaceType: signals.space } : {}),
     ...(sheet.source ? { source: sheet.source } : {}),
     ...(signals.service ? { serviceType: signals.service } : {}),
     ...(signals.budget || budgetMatch ? { clientBudget: (budgetMatch || [])[1] ? `${budgetMatch[1]}만원${budgetMatch[2] || ''}` : '' } : {}),
   };
-  // 규모를 안 적은 요청 — 무엇이든 15평으로 잡으면 "데코타일 철거"가 461만원이 된다.
-  // 한 공간(욕실·방·바닥) 요청인지, 매장·건물 요청인지 구분해 기본값을 나눈다.
-  // 단 길이(m)·개소로 계산하는 공종(목공·전기·설비·수선)은 **평 기본값을 쓰지 않는다.**
-  //  예전에는 '가벽 룸 만들기'에 면적이 없으면 6평 철거로 떨어졌다.
+  if (region) patch.region = region;
+  if (location) patch.location = location;
+  if (phoneMatch) patch.clientPhone = `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}`;
+  if (trade === 'labor') {
+    patch.sizeValue = String(facts.people || 1);
+    patch.sizeUnit = '명';
+    patch.laborDays = Math.max(1, facts.days || 1);
+  }
+  if (trade === 'waste') patch.wasteVehicle = wasteVehicle || 'ton1';
+  if (partial.on) {
+    patch.demolition = { mode: 'partial', items: partial.items, access: partial.access, exterior: partial.exterior };
+    patch.sizeUnit = sizeUnit;
+  }
+  if (facts.fullInterior) patch.fullInterior = true;
+  if (spec.flags.tileRemain) patch.tileRemain = true;
+  if (trade === 'tilewaterproof') patch.tileWork = { mode: tileMode };
+  if (trade === 'plaster') patch.plaster = { heating: extraWorks.includes('난방 보강'), tile: extraWorks.includes('타일') };
+  // 철거만 / 시공까지 — 계산 단계가 문장을 다시 읽지 않게 여기서 확정한다
+  if (['bathroom', 'kitchen'].includes(trade)) patch[trade] = { scope: spec.demoOnly ? 'demo' : 'remodel', method: 'full' };
+  // 규모를 못 읽은 요청 — 무엇이든 15평으로 잡지 않는다
   if (!sizeValue || sizeValue === '0') {
-    const unitTrade = ['carpentry', 'electric', 'plumbing', 'repair'].includes(trade);
-    if (unitTrade) {
-      patch.sizeUnit = sizeUnit && sizeUnit !== '평' ? sizeUnit : TRADES[trade]?.defaultUnit || '모름';
+    if (['carpentry', 'electric', 'plumbing', 'repair'].includes(trade)) {
       patch.sizeUnconfirmed = true;
     } else {
       const roomWords = /욕실|화장실|주방|부엌|베란다|발코니|현관|원룸|투룸|방\s*\d|방 하나|데코타일|텍스|가벽|장판|마루|바닥|싱크대|붙박이|간판|창호|샷시|문짝|몰딩|타일/;
@@ -731,33 +370,17 @@ export function classifyRequest(rawText = '', opts = {}) {
       patch.sizeUnknown = true;
     }
   }
-  if (region) patch.region = region;
-  if (location) patch.location = location;
-  if (phoneMatch) patch.clientPhone = `${phoneMatch[1]}-${phoneMatch[2]}-${phoneMatch[3]}`;
-  if (trade === 'labor') patch.laborDays = dayMatch ? Math.max(1, parseInt(dayMatch[1], 10)) : 1;
-  if (trade === 'waste') patch.wasteVehicle = wasteVehicleId || 'ton1';
-  if (partial.on) {
-    patch.demolition = { mode: 'partial', items: partial.items, access: partial.access, exterior: partial.exterior };
-    patch.sizeUnit = sizeUnit;
-  }
-  if (fullInterior) patch.fullInterior = true;
   if (trade === 'custom') {
-    // '부분 인테리어'라고만 적혀 있고 무엇을 하는지 없는 요청 — 공종 이름은 손님이 쓴 말로 두고,
-    // 금액은 범위를 확인한 뒤 확정하라고 알린다. 규모도 모르므로 큰 평수를 지어내지 않는다(6평 기준).
     patch.tradeName = signals.service || '부분 인테리어';
     patch.needsCheck = true;
     patch.scaleHint = 'room';
     patch.sizeUnknown = true;
     hints.push('요청서에 무엇을 시공하는지 자세히 없습니다 — 첫 통화에서 범위를 확인한 뒤 금액을 정하세요.');
   }
-  if (/덧방/.test(t)) patch.tileRemain = true;
-  if (trade === 'tilewaterproof') patch.tileWork = { mode };
-  if (trade === 'plaster') patch.plaster = { heating: extraWorks.includes('난방 보강'), tile: extraWorks.includes('타일') };
 
   // 정리본 — 원문 순서·라벨을 그대로 살리고 이 한 줄만 덧붙인다
   const autoLine = autoClassLine({ trade, partitionInfo, sizeValue, sizeUnit, tradeName: patch.tradeName });
   const summaryText = sheetToText(sheet, { autoLine }) || autoLine;
-  // 보존 게이트 — 원문 핵심 줄이 정리본에서 사라졌거나, 명시된 서비스와 공종이 어긋나는지
   const guard = preservationGate({ sheet, summary: summaryText, trade, tradeName: TRADES[trade]?.label || '' });
 
   return {
@@ -768,10 +391,11 @@ export function classifyRequest(rawText = '', opts = {}) {
     title: suggestTitle,
     sheet,
     signals,
+    spec,
     autoLine,
     summary: summaryText,
     guard,
-    confidence: trade === 'unclassified' ? 'low' : hits.length >= 2 ? 'medium' : 'high',
+    confidence: trade === 'unclassified' ? 'low' : parsed.ops.length + parsed.mentions.length >= 2 ? 'medium' : 'high',
     detected: trade !== 'unclassified',
   };
 }
@@ -790,11 +414,6 @@ export function autoClassLine({ trade, partitionInfo, sizeValue, sizeUnit, trade
 }
 
 // 사진·메모에서 읽은 글자를 '받은 내용' 칸에 넣기 좋은 짧은 요약으로 정리한다.
-// 폰 UI 잡글자는 ocr.cleanOcrText가 이미 지운 상태로 들어온다.
-//
-//  ① 양식(숨고·카톡 요청서)이면 — **원문 순서·라벨 그대로** 남긴다. 항목을 골라 다시 쓰지 않는다.
-//     (예전에는 목록에 없는 '공간 유형·서비스 분야·공급면적·공실/계약 상태'가 조용히 사라졌다)
-//  ② 자유 문장이면 — 짧은 요약(공종·규모·요청)을 쓴다.
 export function summarizeRequest(text, res) {
   const r = res || classifyRequest(text);
   const sheet = r.sheet || parseRequestSheet(text);
@@ -818,7 +437,6 @@ export function summarizeRequest(text, res) {
   };
 
   // 숨고 요청서의 '문의/희망사항'은 그 자체가 핵심 요구다 — 자르지 않고 맨 위에 통째로 올린다.
-
   const wish = clean.match(/(?:문의\s*\/\s*희망사항|문의\/?희망사항|희망사항|요청사항)\s*[:：]?\s*([\s\S]+)/);
   if (wish) {
     const body = wish[1]
@@ -837,7 +455,7 @@ export function summarizeRequest(text, res) {
 
   const spaces = [
     ...new Set(
-      (clean.match(/거실|방\s*\d|욕실|화장실|주방|부엌|베란다|발코니|현관|상가|사무실|원룸|사무실/g) || []).map((s) =>
+      (clean.match(/거실|방\s*\d|욕실|화장실|주방|부엌|베란다|발코니|현관|상가|사무실|원룸/g) || []).map((s) =>
         s.replace(/\s+/g, '').replace(/\d/g, '').replace('화장실', '욕실').replace('부엌', '주방')
       )
     ),
@@ -859,7 +477,7 @@ export function summarizeRequest(text, res) {
 
   // 요청사항 — 원문에서 핵심이 되는 첫 줄들만 짧게
   const wants = clean
-    .split(/\n|(?<!\d)\.(?!\d)/) // '2.5톤'의 소수점에서 문장을 끊지 않는다
+    .split(/\n|(?<!\d)\.(?!\d)/)
     .map((s) => s.trim())
     .filter((s) => s.length >= 4)
     .slice(0, 2)

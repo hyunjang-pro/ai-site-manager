@@ -3,6 +3,9 @@
 // 원가 구조와 "고객가 = 원가 ÷ (1 − 마진율)" 공식을 그대로 모듈화했다.
 import { TRADES, HARD_DETAILS, hasInteriorStyle, workTypeLabel } from './constants.js';
 import { ratesOf, getRate } from './rates.js';
+import { MATERIAL_RATES, RATE_BOOK, axisAmount } from './engine/rate-book.js';
+import { createLedger, axisOf, AXES } from './engine/ledger.js';
+import { siteSurchargeLines } from './engine/surcharge.js';
 import { wasteVehicle } from './waste.js';
 import { partialPlan, partialOf } from './partial.js';
 import { resolveSurvey } from './site.js';
@@ -12,27 +15,7 @@ import { bathroomDemoOnly, kitchenDemoOnly, isDemoOnlyText } from './scope.js';
 import { estimateWorkDays } from './schedule.js';
 
 export const MAN = 10000; // 원 → 만원
-
-// 2026 실견적 보정 자재·공정 단가 (work/real-interior-quotes-2026.md 5-1·5-2)
-export const MATERIAL_RATES = {
-  wallpaper: { silkRoll: 4.5, paperRoll: 4.2, floor18: 1.1, floor22: 1.5, floor45: 2.6, decoTile: 2.4, hardWood: 3.4 },
-  bathroom: { tilePer: 60, tileStripPer: 45, tileOnlyLaborDays: 2, fixturePer: 50, waterproofPer: 20, demolition: 80, ubrExtra: 90, laborDays: 3, wastePer: 20, overlayWaste: 5, demoOnlyPer: 52, demoOnlyWaste: 24 },
-  kitchen: { sinkPerM: 60, topPerM: 16, waste: 45, laborDays: 3, demoOnlyPer: 30, demoOnlyWaste: 28 },
-  tile: { materialPer: 3.2, installPer: 4.5, waterproofPer: 3.4, demolitionPer: 2.2, minimum: 45 },
-  window: { perSqm: 28, matPerSqm: 24, perDay: 8, removal: 8, waste: 15, minimum: 35 },
-  repair: { perSpot: 12, materialPer: 5, minimum: 15 },
-  plaster: { mortarPer: 2.8, materialPer: 0.8, heatingPer: 2.5, minimum: 30, perDay: 16 },
-  waste: { defaultTons: 1.5 },
-  // 2026 실무 단가 — 노무는 '직종 일당 × 작업일수(하루 처리량 기준)'로 계산한다
-  carpentry: { perM: 9, matPer: 4, perDay: 6, minimum: 25 },
-  // 가벽·칸막이(경량벽체) — 평이 아니라 길이(m)·칸·문 개수로 계산
-  //  스터드 65mm + 석고 9.5t 2겹(양면) + 단열·방음 + 피스·테이프·퍼티·도장(수성) 포함
-  partition: { wallPerM: 3.2, doorEach: 16, perDayM: 4, doorDays: 0.34, minDays: 2, wasteBase: 11, wastePerM: 0.5, consum: 5, height: 2.4 },
-  electric: { trip: 15, perPoint: 8, matPer: 3.2, perDay: 6, minimum: 25 },
-  plumbing: { trip: 15, perPoint: 12, matPer: 4.2, perDay: 3.5, minimum: 30 },
-  film: { perSqm: 2.2, matPer: 1.8, perDay: 14, minimum: 25 },
-  groundwork: { perSqm: 4.5, equipRate: 0.25, minimum: 50 },
-};
+export { MATERIAL_RATES }; // 단가표는 engine/rate-book.js 한 곳에 있다
 
 // 직종 일당 × 작업일수. '하루 처리량(perDay)'은 지금 단가 수준이 그대로 유지되게 잡은 값이다.
 function crewLabor(rates, role, fallbackRate, quantity, perDay, minDays = 0.5) {
@@ -385,7 +368,17 @@ export function computeEstimate(c) {
     const rawDays = manDays / crewSize;
     const days = Math.max(finishOnly ? 0.5 : 1, Math.min(14, finishOnly ? Math.ceil(rawDays * 2) / 2 : Math.ceil(rawDays)));
     const perDay = skilled + helper * helperCount;
-    const laborCost = Math.round(days * perDay);
+    let laborCost = Math.round(days * perDay);
+    // 상가 원상복구는 평당 인건비 하한을 둔다 — 큰 평수에서 3명·3일로 끝내면
+    // 지방 시세(평당 22~25만)보다 훨씬 싸게 나가 사장님이 손해를 본다.
+    const commercialPlace = /상가|상점|매장|식당|음식점|카페|사무실|오피스|근린|상업|학원|병원|약국|공장|창고|숍|미용실|편의점|마트|베이커리|노래방|가게|점포|피시방|당구장/.test(notes);
+    const restoreScope =
+      RATE_BOOK.demolition.restoreScope.test(notes) ||
+      !/간판|싱크대|붙박이|샷시|문짝|선반|에어컨|칸막이|가벽|텍스|데코타일|에폭시|타일/.test(notes);
+    const commercialRestore = !finishOnly && !structural && commercialPlace && restoreScope;
+    if (commercialRestore) {
+      laborCost = Math.max(laborCost, Math.round(pyung * RATE_BOOK.demolition.restoreLaborPerPyung));
+    }
     crewDays += days * crewSize;
     // 폐기물은 '톤'으로 잡고 차량을 고른다. 15평 철거에 3대(마대 30개 분량)를 무조건 넣던 것을 바로잡았다.
     const tons = +(pyung * (structural ? 0.8 : finishOnly ? 0.1 : scope === 'restore' ? 0.2 : 0.26)).toFixed(1);
@@ -530,10 +523,13 @@ export function computeEstimate(c) {
     const B = MATERIAL_RATES.bathroom;
     // "타일만 교체"는 욕실 올수리가 아니다 — 도기·수전은 그대로 두고 타일만 뜯어 새로 붙인다.
     // (예전엔 전체 철거+방수+도기까지 붙어 1칸 553만 — 시세 250~400)
+    // '도기 그대로'·'기존 도기'는 도기를 새로 한다는 말이 아니다 — 뺀 문장으로 판단한다
+    const keepPhrase = ownNotes.replace(/(?:도기|양변기|세면대|수전|욕조)\s*(?:는|를)?\s*(?:그대로|유지|안\s*건드|놔두|그냥)/g, ' ');
     const tileOnly =
       !c?.tileRemain &&
-      /타일\s*(?:만|만\s*교체|교체\s*만)|타일만/.test(ownNotes) &&
-      !/도기|양변기|세면대|수전|욕조|샤워|올수리|리모델링|전체\s*철거|전체\s*교체/.test(ownNotes);
+      !(/하나는[^.\n]{0,24}타일/.test(ownNotes) && /올수리|올\s*수리|전체/.test(ownNotes)) &&
+      /타일\s*(?:만|만\s*교체|교체\s*만)|타일만/.test(keepPhrase) &&
+      !/도기|양변기|세면대|수전|욕조|샤워|올수리|리모델링|전체\s*철거|전체\s*교체/.test(keepPhrase);
     // "하나는 타일만, 하나는 올수리" — 한 현장에서 두 가지를 같이 하는 경우
     const mixedBath = /하나는[^\n]{0,24}타일/.test(ownNotes) && /올수리|올\s*수리|전체/.test(ownNotes) && !tileOnly;
     // 도기·수전 교체는 손님이 그 말을 했을 때만 넣는다 — "타일 철거+방수"에
@@ -815,7 +811,7 @@ export function computeEstimate(c) {
           ? Math.max(1, sizeVal)
           : Math.max(1, +(sizeVal * 3.3 * (/천장/.test(notes) ? 2.6 : /벽|벽체|전체/.test(notes) ? 1.9 : 1.9)).toFixed(1));
       // 탄성코트·발수는 수성페인트보다 자재·공정이 비싸다 (2026 공개 단가 기준)
-      const perSqm = /탄성/.test(notes) ? 0.55 : /발수/.test(notes) ? 0.4 : 0.37; // 만원/㎡ (자재+인건)
+      const perSqm = /탄성/.test(notes) ? 0.55 : /발수/.test(notes) ? 1.2 : 0.37; // 만원/㎡ (자재+인건)
       const paintLabor = Math.round(area * perSqm * 0.6);
       const paintMat = Math.round(area * perSqm * 0.4);
       const paintDays = Math.max(0.5, Math.round((paintLabor / Math.max(1, repairRate)) * 10) / 10);
@@ -1324,73 +1320,27 @@ export function computeEstimate(c) {
   };
 
   const lifting = computeLifting(c, rates);
-  if (lifting.cost > 0) {
-    addSurcharge('lift', '추가(운반)', `자재·폐기물 운반 — ${lifting.chosen.label}`, lifting.chosen.detail, lifting.cost, 'in');
-    laborTotal += lifting.cost;
-  }
-
-  if (surveyOn(c, 'longCarry') && lifting.carryM < 30) addSurcharge('longCarry', '추가(운반)', '운반거리 30m 이상', '잡부 반일 추가', 8);
-  if (surveyOn(c, 'noParking')) addSurcharge('noParking', '추가(운반)', '차량 진입·주차 곤란', '반출 대기·추가 운반', 5);
-  if (surveyOn(c, 'narrowDoor')) addSurcharge('narrowDoor', '추가(운반)', '출입문·복도 협소', '소형 운반·분해 반입', 5);
-  if (surveyOn(c, 'floorHeatingPipe')) { addSurcharge('heating', '추가(구조)', '난방배관 매설 대비', '저속 파쇄·보수 예비비', 35, 'in'); laborTotal += 35; }
-  if (surveyOn(c, 'existingLeak')) { addSurcharge('leak', '추가(구조)', '기존 누수 보수·방수', '보강 시공비', 30, 'in'); laborTotal += 30; }
-  if (surveyOn(c, 'oldPlumbing')) { addSurcharge('plumbing', '추가(구조)', '노후 급배수관 정리', '배관 교체·압력 테스트', 25, 'in'); materialTotal += 25; }
-  if (surveyOn(c, 'loadBearingWall')) addSurcharge('loadBearing', '추가(구조)', '내력벽 철거 구조검토', '구조기술사 검토·보강(없으면 착공 금지)', 30);
-  // 석면은 견적서 '별도 사항(발견 시 조사·처리)'과 같은 조건부 비용이다 — 미리 원가에 넣으면
-  // 작은 텍스 철거(40만)에 조사비 30만이 붙어 손님이 가격을 못 받아준다. 찾으면 그때 청구한다.
-  if (surveyOn(c, 'asbestosRisk')) addSurcharge('asbestos', '추가(규제)', '석면 사전조사 착수비', '시료 분석·조사기관 수수료(발견 시 청구)', 30, 'aside');
-  if (surveyOn(c, 'workTimeLimit')) { addSurcharge('worktime', '추가(규제)', '작업시간 제한', '공사 기간이 늘어난 인건비', 20, 'in'); laborTotal += 20; }
-  // 혼합 폐기물 — 성상 분리를 안 하면 처리비가 3~6배가 된다. 현장 확인 후 체크하는 항목.
-  if (surveyOn(c, 'wasteMixed')) {
-    // 체크한 항목은 현장마다 금액을 직접 고칠 수 있다(0원 = 서비스·직접 처리).
-    const mixed = surveyAmount(c, 'wasteMixed', Math.max(15, Math.round(wasteTotal * 0.35)));
-    addSurcharge('mixedWaste', '추가(폐기물)', '혼합 폐기물 분리·추가 처리', '성상 분리 인력 + 혼합 처리 단가', mixed, 'in');
-    wasteTotal += mixed;
-  }
-  if (surveyOn(c, 'adminDeposit')) {
-    const admin = surveyAmount(c, 'adminDeposit', getRate(rates, ['site', 'adminReport'], 8));
-    addSurcharge('deposit', '추가(규제)', '관리사무소 신고·동의서', '동의서 작성·대행', admin);
-  }
-  if (surveyOn(c, 'powerWaterCut')) addSurcharge('cut', '추가(규제)', '단전·단수 조치', '차단·마감', 5);
-  if (surveyOn(c, 'gasFirePermit')) addSurcharge('gas', '추가(규제)', '가스·소방 작업허가', '허가·보양', 10);
-  if (surveyOn(c, 'residential')) {
-    const live = surveyAmount(c, 'residential', 12);
-    addSurcharge('residential', '추가(현장)', '거주 중 시공 보양', '가구 이동·먼지막이·매일 청소', live, 'in');
-    laborTotal += live;
-  }
-  if (surveyOn(c, 'protectLevel')) {
-    const spots = Math.max(1, parseInt(c?.protectSpots, 10) || 1);
-    const protect = surveyAmount(c, 'protectLevel', getRate(rates, ['site', 'protect'], 8) * spots);
-    // 보양은 '자재'가 아니다 — 자재 합계에 넣으면 원가 구성표의 '자재비'가 틀려 보인다
-    addSurcharge('protect', '추가(현장)', '보양(엘베·복도·현관)', `${spots}곳 기준 (아래에서 금액 수정)`, protect);
-  }
-  if (surveyOn(c, 'materialLift')) {
-    const liftCost = surveyAmount(c, 'materialLift', getRate(rates, ['site', 'materialLift'], 15));
-    addSurcharge('materialLift', '추가(운반)', '자재 올리기', '자재를 층까지 올리는 인력', liftCost, 'in');
-    laborTotal += liftCost;
-  }
-  if (surveyOn(c, 'ladderSmall')) {
-    const small = surveyAmount(c, 'ladderSmall', getRate(rates, ['ladder', 'small'], 12));
-    addSurcharge('ladderSmall', '추가(운반)', '사다리차 소형 1회', '4층 규모 자재·폐기물 반출', small, 'in');
-    equipTotal += small;
-  }
-  if (surveyOn(c, 'ladderHalf')) {
-    const halfDay = surveyAmount(c, 'ladderHalf', getRate(rates, ['ladder', 'half'], 35));
-    addSurcharge('ladderHalf', '추가(운반)', '사다리차 반나절', '자재·폐기물 반출', halfDay, 'in');
-    equipTotal += halfDay;
-  }
-  if (surveyOn(c, 'afterCare')) {
-    const pyungForClean = toPyung(c?.sizeValue, c?.sizeUnit, 15);
-    const cleanPeople = Math.max(1, Math.ceil(pyungForClean / 20));
-    // 10평 미만 마감(필름 15㎡·문 5짝 도장)에 청소 인력 '하루'를 통째로 넣으면
-    // 15㎡ 필름 112만처럼 작은 일이 커진다 — 반나절로 본다.
-    const cleanDays = pyungForClean < 10 ? 0.5 : 1;
-    const cleanRate = getRate(rates, ['labor', 'cleaner'], 19);
-    const cleanup = surveyAmount(c, 'afterCare', Math.round(cleanPeople * cleanDays * cleanRate));
-    addSurcharge('clean', '추가(현장)', '준공 청소', `청소 ${cleanPeople}명 × ${cleanDays}일 × ${cleanRate}만 (${pyungForClean}평 기준)`, cleanup, 'in');
-    laborTotal += cleanup;
-    crewDays += cleanPeople * cleanDays;
-  }
+  // 현장 조건(층수·시간·거리·장비·규제)은 engine/surcharge.js 한 표에서 온다.
+  // 같은 조건이 두 번 붙지 않게, 그리고 화면에만 뜨고 원가에 안 들어가는 일이 없게.
+  const siteCtx = {
+    rates,
+    lifting,
+    pyung: toPyung(c?.sizeValue, c?.sizeUnit, 15),
+    wasteTotal,
+    laborTotal,
+    workDays: workDays || 1,
+    outOfTown: !!(c?.region && c.region !== '안동' && c.region !== '기타' && /출장|외곽|원거리/.test(notes)),
+    survey: (id) => surveyOn(c, id),
+    amount: (id, fallback) => surveyAmount(c, id, fallback),
+  };
+  siteSurchargeLines(c, siteCtx).forEach((l) => {
+    addSurcharge(l.id, l.category, l.name, l.detail, l.amount, l.mode);
+    if (l.addToLabor) laborTotal += l.amount;
+    if (l.addToMaterial) materialTotal += l.amount;
+    if (l.addToEquip) equipTotal += l.amount;
+    if (l.addToWaste) wasteTotal += l.amount;
+    if (l.crewDays) crewDays += l.crewDays;
+  });
 
   // ---- 직접 추가한 실측 항목 ----
   (c?.customChecklist || []).forEach((it) => {
@@ -1538,12 +1488,42 @@ export function computeEstimate(c) {
     .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   // 소형·부품 현장은 원가 바닥도 낮춘다 (에어컨 1대 철거가 30만원으로 보이지 않게)
   const costFloor = smallJob ? 12 : 30;
+
+  // ── 4축 합계는 **줄에서 다시 센다** ─────────────────────────
+  // 위에서 만든 줄(items) 하나하나가 자기 축(자재·인건비·장비·폐기물)을 갖고 있고,
+  // 합계는 그 줄들의 합이다. 예전처럼 laborTotal += … 로 따로 더하지 않으므로
+  // 같은 돈이 두 축에 겹쳐 들어가거나 빠지는 일이 구조적으로 생기지 않는다.
+  items.forEach((it) => {
+    it.axis = axisOf(it);
+  });
+  const ledger = createLedger();
+  items.forEach((it) =>
+    ledger.add({ ...it, phase: it.id === 'survey_adjust' ? 'change' : it.isSurcharge ? 'surcharge' : 'base' })
+  );
+  const countedLines = ledger.lines.filter((l) => !l.conditional && !excludedIds.includes(l.id));
+  const axisSum = (axis, pred = () => true) =>
+    countedLines.filter((l) => l.axis === axis && pred(l)).reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
+  const axisTotals = AXES.reduce((out, axis) => ({ ...out, [axis]: axisSum(axis) }), {});
+  const baseAxisTotals = AXES.reduce((out, axis) => ({ ...out, [axis]: axisSum(axis, (l) => l.id !== 'survey_adjust') }), {});
+  laborTotal = axisTotals.labor;
+  materialTotal = axisTotals.material;
+  wasteTotal = axisTotals.waste;
+  equipTotal = axisTotals.equip;
+
   // 실지 원가(변동 전) — 견적가는 이 값으로 잡고, 답사 변동은 금액·원가에 각각 한 번씩만 더한다.
   // (변동을 원가에도 넣은 뒤 그 원가로 다시 가격을 계산하면 -40만이 -90만으로 두 번 빠진다)
-  let baseDirectCost = Math.max(
-    costFloor,
-    Math.round(laborTotal + materialTotal + wasteTotal + equipTotal + surchargeExtra - excludedAmount)
-  );
+  const baseLineSum = AXES.reduce((sum, axis) => sum + baseAxisTotals[axis], 0);
+  let baseDirectCost = Math.max(costFloor, Math.round(baseLineSum));
+  if (baseDirectCost > Math.round(baseLineSum)) {
+    // 최소 공사비 하한을 적용하면 그 차액도 줄로 남긴다 (합계 = 줄 합계 불변식)
+    const gap = baseDirectCost - Math.round(baseLineSum);
+    const floorLine = { id: 'cost_floor', category: '추가(현장)', name: '최소 공사비 하한', detail: '출동·실측·마감 최소선', amount: gap, axis: 'labor' };
+    items.push(floorLine);
+    ledger.add(floorLine);
+    baseAxisTotals.labor += gap;
+    axisTotals.labor += gap;
+    laborTotal += gap;
+  }
   let totalDirectCost = Math.max(costFloor, baseDirectCost + adjustTotal);
 
   // ---- 관공서 공고: 설계내역서 확인 전까지 실행원가를 수주금액의 80%로 보수적으로 잡는다 ----
@@ -1700,6 +1680,8 @@ export function computeEstimate(c) {
     baseMaterial,
     laborTotal,
     materialTotal,
+    axisTotals,
+    ledgerLines: ledger.lines,
     wasteTotal,
     equipTotal,
     surchargeTotal,
