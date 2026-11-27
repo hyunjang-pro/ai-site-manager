@@ -32,12 +32,12 @@ const CASES = [
   { text: '욕실 1칸 타일만 교체', trades: ['bathroom', 'tilewaterproof'], price: [250, 400] },
   { text: '24평 아파트 인테리어', trades: ['combined'], price: [2000, 3600] },
   { text: '철거하고 도배 장판까지 24평', trades: ['combined', 'wallpaper'], price: [300, 800] },
-  // ── 폐기물 용량별 ──
-  { text: '원룸 생활폐기물 반차', trades: ['waste'], price: [20, 45], wasteTons: 0.5 },
-  { text: '폐기물 1톤 트럭 한차', trades: ['waste'], price: [30, 70], wasteTons: 1 },
-  { text: '2.5톤 폐기물 처리', trades: ['waste'], price: [70, 140], wasteTons: 2.5 },
-  { text: '5톤 폐기물 차량 한대', trades: ['waste'], price: [120, 260], wasteTons: 5 },
-  { text: '가게 폐업 집기 정리', trades: ['waste'], price: [40, 200] },
+  // ── 폐기물 용량별 (v3.20: 차량 실비 반차 26 · 1톤 42.5 · 2.5톤 75만 + 올바로 3만 + 운용 마진 13%)
+  { text: '원룸 생활폐기물 반차', trades: ['waste'], price: [30, 38], wasteTons: 0.5 },
+  { text: '폐기물 1톤 트럭 한차', trades: ['waste'], price: [45, 60], wasteTons: 1 },
+  { text: '2.5톤 폐기물 처리', trades: ['waste'], price: [85, 100], wasteTons: 2.5 },
+  { text: '5톤 폐기물 차량 한대', trades: ['waste'], price: [170, 240], wasteTons: 5 },
+  { text: '가게 폐업 집기 정리', trades: ['waste'], price: [80, 105] },
   // ── 일반 상가·사무실 철거 ──
   { text: '사무실 12평 원상복구', trades: ['demolition'], price: [180, 420] },
   { text: '카페 20평 철거', trades: ['demolition'], price: [230, 520] },

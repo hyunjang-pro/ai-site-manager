@@ -36,6 +36,7 @@ import {
 } from '../ui.jsx';
 import WasteVehicleSwitch from '../WasteVehicleSwitch.jsx';
 import CostFlow from '../CostFlow.jsx';
+import MarketBandCard from '../MarketBandCard.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import { quoteSignal, parseBudget, aiSignalOf } from '../../lib/budget.js';
 
@@ -67,6 +68,8 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
     ? '숨고에서 견적 보낼 때 그대로 붙여넣으세요. 금액을 바꾸면 멘트 안 숫자도 즉시 바뀝니다.'
     : `카톡·문자로 ${honorific}에게 보낼 때 그대로 붙여넣으세요. 금액을 바꾸면 멘트 안 숫자도 즉시 바뀝니다.`;
   const ref = useMemo(() => similarCases(c, calc, completedCases), [c, calc, completedCases]);
+  // 폐기물 단독은 차량 실비라 예비비를 잡지 않는다 — 화면 문구도 같은 사실을 말하게
+  const bufferLabel = calc.bufferRate > 0 ? `예비비 ${calc.bufferRate}% 포함` : '차량 실비 + 진행비 기준';
   const hasSurvey = Math.abs(calc.adjustmentTotal) > 0 || (c.changeLogs || []).length > 0;
   const info = TRADES[c.trade] || TRADES.unclassified;
   const mset = materialSetFor(c, calc.trade);
@@ -138,8 +141,8 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           calc.hasCalledPrice
             ? `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 내가 부를 금액 기준 · 앱 계산가 ${Math.round(calc.appClientPrice).toLocaleString('ko-KR')}만`
             : hasSurvey
-            ? `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 답사 변동 ${calc.adjustmentTotal > 0 ? '+' : ''}${Math.round(calc.adjustmentTotal).toLocaleString('ko-KR')}만 반영 · 예비비 ${calc.bufferRate}% 포함`
-            : `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 실측 후 확정 · 예비비 ${calc.bufferRate}% 포함`
+            ? `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 답사 변동 ${calc.adjustmentTotal > 0 ? '+' : ''}${Math.round(calc.adjustmentTotal).toLocaleString('ko-KR')}만 반영 · ${bufferLabel}`
+            : `${c.includeVat ? '부가세 포함' : '부가세 별도'} · 실측 후 확정 · ${bufferLabel}`
         }
         badge={
           <span className={cx('rounded-lg px-2 py-1 text-2xs font-extrabold', calc.isBelowBreakEven ? 'bg-rose-500/25 text-rose-200' : 'bg-emerald-400/20 text-emerald-300')}>
@@ -166,9 +169,14 @@ export default function EstimateTab({ c, update, calc, design, showToast, comple
           </div>
         </div>
         <p className="mt-1.5 text-[11px] font-semibold leading-4 text-blue-200">
-          기본 원가 {Math.round(calc.totalDirectCost).toLocaleString('ko-KR')}만 + 예비비 {Math.round(calc.costBuffer).toLocaleString('ko-KR')}만({calc.bufferRate}%)을 미리 넣었습니다
+          {calc.bufferRate > 0
+            ? `기본 원가 ${Math.round(calc.totalDirectCost).toLocaleString('ko-KR')}만 + 예비비 ${Math.round(calc.costBuffer).toLocaleString('ko-KR')}만(${calc.bufferRate}%)을 미리 넣었습니다`
+            : `원가 ${Math.round(calc.totalDirectCost).toLocaleString('ko-KR')}만에 진행비 ${calc.marginPercent}%만 넣었습니다 — 차량 실비는 예비비를 잡지 않습니다`}
         </p>
       </Hero>
+
+      {/* 보통 시세 안내 — 어머님이 바로 읽는 카드 (계산이 시세를 벗어나면 앱이 먼저 조정한다) */}
+      <MarketBandCard calc={calc} />
 
       {/* 원가가 어떻게 나왔는지 — 답사 전에도 바로 읽히게 (2·4단계 같은 모양) */}
       <CostFlow calc={calc} />

@@ -13,6 +13,7 @@ import { materialSetFor } from './materials.js';
 import { detailRowsFor, detailTotals } from './details.js';
 import { bathroomDemoOnly, kitchenDemoOnly, isDemoOnlyText } from './scope.js';
 import { estimateWorkDays } from './schedule.js';
+import { marketSanity, marketPosition, marketWhy } from './engine/sanity.js';
 
 export const MAN = 10000; // 원 → 만원
 export { MATERIAL_RATES }; // 단가표는 engine/rate-book.js 한 곳에 있다
@@ -326,6 +327,14 @@ export function computeEstimate(c) {
   let crewDays = 0; // 총 연인원(명·일) — 교통비·식비를 여기에 곱한다
   let targetSummary = '';
   let smallJob = false; // 개수·품목 단위 소형 현장 — 최소 공사비 하한을 낮게 본다
+  // 시세 검증(engine/sanity.js)에 넘길 현장 사실 — 공종 안에서만 알 수 있는 값들
+  let demolitionKind = ''; // partial · finish · structural · restore
+  let wasteTons = 0;
+  let wasteVehicleCost = 0;
+  let wasteTicket = 0;
+  let laborPeople = 0;
+  let laborDaysN = 0;
+  let laborCharge = 0;
   let workDays = 0; // 화면·문서가 같은 공사일수를 쓰게 한다
   let plannedCrew = null; // 추천 인원 × 일수 — '2명 1일'처럼 원가가 가장 적은 조합을 화면에 보여 준다
 
@@ -334,6 +343,7 @@ export function computeEstimate(c) {
     if (partial) {
       // "간판 2개 철거"처럼 개수·품목 단위 현장 — 평수 전체 철거 단가를 쓰지 않는다.
       smallJob = true;
+      demolitionKind = 'partial';
       laborTotal += partial.labor;
       wasteTotal += partial.waste;
       equipTotal += partial.equip;
@@ -363,6 +373,7 @@ export function computeEstimate(c) {
     // 순수 철거(마감만)는 4.5평, 마감재 한 가지만 뜯는 일은 8평,
     // 건물 전체 해체는 잔재 처리·장비 대기가 붙어 1인 1일 1.5평.
     // 예전 '평 ÷ 6일'은 24평을 4일×3명(연인원 12)으로 잡아 실제 2~3일 현장보다 인건비가 30~40% 부풀었다.
+    demolitionKind = structural ? 'structural' : finishOnly ? 'finish' : 'restore';
     const perManDay = structural ? 1.5 : finishOnly ? 8 : scope === 'restore' || wholeStrip ? 3.5 : 4.5;
     const manDays = pyung / perManDay;
     const rawDays = manDays / crewSize;
@@ -641,20 +652,39 @@ export function computeEstimate(c) {
     // 차량비·상차 인부를 따로 또 더하면 1톤 한차가 90만원대로 부풀려진다.
     // 식비·교통비도 상차 인부 몫까지 또 붙이지 않는다(차량 단가에 이미 포함).
     const ticket = getRate(rates, ['waste', 'ticket'], 3);
-    const disposal = Math.round(tons * perTon);
+    // 원가는 '차량 실비'다 — 반차 26만 / 1톤 42.5만 / 2.5톤 75만(상차·운반·처리 포함).
+    // 예전엔 톤당 32만을 곱해 2.5톤이 80만, 반차가 16만으로 나와 작은 차는 손해·큰 차는 과다였다.
+    // 탭(반차·1톤·2.5톤)보다 큰 톤수를 직접 적었을 때만 톤당 통합단가를 쓴다.
+    const overTab = explicitTons > vehicle.tons + 0.01;
+    const vehicleCost = overTab
+      ? Math.round(tons * perTon)
+      : Math.round(getRate(rates, ['waste', vehicle.rateKey], vehicle.rate));
+    const disposal = vehicleCost;
     smallJob = true;
+    wasteTons = tons;
+    wasteVehicleCost = vehicleCost;
+    wasteTicket = Math.round(ticket);
 
     wasteTotal += disposal;
     equipTotal += ticket;
-    targetSummary = `폐기물 약 ${tons}톤 수거·상차·운반·처리 (${truckLabel} · 톤당 ${perTon}만)`;
+    targetSummary = `폐기물 약 ${tons}톤 수거·상차·운반·처리 (${truckLabel} · 차량 실비 ${vehicleCost}만)`;
     items.push(
-      { id: 'waste_disposal', category: '폐기물', name: `${truckLabel} 폐기물 수거·처리 (${tons}톤)`, detail: `${tons}톤 × ${perTon}만 (2026 성상별 단가 · 차량·상차 인부 포함)`, amount: disposal },
+      {
+        id: 'waste_disposal',
+        category: '폐기물',
+        name: `${truckLabel} 폐기물 수거·처리 (${tons}톤)`,
+        detail: overTab ? `${tons}톤 × ${perTon}만 (차량·상차·운반·처리 포함)` : `차량 실비 ${vehicleCost}만 (상차·운반·처리 포함)`,
+        amount: disposal,
+      },
       { id: 'ticket', category: '장비', name: '처리확인서·올바로 등록', detail: '행정 처리', amount: Math.round(ticket) }
     );
   } else if (trade === 'labor') {
     const people = sizeUnit === '명' && sizeVal > 0 ? sizeVal : Math.max(1, parseInt(sizeVal, 10) || 1);
     const days = Math.max(1, parseInt(c?.laborDays, 10) || 1);
     const charge = laborChargeOf(rates, notes);
+    laborPeople = Math.round(people);
+    laborDaysN = days;
+    laborCharge = charge;
     const cost = getRate(rates, ['laborSupply', 'cost'], 19);
     const insurance = Math.round(getRate(rates, ['laborSupply', 'insurance'], 2) * people * days);
     const wageCost = Math.round(people * days * cost);
@@ -1553,8 +1583,20 @@ export function computeEstimate(c) {
 
   const markedItems = items.map((i) => ({ ...i, excluded: excludedIds.includes(i.id) }));
 
-  const marginTarget = typeof c?.marginRate === 'number' ? c.marginRate : info.defaultMargin;
-  const safeMargin = Math.min(60, Math.max(5, marginTarget));
+  // ── 마진·예비비 ──────────────────────────────────────────────
+  // 폐기물 단독은 자재·시공이 아니라 차량 실비를 그대로 받는 일이다. 일반 시공 마진(22~35%)을
+  // 얹으면 2.5톤 한 차가 113만원이 되어 현실 시세(85~95만)를 벗어나고 반차는 26만으로 손해가 된다.
+  // → 운용 마진 13%(10~15% 구간), 예비비 0%(차량 실비는 시공처럼 흔들리지 않는다).
+  const wasteOnly = trade === 'waste';
+  const WASTE_MARGIN = 13;
+  const marginTouched =
+    typeof c?.marginRate === 'number' && (!wasteOnly || c.marginRate !== TRADES.waste.defaultMargin);
+  const marginTarget = marginTouched ? c.marginRate : wasteOnly ? WASTE_MARGIN : info.defaultMargin;
+  // 폐기물 단독은 차량 실비를 그대로 받는 일 — 다른 공종에서 물려받은 20~35% 마진이 남아 있어도
+  // 운용 마진 상한(15%)까지만 적용해 현실 시세(2.5톤 85~95만)를 넘지 않게 한다.
+  let safeMargin = wasteOnly
+    ? Math.min(15, Math.max(5, marginTarget))
+    : Math.min(60, Math.max(5, marginTarget));
 
   let clientPrice;
   let customPrice = null;
@@ -1566,12 +1608,14 @@ export function computeEstimate(c) {
 
   // ---- 2026 보수적 보호: 예비비(안전 버퍼) ----
   // 원가를 그대로 믿지 않고 5~8% 예비비를 더한 '보수적 원가'로 견적가를 낸다.
-  const bufferRate = Math.max(
+  const bufferDefault = getRate(rates, ['buffer'], 6);
+  let bufferRate = Math.max(
     0,
-    Math.min(15, typeof c?.bufferRate === 'number' ? c.bufferRate : getRate(rates, ['buffer'], 6))
+    Math.min(15, typeof c?.bufferRate === 'number' ? c.bufferRate : bufferDefault)
   );
-  const costBuffer = Math.round((totalDirectCost * bufferRate) / 100);
-  const costWithBuffer = totalDirectCost + costBuffer;
+  if (wasteOnly && (typeof c?.bufferRate !== 'number' || c.bufferRate === bufferDefault)) bufferRate = 0;
+  let costBuffer = Math.round((totalDirectCost * bufferRate) / 100);
+  let costWithBuffer = totalDirectCost + costBuffer;
 
   const minJobBase = getRate(rates, ['minimumJob'], 40);
   const minJob = smallJob ? Math.min(20, minJobBase) : minJobBase;
@@ -1584,7 +1628,7 @@ export function computeEstimate(c) {
     const days = Math.max(1, parseInt(c?.laborDays, 10) || 1);
     quotedLabor = Math.round(people * days * laborChargeOf(rates, notes));
   }
-  const baseClientPrice = customPrice !== null ? Math.max(customPrice, 0) : quotedLabor !== null ? quotedLabor : suggestedPrice;
+  let baseClientPrice = customPrice !== null ? Math.max(customPrice, 0) : quotedLabor !== null ? quotedLabor : suggestedPrice;
 
   // ── 관공서 공고: 부를 금액은 공고 수주금액이다 ────────────────────────────
   // 예전에는 1,500만 공고에 실행원가 80%(1,200만)·마진 25%로 1,590만을 제시해
@@ -1595,7 +1639,7 @@ export function computeEstimate(c) {
   // 현장 변동(추가·감소) 누적 — 위에서 뽑은 값을 그대로 쓴다 (견적가에만 더하지 않고 원가에도 반영했다)
 
   // 앱이 계산한 최종 견적(참고용) — 단가·변동을 모두 반영한 값
-  const appClientPrice = bidLocked
+  let appClientPrice = bidLocked
     ? Math.max(0, bidPriceMan + adjustmentTotal)
     : Math.max(0, baseClientPrice + adjustmentTotal);
 
@@ -1606,6 +1650,57 @@ export function computeEstimate(c) {
     calledRaw !== null && calledRaw !== undefined && String(calledRaw).trim() !== '' && Number.isFinite(Number(calledRaw));
   const calledPrice = hasCalledPrice ? Math.max(0, Math.round(Number(calledRaw))) : null;
   clientPrice = calledPrice !== null ? calledPrice : appClientPrice;
+
+  // ── 시세 상식 검증 (v3.20, engine/sanity.js) ─────────────────────────────
+  // 전 공종(철거·폐기물·인력·욕실·주방·타일·도배·바닥·필름·도장·전기·방수·창호·목공·복합)의
+  // 계산 결과가 규모별 현실 시세 [min, 보통, 보통, max]를 벗어나면 마진·예비비를 자동으로 조정한다.
+  // 야간·지하·양중·석면 같은 현장 할증은 시세 밖의 돈이므로 빼고 본다(할증 제외).
+  const surchargeShare =
+    totalDirectCost > 0 ? Math.min(0.85, Math.max(0, (surchargeExtra || 0) / totalDirectCost)) : 0;
+  const sanityParts = {
+    vehicle: wasteVehicleCost,
+    ticket: wasteTicket,
+    people: laborPeople,
+    days: laborDaysN || (plannedCrew ? plannedCrew.days : workDays),
+    charge: laborCharge,
+    crew: plannedCrew ? plannedCrew.crew : 0,
+    labor: laborTotal,
+    material: materialTotal,
+    waste: wasteTotal,
+    equip: equipTotal,
+    lifting: lifting ? lifting.cost : 0,
+    floor: lifting ? lifting.floor : 0,
+  };
+  let sanity = marketSanity({
+    trade,
+    kind: demolitionKind,
+    sizeValue: sizeVal,
+    sizeUnit,
+    notes,
+    tons: wasteTons,
+    people: laborPeople,
+    days: laborDaysN,
+    baseCost: baseDirectCost,
+    cost: totalDirectCost,
+    bufferRate,
+    margin: safeMargin,
+    price: Math.round(clientPrice * (1 - surchargeShare)),
+    disabled: isBid ? 'bid' : '',
+    locked: customPrice !== null || hasCalledPrice || bidLocked || quotedLabor !== null,
+  });
+  if (sanity.adjusted) {
+    safeMargin = sanity.margin;
+    bufferRate = sanity.bufferRate;
+    costBuffer = Math.round((totalDirectCost * bufferRate) / 100);
+    costWithBuffer = totalDirectCost + costBuffer;
+    suggestedPrice = Math.round((baseDirectCost * (1 + bufferRate / 100)) / (1 - safeMargin / 100));
+    if (minJob > 0 && suggestedPrice < minJob) suggestedPrice = minJob;
+    baseClientPrice = customPrice !== null ? Math.max(customPrice, 0) : quotedLabor !== null ? quotedLabor : suggestedPrice;
+    appClientPrice = bidLocked ? Math.max(0, bidPriceMan + adjustmentTotal) : Math.max(0, baseClientPrice + adjustmentTotal);
+    clientPrice = calledPrice !== null ? calledPrice : appClientPrice;
+    const compare = Math.round(clientPrice * (1 - surchargeShare));
+    sanity = { ...sanity, price: compare, position: marketPosition(compare, sanity.band) };
+  }
 
   const vatAmount = c?.includeVat ? Math.round(clientPrice * 0.1) : 0;
   const finalPrice = clientPrice + vatAmount;
@@ -1754,6 +1849,16 @@ export function computeEstimate(c) {
     bidCostFloor,
     isUncertain: missingInfos.length >= 2,
     displayTotal: finalPrice,
+    // '보통 시세 안내' — 범위·현재 위치·왜 이 금액인지까지 화면이 그대로 읽는다
+    sanity: {
+      ...sanity,
+      fullPrice: clientPrice,
+      surchargeShare,
+      cost: totalDirectCost,
+      margin: marginPercent,
+      why: marketWhy({ ...sanity, cost: totalDirectCost, margin: marginPercent, fullPrice: clientPrice, parts: sanityParts }),
+    },
+    marketBand: sanity.band,
     workDays,
   };
 }

@@ -9,6 +9,7 @@ import { estimateWorkDays } from '../../lib/schedule.js';
 import AfterPreview, { PREVIEW_TRADES } from '../AfterPreview.jsx';
 import SignalBanner from '../SignalBanner.jsx';
 import CostFlow from '../CostFlow.jsx';
+import MarketBandCard from '../MarketBandCard.jsx';
 import { finalSignal, aiSignalOf } from '../../lib/budget.js';
 import { clientHonorific } from '../../lib/docs.js';
 import { materialSetFor, materialSetsFor } from '../../lib/materials.js';
@@ -356,6 +357,9 @@ export default function ProfitTab({ c, update, calc, design, showToast, onOpenSe
           </p>
         </div>
       </Card>
+
+      {/* 보통 시세 안내 — 최종 금액을 정하기 전에 '이 정도가 보통'을 확인한다 */}
+      <MarketBandCard calc={calc} />
 
       <SignalBanner signal={aiSignalOf(c.aiSurveySignal) || aiSignalOf(c.aiAnalysis) || finalSignal(calc, c)} caption="이 금액으로 진행해도 되는지 앱이 판단했습니다." />
 

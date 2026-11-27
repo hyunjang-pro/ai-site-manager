@@ -70,7 +70,9 @@ export const TRADES = {
     label: '폐기물 수거·처리',
     short: '폐기물',
     emoji: '🚛',
-    defaultMargin: 22,
+    // 폐기물 단독은 자재·시공이 아니라 차량 실비 청구다 — 운용 마진 10~15%(13%)만 얹는다.
+    // (예전 22%는 2.5톤 한 차를 113만으로 밀어 현실 시세 85~95만을 벗어났다)
+    defaultMargin: 13,
     defaultUnit: '톤',
     accent: 'amber',
   },

@@ -24,7 +24,7 @@ import { perPyeong, DEFAULT_RATES, RATE_FIELDS } from '../src/lib/rates.js';
 import { computeEstimate } from '../src/lib/pricing.js';
 import { composeCase } from '../src/lib/storage.js';
 import { siteCostRows } from '../src/lib/site.js';
-import { hasInteriorStyle } from '../src/lib/constants.js';
+import { hasInteriorStyle, TRADES } from '../src/lib/constants.js';
 import { surveyGuideFor } from '../src/lib/surveyGuide.js';
 import { buildOrderGroups } from '../src/lib/orders.js';
 import { buildQuote, constructionNoticeText } from '../src/lib/docs.js';
@@ -394,9 +394,9 @@ async function main() {
     const sink = price('싱크대 철거 및 수거');
     record('소형: 싱크대 철거(교체 아님) = 15~40만', sink.trade === 'demolition' && sink.price >= 15 && sink.price <= 40, `${sink.trade} ${sink.price}만`);
     const half = price('원룸 생활폐기물 반차');
-    record('폐기물: 반차 = 15~30만', half.trade === 'waste' && half.price >= 15 && half.price <= 30, `${half.price}만`);
+    record('폐기물: 반차 = 30~38만 (차량 실비 26 + 올바로 3 + 진행비)', half.trade === 'waste' && half.price >= 30 && half.price <= 38, `${half.price}만`);
     const ton1 = price('폐기물 1톤 트럭 한차');
-    record('폐기물: 1톤 한차 = 30~60만', ton1.price >= 30 && ton1.price <= 60, `${ton1.price}만`);
+    record('폐기물: 1톤 한차 = 45~60만', ton1.price >= 45 && ton1.price <= 60, `${ton1.price}만`);
     const apt = price('15평 아파트 전체 인테리어');
     record('전체: 15평 올수리 = 1,300만 이상', apt.price >= 1300, `${apt.price}만`);
     record('전체: 아파트 올수리에 보양·관리소·준공청소 자동 포함', ['protectLevel', 'adminDeposit', 'afterCare'].every((id) => apt.site.includes(id)), apt.site.join(','));
@@ -404,6 +404,56 @@ async function main() {
     record('전체: 단독주택 철거엔 관리사무소 신고 없음', !house.site.includes('adminDeposit'), house.site.join(',') || '없음');
     const demo = price('카페 15평 원상복구 철거');
     record('철거: 카페 철거엔 준공 청소 안 붙음', !demo.site.includes('afterCare'), demo.site.join(',') || '없음');
+  });
+
+  // v3.20 — 전 공종 시세 상식 검증 + 자동 보정
+  await step('단위: 전 공종 시세 상식 검증(보통 시세·상한·하한) + 자동 보정', async () => {
+    const run = (text, mutate) => {
+      const r = classifyRequest(text);
+      const c = composeCase({ trade: r.trade === 'unclassified' ? 'custom' : r.trade, patch: r.patch });
+      if (mutate) mutate(c);
+      const calc = computeEstimate(c);
+      return { price: Math.round(calc.clientPrice), calc, s: calc.sanity };
+    };
+    // ① 전 공종에 시세 범위가 있고, 하한 ≤ 보통 ≤ 상한 순서가 맞다
+    const trades = ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'waste', 'labor', 'tilewaterproof', 'plaster', 'window', 'repair', 'carpentry', 'electric', 'plumbing', 'film', 'groundwork', 'combined', 'custom'];
+    const badOrder = trades.filter((trade) => {
+      const c = composeCase({ trade, patch: { sizeValue: '', sizeUnit: TRADES[trade].defaultUnit } });
+      const b = computeEstimate(c).marketBand;
+      return !b || !(b.min <= b.low && b.low <= b.high && b.high <= b.max);
+    });
+    record('시세: 전 공종 범위(하한≤보통≤상한) 계산', badOrder.length === 0, badOrder.join(','));
+
+    // ② 폐기물 2.5톤은 현실 시세(85~95만) 안에서 나온다 — 예전 113만(원가 83 + 22% 마진) 문제
+    const w = run('2.5톤 폐기물 처리');
+    record('시세: 2.5톤 폐기물 = 85~95만 · 원가 78만(차량 75 + 올바로 3)', w.price >= 85 && w.price <= 95 && Math.round(w.calc.totalDirectCost) === 78, `${w.price}만 · 원가 ${Math.round(w.calc.totalDirectCost)}만`);
+    record('시세: 폐기물은 운용 마진 10~15%', w.calc.marginTarget >= 10 && w.calc.marginTarget <= 15, `${w.calc.marginTarget}%`);
+    const w1 = run('폐기물 1톤 트럭 한차');
+    const wh = run('원룸 생활폐기물 반차');
+    record('시세: 1톤 45~55 · 반차 30~35', w1.price >= 45 && w1.price <= 55 && wh.price >= 30 && wh.price <= 35, `1톤 ${w1.price}만 · 반차 ${wh.price}만`);
+
+    // ③ 폐기물은 운용 마진 상한(15%)이 먼저 막는다 — 남는 비율을 55%로 올려도 시세를 넘지 않는다
+    const hot = run('2.5톤 폐기물 처리', (c) => { c.marginRate = 55; c.calledPrice = ''; });
+    record('시세: 폐기물 마진 55%도 15%까지만·시세 안', hot.calc.marginTarget === 15 && hot.price >= 85 && hot.price <= 110 && hot.s.adjusted === false, `${hot.price}만 · 마진 ${hot.calc.marginTarget}%`);
+    // 시공 공종은 마진을 크게 잡으면 시세 상한으로 자동 보정된다 (엔진 단위 직접 확인)
+    // 아래 ④에서 단가표가 깨진 현장(하한 보정)도 같이 본다
+    // ④ 너무 낮게 잡힌 값(단가표가 0으로 깨진 현장)은 하한 쪽으로 올린다
+    const low = run('2.5톤 폐기물 처리', (c) => { c.unitPriceSnapshot.waste = { ...c.unitPriceSnapshot.waste, truck25: 0, truck1: 0, truckHalf: 0, perTon: 0 }; });
+    record('시세: 과도하게 낮은 값도 자동 보정(adjusted)', low.s.adjusted === true && low.s.direction === 'up', `${low.price}만 · ${low.s.reason || ''}`);
+    // ⑤ 정상 범위 안의 견적은 건드리지 않는다
+    const ok = run('상가 15평 원상복구');
+    record('시세: 정상 견적은 그대로(adjusted:false)', ok.s.adjusted === false && ok.s.checked === true, `${ok.price}만 ${ok.s.position}`);
+    // ⑥ 내가 부른 금액·관공서 공고는 사장님이 정한 값이라 바꾸지 않는다
+    const called = run('2.5톤 폐기물 처리', (c) => { c.calledPrice = 200; c.marginRate = 13; });
+    record('시세: 내가 부른 금액은 안 바꿈(locked)', called.price === 200 && called.s.locked === true && called.s.adjusted === false, `${called.price}만`);
+    const bid = composeCase({ trade: 'demolition', patch: {} });
+    bid.bidBudget = 1500;
+    bid.bid = { title: '안동시 사무실 철거', workTypes: ['demolition'], bidPrice: 15000000 };
+    const bidCalc = computeEstimate(bid);
+    record('시세: 관공서 공고는 시세 검증 제외', Math.round(bidCalc.clientPrice) === 1500 && bidCalc.sanity.disabled === 'bid' && bidCalc.sanity.checked === false, `${bidCalc.clientPrice}만`);
+    // ⑦ 안내 문장은 쉬운 말로만 (전문용어·영문 없음)
+    const why = w.s.why || '';
+    record('시세: 안내 문장에 전문용어·영문 없음', why.length > 10 && !/[A-Za-z]|적산|마진율|부대비/.test(why), why);
   });
 
   await step('단위: 답사 가이드는 AI가 있으면 AI, 없으면 공종 폴백', async () => {
@@ -1317,6 +1367,18 @@ async function main() {
     await page.getByRole('group', { name: '폐기물 차량 선택' }).getByRole('button', { name: /2.5톤/ }).click();
     await page.waitForTimeout(500);
     record('폐기물: 2.5톤으로 전환', (await mainText()).includes('약 2.5톤 수거') || (await mainText()).includes('2.5톤 수집·운반 차량 1대'));
+    // 보통 시세 안내 — 어머님이 읽는 카드 (v3.20)
+    const market = await page.getByTestId('market-band').first().innerText();
+    record(
+      '시세: 보통 시세 안내 문장',
+      market.includes('보통 시세 안내') && market.includes('보통 2.5톤 폐기물 시세는 85~95만 원 선이에요'),
+      market.split('\n').filter(Boolean).slice(0, 4).join(' / ')
+    );
+    const marketPrice = Number((market.match(/([\d,]+)만원/) || [])[1]?.replace(/,/g, '') || 0);
+    // 이 현장은 손님이 "엘리베이터로 운반"이라고 했다 — 엘리베이타 사용료 5.5만이 붙어 97만(시세 범위 안)
+    record('시세: 2.5톤 견적이 현실 시세 85~100만', marketPrice >= 85 && marketPrice <= 100, `${marketPrice}만`);
+    record('시세: 왜 이 금액인지 차량 실비로 설명', market.includes('차량 실비 75만') && market.includes('올바로') && market.includes('진행비'), market.split('\n').slice(-2).join(' / '));
+    await shotAt('38a-waste-market.png', '보통 시세 안내', -120);
     await page.getByRole('group', { name: '폐기물 차량 선택' }).getByRole('button', { name: /1톤 1차/ }).click();
     await page.waitForTimeout(400);
     await shotAt('38-waste-estimate.png', '1차 가견적', -110);
@@ -2346,6 +2408,20 @@ async function main() {
       await check(`${n}단계`);
     }
     record('360: 6단계 이동', true);
+    // 보통 시세 안내 카드가 360에서도 잘리지 않는지 (v3.20)
+    await p2.locator('nav[aria-label="현장 단계"] button').nth(1).click();
+    await p2.waitForTimeout(300);
+    const mkt = p2.getByTestId('market-band').first();
+    await mkt.scrollIntoViewIfNeeded().catch(() => {});
+    const mktFit = await p2.evaluate(() => {
+      const el = document.querySelector('[data-testid=market-band]');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { over: el.scrollWidth - el.clientWidth, right: Math.round(r.right), vw: window.innerWidth };
+    });
+    record('360: 시세 안내 카드 있음·글자 안 잘림', !!mktFit && mktFit.over <= 1 && mktFit.right <= mktFit.vw + 1, JSON.stringify(mktFit));
+    await check('시세 카드');
+    await p2.screenshot({ path: path.join(SHOTS, '49-360-market-band.png') });
     await p2.getByLabel('장부로 돌아가기').first().click();
     await p2.waitForTimeout(500);
     await p2.getByRole('button', { name: /새 현장 만들기/ }).first().click();

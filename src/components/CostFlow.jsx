@@ -62,10 +62,17 @@ export default function CostFlow({ calc, title = '이 원가는 이렇게 나왔
           <span>{adjust !== 0 ? '답사 변동 반영한 기본 원가' : '기본 원가'}</span>
           <span className="num font-extrabold text-ink">{pers(base)}만</span>
         </div>
-        <div className="flex items-center justify-between">
-          <span>돌발 예비비 {calc.bufferRate}%</span>
-          <span className="num font-extrabold text-ink">+{pers(buffer)}만</span>
-        </div>
+        {calc.bufferRate > 0 ? (
+          <div className="flex items-center justify-between">
+            <span>돌발 예비비 {calc.bufferRate}%</span>
+            <span className="num font-extrabold text-ink">+{pers(buffer)}만</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <span>돌발 예비비</span>
+            <span className="text-[11.5px] font-bold text-ink-3">차량 실비라 따로 안 잡았어요</span>
+          </div>
+        )}
         <div className="flex items-center justify-between rounded-xl bg-white px-2.5 py-1.5 ring-1 ring-slate-200">
           <span className="text-[13px] font-extrabold text-ink">보수적 원가</span>
           <span className="num text-[15px] font-black text-ink">{pers(cost)}만</span>

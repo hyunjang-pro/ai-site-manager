@@ -1,16 +1,17 @@
 {
   "name": "ai-site-manager",
   "private": true,
-  "version": "3.19.0",
+  "version": "3.20.0",
   "type": "module",
   "description": "AI 현장 매니저 — 경북 철거·인테리어 현장 장부/견적/수익방어/공정잠금/고객문서",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --port 4173 --strictPort",
-    "test": "node test/engine-v319.mjs && node test/sim-holdout-v319.mjs && node test/sim-stress-v318.mjs && node test/audit-v314.mjs && node test/quote-sim-v313.mjs && node test/quote-sim.mjs && node test/sim-extra-v317.mjs && node test/sim-v315.mjs && node test/request-sheet-v316.mjs",
+    "test": "node test/engine-v319.mjs && node test/sanity-v320.mjs && node test/sim-holdout-v319.mjs && node test/sim-stress-v318.mjs && node test/audit-v314.mjs && node test/quote-sim-v313.mjs && node test/quote-sim.mjs && node test/sim-extra-v317.mjs && node test/sim-v315.mjs && node test/request-sheet-v316.mjs",
     "test:engine": "node test/engine-v319.mjs",
-    "test:holdout": "node test/sim-holdout-v319.mjs"
+    "test:holdout": "node test/sim-holdout-v319.mjs",
+    "test:sanity": "node test/sanity-v320.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.462.0",
