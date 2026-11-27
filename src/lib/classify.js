@@ -851,7 +851,7 @@ export function summarizeRequest(text, res) {
   else if (/거주|살고|사람이\s*삼/.test(t)) push('현장 상태', '거주 중');
   if (row('층 / 엘베')) push('층·엘베', row('층 / 엘베'));
   if (r.patch?.subScopes?.length) {
-    const label = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배·장판', entrance: '현관', demolition: '철거', plaster: '바닥 미장', groundwork: '기초·정지', window: '창호', carpentry: '문·몰딩', electric: '전기·조명' };
+    const label = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배', floor: '바닥', paint: '도장', entrance: '현관', demolition: '철거', plaster: '바닥 미장', groundwork: '기초·정지', window: '창호', carpentry: '문·몰딩', electric: '전기·조명', film: '필름' };
     push('포함', r.patch.subScopes.map((x) => label[x] || String(x).replace(/^x:/, '')).join('·'));
   }
   if (r.patch?.excludedWorks?.length) push('제외', r.patch.excludedWorks.join('·'));
