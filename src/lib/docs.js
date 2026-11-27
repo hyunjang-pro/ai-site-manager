@@ -176,6 +176,8 @@ const SCOPE_TITLES = {
   demolition: ['철거·해체', '기존 마감 철거·폐기물 반출'],
   groundwork: ['기초·정지', '터파기·다짐·되메우기'],
   wallpaper: ['도배·장판', '기존 벽지 제거·초배·도배·장판'],
+  floor: ['바닥 (장판·데코타일·강마루)', '기존 바닥 철거·바닥재 시공·걸레받이'],
+  paint: ['도장·페인트', '퍼티·하도·본도 2회'],
   bathroom: ['욕실 리모델링', '철거·방수·타일·도기 교체'],
   kitchen: ['주방 (싱크대·상판)', '싱크대·상판·수전·후드'],
   entrance: ['현관 (중문·신발장·타일)', '중문·신발장·현관 타일'],
@@ -199,7 +201,7 @@ export function buildQuote(c, calc, design, waste) {
   // 손님은 자재까지 포함된 줄 읽는다 — 자재비가 잡힌 현장만 자재 목록을 넣는다.
   const hasMaterials = (calc?.items || []).some((i) => i.category === '자재' && Number(i.amount) > 0);
   const materialSpecs = hasMaterials
-    ? (scopeSpecs.length ? scopeSpecs : calc?.materialSet?.spec?.length ? calc.materialSet.spec : design?.combo || []).slice(0, 10)
+    ? (scopeSpecs.length ? scopeSpecs : calc?.materialSet?.spec?.length ? calc.materialSet.spec : design?.combo || []).slice(0, 14)
     : [];
 
   const clauses = [];
@@ -636,7 +638,7 @@ export function clientScopeText(c, calc) {
   const size = sizeText(c);
   const pyung = size.replace(/[^\d.]/g, '');
   const items = (calc?.items || []).filter((i) => !i.excluded && Number(i.amount) !== 0);
-  const scopeNames = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배·장판', entrance: '현관', demolition: '철거', plaster: '바닥 미장', carpentry: '문·몰딩', electric: '전기·조명', plumbing: '설비', film: '필름', window: '창호', groundwork: '기초·정지' };
+  const scopeNames = { bathroom: '욕실', kitchen: '주방', wallpaper: '도배', floor: '바닥', paint: '도장', entrance: '현관', demolition: '철거', plaster: '바닥 미장', carpentry: '문·몰딩', electric: '전기·조명', plumbing: '설비', film: '필름', window: '창호', groundwork: '기초·정지' };
 
   if (trade === 'demolition') {
     const partialRows = (calc?.items || []).filter((i) => String(i.id || '').startsWith('partial_') && /철거$/.test(i.name || ''));

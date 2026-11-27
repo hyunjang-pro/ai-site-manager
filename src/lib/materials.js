@@ -465,17 +465,31 @@ const SCOPE_SPECS = {
     wood: ['무광 니켈 스위치', '3000K 다운라이트'],
     premium: ['무광 스위치 + 간접등', '2700K 스포트'],
   },
+  floor: {
+    value: ['1.8T 모노륨(무지)'],
+    clean: ['2.0T 모노륨(라이트오크)'],
+    modern: ['데코타일(무광 그레이)'],
+    wood: ['2.2T 모노륨(오크 패턴)'],
+    premium: ['강마루(중급) + 걸레받이'],
+  },
+  paint: {
+    value: ['수성페인트 하도+본도 2회'],
+    clean: ['친환경 수성페인트 2회'],
+    modern: ['무광 화이트 수성페인트'],
+    wood: ['수성페인트 + 우드 몰딩 포인트'],
+    premium: ['친환경 도장 + 퍼티 보강'],
+  },
 };
 
 const TIER_KEYS = { 실속: 'value', 표준: 'clean', 고급: 'premium' };
 
 export function combinedScopeSpecs(presetId, scopes = [], tier = 'clean') {
   const key = ['value', 'clean', 'modern', 'wood', 'premium'].includes(presetId) ? presetId : TIER_KEYS[tier] || 'clean';
-  const order = ['demolition', 'wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster', 'carpentry', 'electric', 'window'];
+  const order = ['demolition', 'wallpaper', 'floor', 'paint', 'bathroom', 'kitchen', 'entrance', 'plaster', 'carpentry', 'electric', 'window'];
   const out = [];
   order.forEach((sc) => {
     if (!scopes.includes(sc)) return;
-    const name = { demolition: '철거', wallpaper: '도배·장판', bathroom: '욕실', kitchen: '주방', entrance: '현관', plaster: '바닥 미장', carpentry: '문·몰딩', electric: '전기·조명', window: '창호' }[sc];
+    const name = { demolition: '철거', wallpaper: '도배·장판', floor: '바닥', paint: '도장', bathroom: '욕실', kitchen: '주방', entrance: '현관', plaster: '바닥 미장', carpentry: '문·몰딩', electric: '전기·조명', window: '창호' }[sc];
     (SCOPE_SPECS[sc]?.[key] || []).forEach((line) => out.push(`${name} · ${line}`));
   });
   return out;

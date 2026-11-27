@@ -370,7 +370,7 @@ export const INTERIOR_STYLE_TRADES = [
 ];
 
 // 복합(집 전체)에서 '마감'으로 쳐주는 세부 공종 — 하나라도 있으면 인테리어 현장이다.
-export const INTERIOR_SCOPES = ['wallpaper', 'bathroom', 'kitchen', 'entrance', 'plaster'];
+export const INTERIOR_SCOPES = ['wallpaper', 'floor', 'bathroom', 'kitchen', 'entrance', 'plaster', 'paint'];
 
 // 직접 입력·기타 현장에서 인테리어로 볼 키워드 (철거·폐기물·토목 단어는 넣지 않는다)
 const INTERIOR_WORDS =

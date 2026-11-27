@@ -28,7 +28,8 @@ const CASES = [
   { text: '부엌 싱크대만 철거', trades: ['kitchen', 'demolition'], price: [20, 80], demo: true },
   { text: '아파트 18평 장판 다 뜯고 새로 깔아주세요', trades: ['wallpaper'], price: [100, 240] },
   { text: '24평 아파트 도배 장판만', trades: ['wallpaper'], price: [220, 380] },
-  { text: '욕실 1칸 타일만 교체', trades: ['bathroom', 'tilewaterproof'], price: [450, 650] },
+  // 2026 시세: 욕실 1칸 타일만 교체(도기·수전 유지) 250~400만 — 예전 450~650 기대값은 앱의 과대 계산을 그대로 고정한 것이었다
+  { text: '욕실 1칸 타일만 교체', trades: ['bathroom', 'tilewaterproof'], price: [250, 400] },
   { text: '24평 아파트 인테리어', trades: ['combined'], price: [2000, 3600] },
   { text: '철거하고 도배 장판까지 24평', trades: ['combined', 'wallpaper'], price: [300, 800] },
   // ── 폐기물 용량별 ──

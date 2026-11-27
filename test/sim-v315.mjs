@@ -32,7 +32,8 @@ const CASES = [
   ['아파트 30평 도배만', ['wallpaper'], [250, 480]],
   ['욕실 1칸 올수리', ['bathroom'], [380, 720]],
   ['욕실 2칸 올수리', ['bathroom'], [700, 1350]],
-  ['욕실 1칸 타일만 교체', ['bathroom', 'tilewaterproof'], [450, 680]],
+  // 욕실 1칸 타일만 교체는 시세 250~400만 (도기·수전 유지, 예전 450~680 기대값은 과대 계산 고정)
+  ['욕실 1칸 타일만 교체', ['bathroom', 'tilewaterproof'], [250, 400]],
   ['주방 싱크대 3m 교체', ['kitchen'], [300, 580]],
   ['아파트 샷시 4짝 교체', ['window'], [150, 480]],
   ['발코니 확장 창호 8㎡', ['window'], [250, 480]],
@@ -90,8 +91,9 @@ for (const [text, trades, range] of CASES) {
   if (trade === 'demolition' && mats) flags.push(`[자재] ${text} — 철거만인데 자재 ${mats}건`);
   // 크리틱: 어떤 현장이든 폐기물·장비가 원가의 70%를 넘으면 확인
   if (!['waste','labor'].includes(trade) && share(calc.wasteTotal + calc.equipTotal) > 70) flags.push(`[비율] ${text} — 폐기물·장비가 원가의 ${share(calc.wasteTotal + calc.equipTotal)}%`);
-  // 크리틱: 일수가 10일을 넘거나 0.5일 미만
-  if (calc.workDays > 10 || calc.workDays < 0.5) flags.push(`[일수] ${text} — ${calc.workDays}일`);
+  // 크리틱: 일수가 10일을 넘거나 0.5일 미만 (전체 인테리어는 양생·발주 대기로 2~3주가 정상이라 25일까지 허용)
+  const daysLimit = trade === 'combined' && c?.fullInterior ? 25 : 10;
+  if (calc.workDays > daysLimit || calc.workDays < 0.5) flags.push(`[일수] ${text} — ${calc.workDays}일`);
   // 크리틱: 마진이 60%를 넘거나 적자
   if (calc.marginBuffered > 60 || calc.marginBuffered < 5) flags.push(`[마진] ${text} — ${calc.marginBuffered}% (견적 ${price} / 원가 ${cost})`);
 }
