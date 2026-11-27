@@ -300,7 +300,8 @@ export function classifyRequest(rawText = '', opts = {}) {
   if (signals.service) rows.push({ label: '요청', value: signals.service });
   if (region || location) rows.push({ label: '지역', value: location || region });
   if (floor) rows.push({ label: '층 / 엘베', value: `${floor}층 · ${elevator === 'no' ? '없음' : elevator === 'yes' ? '있음' : '확인 필요'}` });
-  if (trade === 'waste') rows.push({ label: '처리', value: `${wasteVehicleLabel || '1톤 1차'} · 톤당 32만(차량·상차 포함)` });
+  // 폐기물은 톤당 단가가 아니라 차량 실비(반차 26 · 1톤 42.5 · 2.5톤 75만)로 계산한다 (v3.20)
+  if (trade === 'waste') rows.push({ label: '처리', value: `${wasteVehicleLabel || '1톤 1차'} · 차량 실비 기준(상차·운반·처리 포함)` });
   if (trade === 'labor') rows.push({ label: '청구 기준', value: '1명 1일 26만원(원가 19만)' });
   if (trade === 'plaster' && extraWorks.length) rows.push({ label: '추가', value: extraWorks.join(' · ') });
   if (excludedWorks.length) rows.push({ label: '제외', value: excludedWorks.join(' · ') });
