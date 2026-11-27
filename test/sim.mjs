@@ -334,16 +334,25 @@ async function main() {
             ? Number(await draftEl.first().getAttribute('data-amount'))
             : modalText.match(/([\d,]+)만원/) ? Number(modalText.match(/([\d,]+)만원/)[1].replace(/,/g, '')) : null;
           if (!(await draftEl.count())) addIssue(`${where}/분류결과`, '미리보기', '만들기 전 견적 미리보기 카드가 없음');
-          await page.getByRole('button', { name: /이 내용으로 현장 만들기/ }).click();
-          await page.getByLabel('받은 내용').waitFor();
+          await page.getByRole('button', { name: /이 내용으로 가견적 보기/ }).click();
+          // v3.12부터 새 현장은 2단계 가견적으로 바로 들어간다 — 1단계 '받은 내용'은 탭을 열어야 보인다
+          await page.locator('nav[aria-label="현장 단계"] button').first().waitFor();
           await page.waitForTimeout(700);
           if (sc.photo) await page.evaluate(() => localStorage.removeItem('aiSiteManager.geminiKey'));
           const hp = await headerPrice();
           created = { modalFirstPrice: shown, header: hp };
           if (sc.custom) {
-            // 공종을 '기타'로 바꾸고 직접 이름을 넣는다
-            await page.getByRole('button', { name: '기타', exact: true }).first().click().catch(() => {});
+            // 공종을 '기타'로 바꾸고 직접 이름을 넣는다 — 공종 칩은 1단계(정보)에 있다
+            await openTab(1);
             await page.waitForTimeout(400);
+            // (화면에 지역 '기타' 칩도 있어서 첫 버튼만 누르면 공종이 안 바뀐다 — 될 때까지 눌러 본다)
+            const otherBtns = page.getByRole('button', { name: '기타', exact: true });
+            for (let i = 0; i < (await otherBtns.count()); i += 1) {
+              await otherBtns.nth(i).click().catch(() => {});
+              await page.waitForTimeout(300);
+              if (await page.getByLabel('직접 공종 이름').count()) break;
+            }
+            await page.waitForTimeout(300);
             const nameInput = page.getByLabel('직접 공종 이름');
             if (await nameInput.count()) {
               await nameInput.fill('사무실 파티션 철거·재설치');

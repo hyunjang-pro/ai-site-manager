@@ -159,10 +159,12 @@ export function classifyRequest(rawText = '', opts = {}) {
   push('window', windowExcluded ? /__none__/ : /창호|샤시|샷시|폴딩도어|발코니|중문|방충망|유리|블라인드/);
   push('waste', /폐기물|쓰레기|수거|배출|반출|마대|처리장|한\s*차/);
   push('labor', /인부|일용|인력|인력사무소|잠부|사람.{0,6}(구해|필요)/);
-  push('repair', /수선|보수|교체|문짝|몰딩|도장|페인트|걸레받이|경첩|손잡이|실리콘/);
+  push('repair', /수선|보수|교체|문짝|몰딩|도장|도색|페인트|탄성\s*코트|탄성코트|발수|코팅|걸레받이|경첩|손잡이|실리콘|코킹/);
   // 가벽·칸막이·경량벽체는 **목공(경량벽체) 작업**이다 — 뜯는 말이 함께 있을 때만 철거(부분 철거)로 내려간다
-  push('carpentry', /목공|문틀|문짝|몰딩|가구|데크|선반|파티션|합판|가벽|경량\s*벽체|경량벽체|칸막이|판넬\s*벽|신발장|붙박이\s*장/);
-  push('electric', /전기\s*(공사|배선|증설)|콘센트|조명|스위치|분전반|누전|형광등|LED|배선/);
+  push('carpentry', /목공|문틀|문짝|몰딩|가구|데크|선반|파티션|합판|가벽|경량\s*벽체|경량벽체|칸막이|판넬\s*벽|신발장|붙박이\s*장|이보드|단열\s*보드|결로/);
+  // 소문자로 비교하므로 'led'로 적는다 — 예전 'LED'(대문자)는 'LED 등기구'를 못 잡아
+  // "34평 LED 등기구 전체 교체"가 주방(주방·싱크대 626만)으로 떨어졌다.
+  push('electric', /전기\s*(공사|배선|증설)|콘센트|조명|스위치|분전반|분전함|누전|형광등|led|배선|차단기|등기구|다운라이트/);
   push('plumbing', /배관|급수|배수|수도|보일러|하수구|막힘|수전|세면기|변기\s*(막힘|교체)/);
   push('film', /필름|시트지|래핑|유리\s*필름/);
   push('groundwork', /토목|터파기|기초\s*(공사|타설|콘크리트)|맨땅|콘크리트\s*타설|배수로|정원\s*공사|포장\s*공사|성토|절토|굴삭기|포크레인|아스콘|옹벽|부지\s*정지|정지\s*(작업|공사)|땅\s*고르|지반\s*(공사|복구)|노면\s*복구|부지\s*(정리|고르|공사)/);
@@ -223,6 +225,40 @@ export function classifyRequest(rawText = '', opts = {}) {
   // '서비스 분야: 부분 인테리어' + '가벽 룸3개 만들기' = 목공(경량벽체) 현장이다.
   // 뜯는 말이 없는데 철거로 내려가면 6평 철거·폐기물 멘트가 나간다.
   if (partitionJob && ['unclassified', 'demolition', 'carpentry'].includes(trade)) trade = 'carpentry';
+  // 필름·시트지 리폼은 샷시·문짝·싱크대 이름이 같이 나와도 **필름 현장**이다.
+  // (예전 "아파트 34평 샷시 문짝 싱크대 필름 리폼"이 목공 741만으로 계산됐다)
+  if (
+    ids.includes('film') &&
+    !partitionJob &&
+    /필름|시트지|래핑/.test(t) &&
+    !/가벽|칸막이|경량벽체|문틀\s*(제작|시공)|목공\s*(제작|시공)/.test(t) &&
+    ['carpentry', 'kitchen', 'bathroom', 'repair', 'window', 'electric', 'plumbing', 'wallpaper', 'tilewaterproof', 'custom', 'unclassified'].includes(trade)
+  ) {
+    trade = 'film';
+  }
+  // "화장실 누수 방수"·"베란다 방수"는 욕실 올수리(612만)가 아니라 방수 공사다.
+  if (
+    trade === 'bathroom' &&
+    ids.includes('tilewaterproof') &&
+    /방수|누수/.test(t) &&
+    !/타일|도기|양변기|세면대|수전|올\s*수리|올수리|리모델링|인테리어|전체\s*(교체|철거)/.test(t)
+  ) {
+    trade = 'tilewaterproof';
+  }
+  // 도장·페인트는 문틀·샷시 이름이 같이 나와도 **도장 현장**이다
+  // ("문짝 도장"이 목공 65만, "베란다 샷시 도장"이 창호 교체 302만으로 나가던 것)
+  const paintJob = /도장|도색|페인트|탄성\s*코트|탄성코트|발수/.test(t);
+  if (
+    paintJob &&
+    !/(가벽|칸막이|경량벽체|문틀\s*제작|설치|교체|철거|해체)/.test(t) &&
+    !['demolition', 'combined', 'waste', 'labor', 'groundwork', 'tilewaterproof'].includes(trade)
+  ) {
+    trade = 'repair';
+  }
+  // 창호는 "교체·설치" 현장이다 — 단열·코킹·틈막이만 말했으면 보수 현장으로
+  if (trade === 'window' && !/교체|설치|확장|새\s*창/.test(t) && /단열|보강|코킹|실리콘|틈|바람/.test(t)) {
+    trade = 'repair';
+  }
   // '인테리어'라고 적혀 있는데 안에 뭐가 있는지 못 찾았으면 — 철거로 기울지 말고 '직접 확인' 현장으로
   if (trade === 'unclassified' && signals.interiorDeclared) trade = 'custom';
 
@@ -308,7 +344,8 @@ export function classifyRequest(rawText = '', opts = {}) {
 
   let sizeValue = '';
   let sizeUnit = '';
-  const livingWaste = trade === 'waste' && /생활\s*폐기물|가구|침대|소파|장롱|냉장고|세탁기|이사|살림|가전|집기/.test(t);
+  // 집기·비품은 살림 폐기물(1톤)이 아니라 상가 폐업 정리(2.5톤)다.
+  const livingWaste = trade === 'waste' && /생활\s*폐기물|가구|침대|소파|장롱|냉장고|세탁기|이사|살림|가전/.test(t);
   const sitePyung = parseFloat((t.match(/(\d+(?:\.\d+)?)\s*평/) || [])[1] || 0);
   if (partial.on) {
     // 부분 철거는 품목 수량이 곧 규모다 (간판 2개 · 샷시 2짝 · 가벽 3m).
@@ -370,8 +407,22 @@ export function classifyRequest(rawText = '', opts = {}) {
       sizeUnit = '평';
     }
   } else if (trade === 'repair') {
-    sizeValue = spot ? num(spot[1]) : 1;
-    sizeUnit = '개소';
+    // 도장·페인트는 개소가 아니라 면적으로 견적하는 현장이 많다 — 평·㎡를 살린다
+    const paintWord = /페인트|도장|도색|탄성|발수|코팅/.test(t);
+    const doorSpots = Number((t.match(/(?:문|도어)\s*(\d+)\s*(?:짝|개|틀)/) || [])[1] || 0);
+    if (paintWord && !spot && pyung) {
+      sizeValue = num(pyung[1]);
+      sizeUnit = '평';
+    } else if (paintWord && !spot && sqm) {
+      sizeValue = num(sqm[1]);
+      sizeUnit = '㎡';
+    } else if (paintWord && !spot && doorSpots) {
+      sizeValue = doorSpots;
+      sizeUnit = '개소';
+    } else {
+      sizeValue = spot ? num(spot[1]) : 1;
+      sizeUnit = '개소';
+    }
   } else if (pyung) {
     sizeValue = num(pyung[1]);
     sizeUnit = '평';
@@ -485,7 +536,7 @@ export function classifyRequest(rawText = '', opts = {}) {
 
   // 폐기물 차량 — 1톤 1차가 기본, 2.5톤 명시나 상가·공장 철거 한차만 2.5톤
   const hasHalfWord = /반\s*차|반차량/.test(t);
-  const storeCleanout = /집기|비품|폐업/.test(t) && /상가|매장|음식점|식당|카페|사무실|공장/.test(t);
+  const storeCleanout = /집기|비품|폐업/.test(t) && /상가|매장|음식점|식당|카페|사무실|공장|가게|점포|상점|마트|편의점|학원/.test(t);
   const wasteVehicleId =
     trade === 'waste'
       ? hasHalfWord

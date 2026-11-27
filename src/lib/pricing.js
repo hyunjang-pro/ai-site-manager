@@ -30,7 +30,7 @@ export const MATERIAL_RATES = {
   partition: { wallPerM: 3.2, doorEach: 16, perDayM: 4, doorDays: 0.34, minDays: 2, wasteBase: 11, wastePerM: 0.5, consum: 5, height: 2.4 },
   electric: { trip: 15, perPoint: 8, matPer: 3.2, perDay: 6, minimum: 25 },
   plumbing: { trip: 15, perPoint: 12, matPer: 4.2, perDay: 3.5, minimum: 30 },
-  film: { perSqm: 2.2, matPer: 1.2, perDay: 28, minimum: 25 },
+  film: { perSqm: 2.2, matPer: 1.8, perDay: 14, minimum: 25 },
   groundwork: { perSqm: 4.5, equipRate: 0.25, minimum: 50 },
 };
 
@@ -701,7 +701,7 @@ export function computeEstimate(c) {
     const R = MATERIAL_RATES.repair;
     const spots = sizeUnit === '개소' || sizeUnit === '개' ? Math.max(1, sizeVal) : 1;
     // 수선 내용에 따라 부르는 인부가 다르다 — 페인트·탄성 / 코킹·실리콘 / 일반 보수
-    const isPaint = /페인트|도장|탄성/.test(notes);
+    const isPaint = /페인트|도장|도색|탄성|발수/.test(notes);
     const isCaulk = /실리콘|코킹/.test(notes);
     const repairRole = isPaint ? 'painter' : isCaulk ? 'caulking' : 'repair';
     const repairLabel = isPaint ? '페인트·탄성공' : isCaulk ? '코킹·실리콘공' : '수선·보수 기공';
@@ -709,6 +709,28 @@ export function computeEstimate(c) {
     const repairDays = Math.max(0.5, Math.round(spots * 0.5 * 10) / 10);
     const laborCost = Math.round(repairDays * repairRate);
     const matCost = Math.round(spots * R.materialPer);
+    if (isPaint && !isCaulk && sizeVal > 0 && (sizeUnit === '평' || sizeUnit === '㎡')) {
+      // "상가 20평 수성 페인트 벽·천장 도장" — 개소 1곳(55만)이 아니라 **면적**으로 계산한다.
+      // 평이면 바닥면적 × 벽·천장 배수(벽만 1.9 / 벽+천장 2.6), ㎡면 그 면적 그대로.
+      const area =
+        sizeUnit === '㎡'
+          ? Math.max(1, sizeVal)
+          : Math.max(1, +(sizeVal * 3.3 * (/천장/.test(notes) ? 2.6 : /벽|벽체|전체/.test(notes) ? 1.9 : 1.9)).toFixed(1));
+      // 탄성코트·발수는 수성페인트보다 자재·공정이 비싸다 (2026 공개 단가 기준)
+      const perSqm = /탄성/.test(notes) ? 0.55 : /발수/.test(notes) ? 0.4 : 0.37; // 만원/㎡ (자재+인건)
+      const paintLabor = Math.round(area * perSqm * 0.6);
+      const paintMat = Math.round(area * perSqm * 0.4);
+      const paintDays = Math.max(0.5, Math.round((paintLabor / Math.max(1, repairRate)) * 10) / 10);
+      crewDays += paintDays;
+      laborTotal += paintLabor;
+      materialTotal += paintMat;
+      workDays = Math.max(1, Math.ceil(paintDays));
+      targetSummary = `도장(페인트) ${area}㎡ — ${/탄성/.test(notes) ? '탄성코트' : /발수/.test(notes) ? '발수제' : '수성페인트'} ${sizeUnit === '평' ? `${sizeVal}평 ` : ''}벽·천장 퍼티·하도·본도장 2회 (도장공 ${paintDays}일)`;
+      items.push(
+        { id: 'labor', category: '노무', name: `도장 인력 (${area}㎡)`, detail: `${repairLabel} ${paintDays}일 × ${repairRate}만`, amount: paintLabor },
+        { id: 'mat', category: '자재', name: `도료·퍼티·부자재 (${area}㎡)`, detail: `${/탄성/.test(notes) ? '탄성코트' : /발수/.test(notes) ? '발수제' : '수성페인트'}·프라이머·마스킹`, amount: paintMat }
+      );
+    } else {
     crewDays += repairDays;
     laborTotal += laborCost;
     materialTotal += matCost;
@@ -717,8 +739,9 @@ export function computeEstimate(c) {
       { id: 'labor', category: '노무', name: `수선 인력 (${spots}개소)`, detail: `${repairLabel} ${repairDays}일 × ${repairRate}만`, amount: laborCost },
       { id: 'mat', category: '자재', name: '수선 자재·부자재', detail: `${spots}개소 × ${R.materialPer}만`, amount: matCost }
     );
-    if (laborCost + matCost < R.minimum) {
-      const gap = Math.round(R.minimum - (laborCost + matCost));
+    }
+    if (laborTotal + materialTotal < R.minimum) {
+      const gap = Math.round(R.minimum - (laborTotal + materialTotal));
       items.push({ id: 'min_floor', category: '추가(현장)', name: '최소 출동비', detail: '이동·공구·마감', amount: gap });
       laborTotal += gap;
     }
@@ -768,6 +791,8 @@ export function computeEstimate(c) {
     if (consum) items.push({ id: 'equip', category: '장비', name: '소모품·공구', detail: '마대·피스·커터·보호구', amount: consum });
   } else if (trade === 'carpentry') {
     const C = MATERIAL_RATES.carpentry;
+    // 이보드·결로 단열은 목공 틀·문을 만드는 일이 아니라 벽면 보강이다 — 화면 이름을 나눈다
+    const insul = /이보드|단열|결로/.test(notes);
     const meters =
       sizeUnit === 'm' || sizeUnit === '개' || sizeUnit === '개소'
         ? Math.max(1, sizeVal)
@@ -778,10 +803,12 @@ export function computeEstimate(c) {
     crewDays += carpenterCrew.days;
     laborTotal += laborCost;
     materialTotal += matCost;
-    targetSummary = `목공 ${meters}m (문·문틀·몰딩·가구·데크) · 목수 ${carpenterCrew.days}일`;
+    targetSummary = insul
+      ? `이보드·단열 보강 ${meters}m (목수 ${carpenterCrew.days}일 · 단열보드 부직포 면 · 도배 마감 별도)`
+      : `목공 ${meters}m (문·문틀·몰딩·가구·데크) · 목수 ${carpenterCrew.days}일`;
     items.push(
-      { id: 'labor', category: '노무', name: `목공 인건비 (${meters}m)`, detail: `목수 ${carpenterCrew.days}일 × ${carpenterCrew.rate}만 (하루 ${C.perDay}m)`, amount: laborCost },
-      { id: 'mat', category: '자재', name: `목재·부자재 (${meters}m)`, detail: `MDF·각재·경첩·몰딩·도장 (m당 ${C.matPer}만)`, amount: matCost }
+      { id: 'labor', category: '노무', name: insul ? `단열 시공 인력 (${meters}m)` : `목공 인건비 (${meters}m)`, detail: `목수 ${carpenterCrew.days}일 × ${carpenterCrew.rate}만 (하루 ${C.perDay}m)`, amount: laborCost },
+      { id: 'mat', category: '자재', name: insul ? `이보드·폼본드·테이프 (${meters}m)` : `목재·부자재 (${meters}m)`, detail: insul ? `단열보드·전용 본드·이음 테이프 (m당 ${C.matPer}만)` : `MDF·각재·경첩·몰딩·도장 (m당 ${C.matPer}만)`, amount: matCost }
     );
     if (laborCost + matCost < C.minimum) {
       const gap = Math.round(C.minimum - (laborCost + matCost));
@@ -790,11 +817,19 @@ export function computeEstimate(c) {
     }
   } else if (trade === 'electric') {
     const E = MATERIAL_RATES.electric;
-    const points = Math.max(1, sizeVal || 1);
-    const electricCrew = crewLabor(rates, 'electrician', 28, points, E.perDay);
+    // "34평 아파트 LED 등기구 전체 교체"에서 34평을 34개소로 읽으면 400만이 된다.
+    // 평수만 있으면 등기구 개수로 환산한다 — 조명은 4평당 1개(집 전체 6~9개), 콘센트·스위치는 7평당 1개.
+    const lighting = /조명|등기구|led|형광등|다운라이트|레일/.test(notes);
+    const points =
+      sizeUnit === '평' && sizeVal > 0
+        ? Math.max(1, Math.min(12, Math.round(sizeVal * (lighting ? 0.25 : 0.15))))
+        : Math.max(1, sizeVal || 1);
+    // 등기구·레일조명 설치는 하루 10개 안팎, 배선·콘센트 증설은 6개소 기준
+    const electricCrew = crewLabor(rates, 'electrician', 28, points, lighting ? 10 : E.perDay);
     const laborCost = electricCrew.cost + E.trip;
     const matCost = Math.round(points * E.matPer);
     crewDays += electricCrew.days;
+    workDays = Math.max(1, Math.ceil(electricCrew.days));
     laborTotal += laborCost;
     materialTotal += matCost;
     targetSummary = `전기·조명 ${points}개소 (전기공 ${electricCrew.days}일 × ${electricCrew.rate}만 + 출장 ${E.trip}만)`;
@@ -828,17 +863,26 @@ export function computeEstimate(c) {
     }
   } else if (trade === 'film') {
     const F = MATERIAL_RATES.film;
+    // 필름은 바닥면적(평)을 그대로 칠하는 게 아니다 — 문·창호·가구 표면만 시공한다.
+    // ㎡를 적였으면 그 면적, 평만 있으면 표면적(바닥 × 1.6), "문 5짝"처럼 개수만 있으면
+    // 문짝 양면+문틀 3.6㎡/짝으로 잡는다 (2026 실견적: 필름공 일당 30만·하루 10~14㎡).
+    const doorCount = Number((notes.match(/(?:문|도어)\s*(\d+)\s*(?:짝|개|틀|곳)/) || [])[1] || 0);
     const area =
       sizeVal > 0 && sizeUnit === '㎡'
         ? Math.max(1, sizeVal)
-        : Math.max(3, +(toPyung(sizeVal, sizeUnit, 3) * 3.3).toFixed(1));
+        : sizeVal > 0 && sizeUnit === '평'
+        ? Math.max(3, +(sizeVal * 1.6).toFixed(1))
+        : doorCount > 0
+        ? Math.max(3, +(doorCount * 3.6).toFixed(1))
+        : 9.9;
     const filmCrew = crewLabor(rates, 'film', 28, area, F.perDay);
     const laborCost = filmCrew.cost;
     const matCost = Math.round(area * F.matPer);
     crewDays += filmCrew.days;
     laborTotal += laborCost;
     materialTotal += matCost;
-    const withDoor = /중문|문짝|도어|현관문/.test(notes);
+    workDays = Math.max(1, Math.ceil(filmCrew.days));
+    const withDoor = /중문|현관문/.test(notes) && /설치|시공|교체/.test(notes);
     if (withDoor) {
       const doorCost = 45;
       laborTotal += Math.round(doorCost * 0.55);
@@ -1143,11 +1187,14 @@ export function computeEstimate(c) {
   if (surveyOn(c, 'afterCare')) {
     const pyungForClean = toPyung(c?.sizeValue, c?.sizeUnit, 15);
     const cleanPeople = Math.max(1, Math.ceil(pyungForClean / 20));
+    // 10평 미만 마감(필름 15㎡·문 5짝 도장)에 청소 인력 '하루'를 통째로 넣으면
+    // 15㎡ 필름 112만처럼 작은 일이 커진다 — 반나절로 본다.
+    const cleanDays = pyungForClean < 10 ? 0.5 : 1;
     const cleanRate = getRate(rates, ['labor', 'cleaner'], 19);
-    const cleanup = surveyAmount(c, 'afterCare', Math.round(cleanPeople * cleanRate));
-    addSurcharge('clean', '추가(현장)', '준공 청소', `청소 ${cleanPeople}명 × 1일 × ${cleanRate}만 (${pyungForClean}평 기준)`, cleanup, 'in');
+    const cleanup = surveyAmount(c, 'afterCare', Math.round(cleanPeople * cleanDays * cleanRate));
+    addSurcharge('clean', '추가(현장)', '준공 청소', `청소 ${cleanPeople}명 × ${cleanDays}일 × ${cleanRate}만 (${pyungForClean}평 기준)`, cleanup, 'in');
     laborTotal += cleanup;
-    crewDays += cleanPeople;
+    crewDays += cleanPeople * cleanDays;
   }
 
   // ---- 직접 추가한 실측 항목 ----
@@ -1364,10 +1411,18 @@ export function computeEstimate(c) {
   }
   const baseClientPrice = customPrice !== null ? Math.max(customPrice, 0) : quotedLabor !== null ? quotedLabor : suggestedPrice;
 
+  // ── 관공서 공고: 부를 금액은 공고 수주금액이다 ────────────────────────────
+  // 예전에는 1,500만 공고에 실행원가 80%(1,200만)·마진 25%로 1,590만을 제시해
+  // 공고금액을 넘는 금액이 화면에 떴다. 낙찰금액은 수주금액을 넘지 않으므로
+  // 손님이 직접 부른 금액·직접 입력가가 없으면 수주금액으로 잡고 마진을 그 안에서 보여 준다.
+  const bidLocked = isBid && customPrice === null && quotedLabor === null;
+
   // 현장 변동(추가·감소) 누적 — 위에서 뽑은 값을 그대로 쓴다 (견적가에만 더하지 않고 원가에도 반영했다)
 
   // 앱이 계산한 최종 견적(참고용) — 단가·변동을 모두 반영한 값
-  const appClientPrice = Math.max(0, baseClientPrice + adjustmentTotal);
+  const appClientPrice = bidLocked
+    ? Math.max(0, bidPriceMan + adjustmentTotal)
+    : Math.max(0, baseClientPrice + adjustmentTotal);
 
   // 내가 부른 금액(손님에게 실제로 부른 합의가) — 있으면 이 금액이 최종 견적이다.
   // 답사 변동·자재 변경을 이미 반영해 손님과 말한 숫자이므로, 앱 계산가로 다시 더하지 않는다.
@@ -1489,16 +1544,21 @@ export function computeEstimate(c) {
     marginPercent,
     isBelowBreakEven,
     // 예상 범위: 최소(인건비·단순 공정) ~ 기준 ~ 최대(폐기물·양중·자재 추가)
-    rangeMin: Math.round(
-      calledPrice !== null
-        ? calledPrice * 0.95
-        : (customPrice !== null ? baseClientPrice * 0.95 : rangePriceFromCost(costWithBuffer * 0.96)) + adjustmentTotal
-    ),
-    rangeMax: Math.round(
-      calledPrice !== null
-        ? calledPrice * 1.12
-        : (customPrice !== null ? baseClientPrice * 1.12 : rangePriceFromCost(costWithBuffer * 1.18)) + adjustmentTotal
-    ),
+    // 공고는 낙찰금액이 정해져 있다 — 범위를 벌리지 않고 수주금액 기준으로만 보여 준다.
+    rangeMin: bidLocked
+      ? Math.max(0, Math.round(bidPriceMan + adjustmentTotal))
+      : Math.round(
+          calledPrice !== null
+            ? calledPrice * 0.95
+            : (customPrice !== null ? baseClientPrice * 0.95 : rangePriceFromCost(costWithBuffer * 0.96)) + adjustmentTotal
+        ),
+    rangeMax: bidLocked
+      ? Math.max(0, Math.round(bidPriceMan + adjustmentTotal))
+      : Math.round(
+          calledPrice !== null
+            ? calledPrice * 1.12
+            : (customPrice !== null ? baseClientPrice * 1.12 : rangePriceFromCost(costWithBuffer * 1.18)) + adjustmentTotal
+        ),
     rangeBase: clientPrice,
     minimumDefense: Math.round(costWithBuffer * 1.05),
     minApplied,

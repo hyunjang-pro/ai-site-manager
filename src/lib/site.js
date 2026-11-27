@@ -72,7 +72,9 @@ export function autoIncidentals(c) {
     // 준공 청소는 '마감'이 있는 현장만 — 철거+정지처럼 마감이 없으면 붙이지 않는다.
     // 욕실·주방도 '철거만' 하는 현장이면 청소할 마감이 없다.
     const demoOnly = bathroomDemoOnly(c) || kitchenDemoOnly(c);
-    const cleanTrade = CLEAN_TRADES.includes(ctx.trade) && ctx.trade !== 'combined' && !demoOnly;
+    // 방수만 하는 현장은 청소할 마감이 없다 (13㎡ 방수에 준공 청소 19만이 붙던 것)
+    const waterproofOnly = ctx.trade === 'tilewaterproof' && (c?.tileWork?.mode || 'both') === 'waterproof';
+    const cleanTrade = CLEAN_TRADES.includes(ctx.trade) && ctx.trade !== 'combined' && !demoOnly && !waterproofOnly;
     if (cleanTrade || c?.fullInterior) {
       out.afterCare = true;
       reason.afterCare = '마감 공정 — 준공 검수 대비';
@@ -106,12 +108,13 @@ export function siteCostRows(c) {
   const pyung = pyungOf(c?.sizeValue, c?.sizeUnit, 15);
   const spots = Math.max(1, parseInt(c?.protectSpots, 10) || 1);
   const cleanPeople = Math.max(1, Math.ceil(pyung / 20));
+  const cleanDays = pyung < 10 ? 0.5 : 1;
   const cleanRate = getRate(rates, ['labor', 'cleaner'], 19);
   const fallback = {
     protectLevel: getRate(rates, ['site', 'protect'], 8) * spots,
     adminDeposit: getRate(rates, ['site', 'adminReport'], 8),
     materialLift: getRate(rates, ['site', 'materialLift'], 15),
-    afterCare: Math.round(cleanPeople * cleanRate),
+    afterCare: Math.round(cleanPeople * cleanDays * cleanRate),
   };
   return SITE_ITEMS.map((item) => ({
     ...item,
