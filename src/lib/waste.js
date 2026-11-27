@@ -26,6 +26,19 @@ export function wasteVehicle(c) {
   return WASTE_VEHICLES[1];
 }
 
+// 폐기물 단독 운용 마진 — 차량 실비를 그대로 받는 일이라 일반 시공 마진을 얹지 않는다.
+// (pricing.js가 같은 값을 쓴다: 반차 33 · 1톤 53 · 2.5톤 90)
+export const WASTE_QUOTE_MARGIN = 13;
+
+// 차량 실비 → 손님 청구가 (만원). 안내 문구에서 "1톤이면 53만, 2.5톤이면 90만"처럼 보여 준다.
+export function wasteQuoteMan(rates, id) {
+  const v = WASTE_VEHICLES.find((x) => x.id === id) || WASTE_VEHICLES[1];
+  const cost = Number(rates?.waste?.[v.rateKey]) || v.rate;
+  const ticket = Number(rates?.waste?.ticket) || 3;
+  // pricing.js와 같은 순서로 반올림한다 (차량 실비 42.5 → 43만, + 올바로 3만 → 46만 ÷ 0.87)
+  return Math.round((Math.round(cost) + Math.round(ticket)) / (1 - WASTE_QUOTE_MARGIN / 100));
+}
+
 export const WASTE_SCOPES = [
   { id: 'floor', label: '바닥 마루·장판', material: 'mixed', kgPerSqm: 10, defaultArea: 60 },
   { id: 'tile', label: '욕실 타일', material: 'nonflammable', kgPerSqm: 22, defaultArea: 12 },

@@ -131,6 +131,19 @@ export function findQuantities(text = '') {
   return out.sort((a, b) => a.start - b.start);
 }
 
+// 톤 범위 — '1톤~2.5톤차', '1~2.5톤', '1톤에서 2.5톤'
+// 숨고 요청서는 '폐기물 양 1톤~2.5톤차'처럼 차량 범위를 적는다. 점 하나를 집으면 작은 차가 잡혀
+// 비용을 빠뜨리므로, 범위를 읽어 큰 차로 잡고 범위 자체는 안내에 남긴다.
+export function findTonRange(text = '') {
+  const t = normalizeNumerals(normalizeText(text));
+  const m = /(\d+(?:\.\d+)?)\s*(?:톤)?\s*(?:~|∼|-|–|에서|부터)\s*(\d+(?:\.\d+)?)\s*톤/.exec(t);
+  if (!m) return null;
+  const min = parseFloat(m[1]);
+  const max = parseFloat(m[2]);
+  if (!(min > 0) || !(max > 0) || max <= min) return null;
+  return { min, max, start: m.index, end: m.index + m[0].length };
+}
+
 export function distanceToRange(pos, range) {
   if (pos < range.start) return range.start - pos;
   if (pos > range.end) return pos - range.end;

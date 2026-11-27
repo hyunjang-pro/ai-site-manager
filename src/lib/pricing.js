@@ -6,7 +6,7 @@ import { ratesOf, getRate } from './rates.js';
 import { MATERIAL_RATES, RATE_BOOK, axisAmount } from './engine/rate-book.js';
 import { createLedger, axisOf, AXES } from './engine/ledger.js';
 import { siteSurchargeLines } from './engine/surcharge.js';
-import { wasteVehicle } from './waste.js';
+import { wasteVehicle, wasteQuoteMan, WASTE_QUOTE_MARGIN } from './waste.js';
 import { partialPlan, partialOf } from './partial.js';
 import { resolveSurvey } from './site.js';
 import { materialSetFor } from './materials.js';
@@ -300,6 +300,9 @@ export function computeEstimate(c) {
   // 손님이 쓴 말 — 정리본(rawInput)에는 앱이 붙인 '공종: 욕실 리모델링' 같은 요약이 섞여 있다.
   // "타일만 교체" 같은 판단은 손님 글(notes)로만 해야 한다 (정리본의 '리모델링' 때문에 올수리로 돌아가던 것)
   const ownNotes = `${c?.notes || ''} ${c?.supplement || ''}`.toLowerCase().trim() || notes;
+  // 마감재 종류(실크·장판 두께·강마루·데코타일)도 손님 글로만 정한다.
+  // 정리본의 '공종: 도배·장판'을 읽으면 '마루 20평'이 1.8T 장판이 되고, '도배만'에 장판이 붙는다.
+  const finishNotes = ownNotes;
   // AI·스샷으로 들어온 요청이 '철거·제거'만인데 복합 인테리어로 분류되면
   // 시공값(도배·타일·싱크대)이 붙어 1,000만원이 넘는다. 계산 단계에서 한 번 더 막는다.
   const removalOnly =
@@ -359,16 +362,17 @@ export function computeEstimate(c) {
     const scope = c?.demolition?.scope === 'partial' ? 'partial' : 'restore';    // '데코타일 철거'·'천장 텍스 철거'처럼 마감재 한 가지만 뜯는 현장은
     // 원상복구(천장·벽체·바닥 전부)와 인력·폐기물·장비가 다르다.
     const finishOnly =
-      /데코타일|텍스|장판|마루|벽지|도배|에폭시|몰딩|걸레받이|칠판|거울/.test(notes) &&
-      !/조적|콘크리트|철골|벽체|가벽|전체|원상복구|전부|올\s*철거/.test(notes);
+      /데코타일|텍스|장판|마루|벽지|도배|에폭시|몰딩|걸레받이|칠판|거울/.test(ownNotes) &&
+      !/조적|콘크리트|철골|벽체|가벽|전체|원상복구|전부|올\s*철거/.test(ownNotes);
     // '올철거·전체 철거'는 마감재만이 아니라 천장·벽체·바닥을 다 뜯는 원상복구 현장이다
-    const wholeStrip = /올\s*철거|전체\s*철거|전부\s*철거|원상복구/.test(notes);
+    const wholeStrip = /올\s*철거|전체\s*철거|전부\s*철거|원상복구/.test(ownNotes);
     const skilled = getRate(rates, ['labor', 'demolition'], 25);
     const helper = getRate(rates, ['labor', 'helper'], 17);
     // 집·건물을 통째로 뜯는 현장(구옥·단독주택·창고 전체 철거)은 마감 철거와 인력·폐기물 양이 다르다.
+    // 앱이 붙인 분류 이름('상가·주택 철거')을 손님 글처럼 읽으면 평범한 상가 원상복구가 '건물 전체 해체'가 된다
     const structural =
-      /구옥|빈집|단독주택|건물\s*(철거|완파)|건물\s*전체|완파|지붕\s*철거/.test(notes) ||
-      (/(주택|단독|건물|창고|공장)/.test(notes) && /전체\s*철거|전부\s*철거|철거\s*전체|해체/.test(notes));
+      /구옥|빈집|단독주택|건물\s*(철거|완파)|건물\s*전체|완파|지붕\s*철거/.test(ownNotes) ||
+      (/(주택|단독|건물|창고|공장)/.test(ownNotes) && /전체\s*철거|전부\s*철거|철거\s*전체|해체/.test(ownNotes));
     const helperCount = finishOnly ? 0 : pyung >= 12 ? 2 : 1;
     const crewSize = 1 + helperCount;
     // 인력(명·일) 기준으로 일수를 잡는다 — 2026 현장 기준 원상복구는 1인 1일 3.5평,
@@ -384,10 +388,10 @@ export function computeEstimate(c) {
     let laborCost = Math.round(days * perDay);
     // 상가 원상복구는 평당 인건비 하한을 둔다 — 큰 평수에서 3명·3일로 끝내면
     // 지방 시세(평당 22~25만)보다 훨씬 싸게 나가 사장님이 손해를 본다.
-    const commercialPlace = /상가|상점|매장|식당|음식점|카페|사무실|오피스|근린|상업|학원|병원|약국|공장|창고|숍|미용실|편의점|마트|베이커리|노래방|가게|점포|피시방|당구장/.test(notes);
+    const commercialPlace = /상가|상점|매장|식당|음식점|카페|사무실|오피스|근린|상업|학원|병원|약국|공장|창고|숍|미용실|편의점|마트|베이커리|노래방|가게|점포|피시방|당구장/.test(`${ownNotes} ${c?.location || ''}`.toLowerCase());
     const restoreScope =
-      RATE_BOOK.demolition.restoreScope.test(notes) ||
-      !/간판|싱크대|붙박이|샷시|문짝|선반|에어컨|칸막이|가벽|텍스|데코타일|에폭시|타일/.test(notes);
+      RATE_BOOK.demolition.restoreScope.test(ownNotes) ||
+      !/간판|싱크대|붙박이|샷시|문짝|선반|에어컨|칸막이|가벽|텍스|데코타일|에폭시|타일/.test(ownNotes);
     const commercialRestore = !finishOnly && !structural && commercialPlace && restoreScope;
     if (commercialRestore) {
       laborCost = Math.max(laborCost, Math.round(pyung * RATE_BOOK.demolition.restoreLaborPerPyung));
@@ -443,16 +447,16 @@ export function computeEstimate(c) {
 
   } else if (trade === 'wallpaper') {
     const pyung = toPyung(sizeVal, sizeUnit, 24);
-    const silk = /실크/.test(notes);
+    const silk = /실크/.test(finishNotes);
     const wallPyung = +(pyung * 2.3).toFixed(1);
     const rollUnit = silk ? MATERIAL_RATES.wallpaper.silkRoll : MATERIAL_RATES.wallpaper.paperRoll;
     const rolls = Math.ceil((wallPyung / 5) * 1.15); // 손실 15% 포함 (실견적 A)
     const wallCost = Math.round(rolls * rollUnit);
     const floorSqm = Math.round(pyung * 2.3);
-    const is22 = /2\.2|2\.2t|2\.2mm/.test(notes);
-    const is45 = /4\.5|4\.5t|4\.5mm/.test(notes);
-    const isDeco = /데코타일/.test(notes);
-    const isHard = /강마루|원목마루/.test(notes) || (/마루/.test(notes) && !/장판/.test(notes));
+    const is22 = /2\.2|2\.2t|2\.2mm/.test(finishNotes);
+    const is45 = /4\.5|4\.5t|4\.5mm/.test(finishNotes);
+    const isDeco = /데코타일/.test(finishNotes);
+    const isHard = /강마루|원목마루/.test(finishNotes) || (/마루/.test(finishNotes) && !/장판/.test(finishNotes));
     const floorUnit = isDeco
       ? MATERIAL_RATES.wallpaper.decoTile
       : isHard
@@ -473,8 +477,8 @@ export function computeEstimate(c) {
     const laborDays = +(wallDays + floorDays).toFixed(1);
     // "장판만", "벽지(도배)만"처럼 한 가지만 말했으면 다른 자재·노무는 넣지 않는다
     // (벽지만 하겠다는 사람에게 24평 장판 61만원을 꺼워 넣으면 견적이 이유 없이 올라간다)
-    const wantWall = /도배|벽지|합지|실크|초배/.test(notes);
-    const wantFloor = /장판|마루|바닥|카펫|데코타일|강마루/.test(notes);
+    const wantWall = /도배|벽지|합지|실크|초배/.test(ownNotes);
+    const wantFloor = /장판|마루|바닥|카펫|데코타일|강마루/.test(ownNotes);
     const bothOrNone = !wantWall && !wantFloor;
     const useWall = bothOrNone || wantWall;
     const useFloor = bothOrNone || wantFloor;
@@ -1097,10 +1101,10 @@ export function computeEstimate(c) {
     }
     if (scopes.includes('floor')) {
       // 바닥재 — 장판(1.8/2.2/4.5T)·데코타일·강마루를 구분해 계산한다
-      const deco = /데코타일/.test(notes);
-      const hard = /강마루|원목마루/.test(notes) || (/마루/.test(notes) && !/장판/.test(notes));
-      const f45 = /4\.5|4\.5t|4\.5mm/.test(notes);
-      const unit = deco ? S.wallpaper.decoTile : hard ? S.wallpaper.hardWood : f45 ? S.wallpaper.floor45 : /2\.2|2\.2t/.test(notes) ? S.wallpaper.floor22 : S.wallpaper.floor18;
+      const deco = /데코타일/.test(finishNotes);
+      const hard = /강마루|원목마루/.test(finishNotes) || (/마루/.test(finishNotes) && !/장판/.test(finishNotes));
+      const f45 = /4\.5|4\.5t|4\.5mm/.test(finishNotes);
+      const unit = deco ? S.wallpaper.decoTile : hard ? S.wallpaper.hardWood : f45 ? S.wallpaper.floor45 : /2\.2|2\.2t/.test(finishNotes) ? S.wallpaper.floor22 : S.wallpaper.floor18;
       const floorSqm = Math.round(pyung * 2.3);
       const floorCost = Math.round(floorSqm * unit);
       const floorDays = hard ? Math.max(0.5, Math.round((pyung / 12) * 2) / 2) : pyung >= 30 ? 1 : 0.5;
@@ -1110,7 +1114,7 @@ export function computeEstimate(c) {
       phaseDays += floorDays;
       materialTotal += floorCost;
       laborTotal += floorLabor;
-      const name = deco ? '데코타일' : hard ? '강마루' : f45 ? '4.5T 장판' : /2\.2/.test(notes) ? '2.2T 장판' : '1.8T 장판';
+      const name = deco ? '데코타일' : hard ? '강마루' : f45 ? '4.5T 장판' : /2\.2/.test(finishNotes) ? '2.2T 장판' : '1.8T 장판';
       items.push(
         { id: 'floor', category: '자재', name: `${name} (${floorSqm}㎡)`, detail: `${floorSqm}㎡ × ${unit}만 (자재·부자재)`, amount: floorCost },
         { id: 'labor_floor', category: '노무', name: `바닥 시공 (${floorDays}일)`, detail: `${floorDays}일 × ${floorRate}만`, amount: floorLabor }
@@ -1590,7 +1594,7 @@ export function computeEstimate(c) {
   // 얹으면 2.5톤 한 차가 113만원이 되어 현실 시세(85~95만)를 벗어나고 반차는 26만으로 손해가 된다.
   // → 운용 마진 13%(10~15% 구간), 예비비 0%(차량 실비는 시공처럼 흔들리지 않는다).
   const wasteOnly = trade === 'waste';
-  const WASTE_MARGIN = 13;
+  const WASTE_MARGIN = WASTE_QUOTE_MARGIN;
   const marginTouched =
     typeof c?.marginRate === 'number' && (!wasteOnly || c.marginRate !== TRADES.waste.defaultMargin);
   const marginTarget = marginTouched ? c.marginRate : wasteOnly ? WASTE_MARGIN : info.defaultMargin;

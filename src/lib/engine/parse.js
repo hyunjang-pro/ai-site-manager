@@ -10,7 +10,8 @@
 //  · 도장·필름·코킹은 **표면** 공사다 — 그 대상(문짝·샷시·싱크대)은 별도 공종이 아니라 대상일 뿐
 //  · 수량 단위가 공종을 좁힌다 → "욕실 1칸 타일"은 욕실(칸) · "욕실 타일 20㎡"는 타일(㎡)
 import { ITEMS, SPACES, PLACES, itemById } from './lexicon.js';
-import { normalizeText, normalizeNumerals, clauseSpans, findQuantities, korDays } from './text.js';
+import { normalizeText, normalizeNumerals, clauseSpans, findQuantities, findTonRange, korDays } from './text.js';
+import { readDiscourse } from './discourse.js';
 
 // 동작 낱말 — 자기 공종을 들고 오는 것(scope 있음)과 품목에 붙는 일반 동작으로 나눈다.
 const ACTION_LEXICON = [
@@ -281,13 +282,19 @@ function resolveClause(clause, ctx) {
   return { clause, mentions: resolved, actions: cActions, spaceIds };
 }
 
-export function parseText(rawInput = '') {
+export function parseText(rawInput = '', opts = {}) {
   const text = normalizeText(rawInput);
   const normalized = normalizeNumerals(text);
   const { spans: exclusions, removed, excludedScopes } = findExclusions(normalized);
+  // 배경·시점·원인·제외 구간 — 여기만 있는 공종 낱말은 요청이 아니다 (engine/discourse.js)
+  const discourse = opts.ignoreBackground
+    ? { spans: [], foreground: normalized, words: [], excluded: [], prospective: [] }
+    : readDiscourse(normalized);
+  const background = discourse.spans;
+  const cutSpans = [...exclusions, ...background];
   const clauses = clauseSpans(normalized);
-  const actions = findActions(normalized, exclusions);
-  const mentions = findMentions(normalized, actions).filter((m) => !inSpans(m.start, exclusions));
+  const actions = findActions(normalized, cutSpans);
+  const mentions = findMentions(normalized, actions).filter((m) => !inSpans(m.start, cutSpans));
   const quantities = findQuantities(normalized);
   const spaces = [];
   for (const sp of SPACES) {
@@ -332,8 +339,10 @@ export function parseText(rawInput = '') {
       const act = r.action;
       if (!act) {
         // 동작이 아예 없는 문장 — 시공 품목이면 '새로 한다'로 본다 (도배·장판·타일·필름·욕실 올수리)
+        // 다만 'guessed'로 남긴다 — 품목 이름만 나와서 추정한 일은 요청서 라벨을 뒤집는 근거로 쓰지 않는다
+        // (숨고 폐기물 요청서의 '파티션'이 '파티션 시공'이 되어 폐기물 현장이 복합 공사로 바뀌던 것)
         if ((r.item.install || r.item.defaultAction) && !clauseAction) {
-          ops.push(opOf(r, r.item.defaultAction || 'install', r.item.scope === 'waste' ? 'waste' : r.scopeCandidate, cr));
+          ops.push({ ...opOf(r, r.item.defaultAction || 'install', r.item.scope === 'waste' ? 'waste' : r.scopeCandidate, cr), guessed: true });
         } else if (clauseAction) {
           // 코킹·필름처럼 동작 이름이 곧 품목인 것은 그 동작의 일이다 ("샷시 실리콘 코킹")
           if (r.item.id === 'caulk' && clauseAction.scope === 'repair') {
@@ -451,11 +460,13 @@ export function parseText(rawInput = '') {
   ops.length = 0;
   ops.push(...deduped);
 
-  const facts = readFacts(normalized, clauseResults, spaces);
+  const facts = readFacts(normalized, clauseResults, spaces, discourse.foreground);
 
   // 공종별로 한 일을 묶는다 (예: 욕실 문맥의 타일·도기 → 욕실 공사 한 건)
   return {
     text: normalized,
+    foreground: discourse.foreground,
+    background: { spans: background, words: discourse.words, excluded: discourse.excluded, prospective: discourse.prospective },
     clauses: clauseResults.map((c) => c.clause),
     mentions: clauseResults.flatMap((c) => c.mentions),
     actions,
@@ -491,13 +502,17 @@ function opOf(r, action, scope, cr) {
 }
 
 // 문장에서 바로 읽는 사실 — 규모·층·엘베·지역·현장 성격
-function readFacts(text, clauseResults, spaces) {
+// foreground = 배경·시점·제외 구간을 지운 글자. 공종을 뒤집는 깃발(리모델링·올철거·구조)은 요청 글자에서만 본다.
+function readFacts(text, clauseResults, spaces, foreground = '') {
   const t = text.toLowerCase().replace(/\s+/g, ' ');
+  // 자리(offset)가 같은 글자라 수량·평수는 전문장에서 그대로 읽고, 공종 깃발만 요청 글자에서 읽는다
+  const fg = (foreground || text).toLowerCase().replace(/\s+/g, ' ');
   const q = findQuantities(t);
   const first = (key) => q.find((x) => x.key === key);
   const pyungQ = first('pyung');
   const sqmQ = first('sqm');
   const floorQ = first('floor');
+  const tonRange = findTonRange(t);
   const tonQ = first('ton');
   const peopleQ = first('people');
   const dayQ = first('day');
@@ -524,7 +539,7 @@ function readFacts(text, clauseResults, spaces) {
   const windows = pairQ.length ? pairQ[0].value : 0;
 
   // 요청서 라벨('서비스 분야: 부분 인테리어')은 내용이 아니다
-  const masked = t.replace(/부분\s*인테리어|부분인테리어|부분\s*시공/g, ' ');
+  const masked = fg.replace(/부분\s*인테리어|부분인테리어|부분\s*시공/g, ' ');
   const elevatorWord = /엘(?:베|리베이터|레베이터)|승강기/.test(t);
   const elevatorNo = /엘(?:베|리베이터|레베이터)[^.\n]{0,10}?(?:없|불가|미사용|안\s*씀)|승강기[^.\n]{0,6}?없/.test(t);
   const elevatorYes = /엘(?:베|리베이터|레베이터)[^.\n]{0,12}?(?:운반|사용|이용|있|가능)|승강기[^.\n]{0,10}?(?:사용|운반|있)/.test(t);
@@ -533,7 +548,9 @@ function readFacts(text, clauseResults, spaces) {
     pyung: pyungQ ? pyungQ.value : 0,
     sqm: sqmQ ? sqmQ.value : /포크레인|포클레인|굴삭기|미니\s*굴삭/.test(t) ? 20 * Math.max(1, (dayQ ? dayQ.value : 0) || 1) : 0,
     floor: floorQ ? floorQ.value : 0,
-    tons: tonQ ? tonQ.value : 0,
+    // '1톤~2.5톤차'는 범위다 — 보수적으로 큰 차(2.5톤)로 잡고, 범위는 따로 남겨 안내에 쓴다
+    tons: tonRange ? tonRange.max : tonQ ? tonQ.value : 0,
+    tonRange,
     halfTruck: /반\s*차/.test(t),
     people: peopleQ ? peopleQ.value : 0,
     days: dayQ ? dayQ.value : korDay,
@@ -555,8 +572,8 @@ function readFacts(text, clauseResults, spaces) {
     fullInterior: /집\s*전체|아파트\s*인테리어|전체\s*인테리어|전체\s*공사|전체를|풀\s*인테리어|올\s*리모델링/.test(masked),
     // '부분 인테리어'는 요청서의 서비스 분류 라벨이다 — 전체 인테리어로 읽지 않는다
     remodelWord: /올\s*수리|올수리|리모델링|인테리어/.test(masked),
-    wholeStrip: /올\s*철거|전체\s*철거|전부\s*철거|원상복구|다\s*뜯|전체\s*해체/.test(t),
-    structural: /구옥|빈집|단독주택|건물\s*(?:철거|완파)|건물\s*전체|완파|지붕\s*철거|창고\s*철거|공장\s*철거/.test(t),
+    wholeStrip: /올\s*철거|전체\s*철거|전부\s*철거|원상복구|다\s*뜯|전체\s*해체/.test(fg),
+    structural: /구옥|빈집|단독주택|건물\s*(?:철거|완파)|건물\s*전체|완파|지붕\s*철거|창고\s*철거|공장\s*철거/.test(fg),
     paintWall: /벽\s*(?:만|도장|페인트)|벽체/.test(t),
     paintCeiling: /천장/.test(t),
     silk: /실크/.test(t),

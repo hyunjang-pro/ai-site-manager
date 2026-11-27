@@ -134,7 +134,7 @@ export const ITEMS = [
 
   // ── 폐기물·인력 ──────────────────────────────────
   { id: 'waste', label: '폐기물', scope: 'waste', role: 'scope', authority: 3, unit: '톤', defaultQty: 1, demo: true, defaultAction: 'collect',
-    terms: /폐기물|쓰레기|수거|배출|반출|마대|처리장|집기|비품/ },
+    terms: /폐기물|쓰레기|수거|배출|반출|마대|처리장|집기|비품|살림|폐업\s*정리|짐[^.。\n,·]{0,8}(?:정리|처리|버리|버려|빼|치우|반출)/ },
   { id: 'labor', label: '인력', scope: 'labor', role: 'scope', authority: 2, unit: '명', defaultQty: 2, demo: false,
     terms: /인부|일용|인력|잡부|기공|철거공|타일공|목수|미장공|용접공|설비공|전기공|도배공|사람\s*\d*\s*명|사람/ },
 ];
@@ -193,6 +193,10 @@ export const SCOPE_LABEL = {
   labor: '인력',
   repair: '부분 수선',
 };
+
+// 동작 이름(scope)과 장부 공종(trade)이 다른 것만 적는다 — 도장은 'repair' 장부로, 방수는 '타일·방수'로
+// (parse·jobspec·tiers가 같은 표를 본다)
+export const SCOPE_TO_TRADE = { paint: 'repair', waterproof: 'tilewaterproof' };
 
 export function itemById(id) {
   return ITEMS.find((it) => it.id === id) || null;

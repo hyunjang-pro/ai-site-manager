@@ -3,8 +3,9 @@
 // 여기서 정하는 것: 의도 모드 → 공종 → 규모 → 세부 공종 → 현장 조건.
 // 화면·견적·문서는 모두 이 명세 하나만 본다. (예전에는 classify·pricing·docs가
 // 각자 문장을 다시 읽어서 같은 현장이 화면마다 다른 금액이 됐다)
-import { itemById, SCOPE_LABEL, PLACES } from './lexicon.js';
+import { itemById, SCOPE_LABEL, PLACES, SCOPE_TO_TRADE } from './lexicon.js';
 import { parseText } from './parse.js';
+import { readTiers } from './tiers.js';
 import { isDemoOnlyText } from '../scope.js';
 
 // 4가지 의도 모드 — 사람을 보내는 일 / 관공서 공고 / 단독 부분 교체 / 일반·복합 공사
@@ -68,8 +69,7 @@ function opts_bid(signals) {
 
 // ── 공종 정하기 ──────────────────────────────────────────
 // 규칙은 '동작이 있는 일'만 본다. 표면(surface)과 장소 이름은 공종을 정하지 않는다.
-// 공종 이름 매핑 — 동작 이름(paint)과 장부 공종(repair)이 다르다
-const SCOPE_TO_TRADE = { paint: 'repair', waterproof: 'tilewaterproof' };
+// 공종 이름 매핑 — 동작 이름(paint)과 장부 공종(repair)이 다르다 (표는 engine/lexicon.js에 있다)
 function tradeOfScope(scope) {
   return SCOPE_TO_TRADE[scope] || scope;
 }
@@ -88,6 +88,12 @@ function chooseTrade(parsed, mode, text) {
 
   // 폐기물 수거만 하는 요청
   if (ops.length && ops.every((o) => o.itemId === 'waste' || o.action === 'collect')) return 'waste';
+
+  // '철거 예정인데 폐기물 1톤만 먼저' — 철거는 다음 일이고 지금 요청은 폐기물이다.
+  // ('폐기물 포함'처럼 딸린 말이면 철거를 그대로 둔다 — '만·먼저·우선'이 있을 때만 뒤집는다)
+  const wasteFirst = /(?:폐기물|집기|비품|스레기|스래기|살림)[^.。\n]{0,10}(?:만|먼저|우선|부터)|(?:만|먼저|우선)\s*(?:폐기물|집기|비품|치워|수거|처리)/.test(text);
+  const wholeOnly = removeOps.length > 0 && removeOps.every((o) => o.itemId === 'whole' || o.itemId === 'waste');
+  if (wasteFirst && wholeOnly && ops.some((o) => o.itemId === 'waste')) return 'waste';
 
   // ① 전체 인테리어·리모델링 — 여러 공간을 새로 하는 일
   const remodelScopes = unique(buildOps.map((o) => o.scope)).filter((sc) => sc && sc !== 'repair');
@@ -156,6 +162,37 @@ function chooseTrade(parsed, mode, text) {
   if (spaces.has('bathroom')) return 'bathroom';
   if (spaces.has('kitchen')) return 'kitchen';
   return 'unclassified';
+}
+
+// ── Tier 1(요청서 라벨) 우선 ───────────────────────────────
+// 손님이 요청서 칸에 직접 고른 분류는 "이 일을 시키는 이유"다. 자유 서술의 배경 설명은
+// 이미 discourse.js가 걷어냈고, 그래도 남은 서술이 라벨과 다르면 서술의 **실행(설치·시공)** 만 본다.
+//   · 라벨 '폐기물 처리' + 서술 '철거 후 도배까지' → 복합 (라벨이 도배를 지우면 안 된다)
+//   · 라벨 '폐기물 처리' + 서술에 시공 없음 → 폐기물 단독
+//   · 라벨 '철거' + 서술에 철거 품목·시공 없음 → 서술 판단을 따른다
+function applyDeclared(trade, declared, parsed, mode) {
+  if (!declared || trade === declared) return trade;
+  // 사람만 보내는 요청(인력)·관공서 공고는 요청서 라벨보다 그 자체가 더 구체적인 의도다
+  if (mode === 'labor' || mode === 'bid') return trade;
+  const ops = parsed.ops.filter((o) => o.action);
+  const buildScopes = unique(
+    ops.filter((o) => o.action !== 'remove' && o.action !== 'collect' && !o.guessed).map((o) => tradeOfScope(o.scope))
+  ).filter((s) => s && s !== 'waste');
+  const removalItems = ops.filter((o) => o.action === 'remove' && o.itemId !== 'whole');
+
+  if (declared === 'waste') return buildScopes.length ? 'combined' : 'waste';
+  if (declared === 'demolition') {
+    if (buildScopes.length) return trade; // 철거+시공은 복합·시공 그대로
+    // 본문이 더 좁은 공종(욕실 1칸·주방·창호…)으로 이미 정리했으면 그쪽이 맞다
+    const finer = ['bathroom', 'kitchen', 'carpentry', 'window', 'tilewaterproof', 'electric', 'plumbing', 'repair'];
+    if (removalItems.length && finer.includes(trade)) return trade;
+    return removalItems.length ? 'demolition' : trade;
+  }
+  // 그 밖의 라벨 — 서술이 다른 시공을 둘 이상 말했으면 복합, 아니면 라벨을 따른다
+  if (buildScopes.filter((s) => s !== declared).length >= 2) return 'combined';
+  // 라벨이 도배인데 본문이 철거까지 말했으면 뜯는 일을 깎지 않는다 (라벨은 '주공종', 서술은 '함께 하는 일')
+  if (removalItems.length || ops.some((o) => o.action === 'remove' && o.itemId === 'whole')) return trade;
+  return declared;
 }
 
 // ── 규모 ─────────────────────────────────────────────────
@@ -348,7 +385,7 @@ const SUB_SCOPE_OF = {
 };
 
 const FULL_PACKAGE = ['demolition', 'wallpaper', 'floor', 'bathroom', 'kitchen', 'entrance', 'plaster'];
-function subScopesOf(parsed, trade) {
+function subScopesOf(parsed, trade, requestText = '') {
   const scopes = parsed.facts.fullInterior ? [...FULL_PACKAGE] : [];
   parsed.ops.forEach((o) => {
     if (o.action === 'remove') {
@@ -367,42 +404,50 @@ function subScopesOf(parsed, trade) {
   parsed.mentions.forEach((m) => {
     if (m.item?.id === 'entrance' || m.item?.id === 'showcase') scopes.push('entrance');
   });
-  if (/현관|중문|신발장/.test(parsed.text)) scopes.push('entrance');
-  if (/바닥|장판|마루|데코타일/.test(parsed.text)) scopes.push('floor');
+  if (/현관|중문|신발장/.test(requestText)) scopes.push('entrance');
+  if (/바닥|장판|마루|데코타일/.test(requestText)) scopes.push('floor');
   const out = unique(scopes);
   return out;
 }
 
 export function buildJobSpec(rawText, { sheet = null, signals = null } = {}) {
   const text = String(rawText || '');
-  const parsed = parseText(text);
+  // Tier 1(요청서 라벨·머리글) / Tier 2(자유 서술) — 양식이면 라벨이 확정 의도다
+  const tiers = readTiers(text);
+  let parsed = parseText(text);
+  // 배경으로 본 구간에만 내용이 있었다면(“폐기물 처리 전에 견적만…”) 배경 판정을 접고 전문장으로 다시 읽는다
+  if (parsed.background.spans.length && !parsed.ops.length && !parsed.mentions.length) {
+    parsed = parseText(text, { ignoreBackground: true });
+  }
+  const requestText = parsed.foreground || parsed.text;
   const sig = signals || {};
-  const mode = detectMode(parsed, sig, parsed.text);
-  let trade = chooseTrade(parsed, mode, parsed.text);
+  const mode = detectMode(parsed, sig, requestText);
+  const narrativeTrade = chooseTrade(parsed, mode, requestText);
+  let trade = applyDeclared(narrativeTrade, tiers.declaredTrade, parsed, mode);
   const f = parsed.facts;
 
   // '올수리'는 전체 인테리어다 — 단 "욕실 올수리"처럼 한 공간만 새로 하는 말이면 아니다
-  if (!f.fullInterior && /올\s*수리|올수리|리모델링/.test(parsed.text) && !/욕실\s*(?:1|한|두|2)|화장실\s*(?:1|한|두|2)|주방\s*만|부엌\s*만/.test(parsed.text)) {
+  if (!f.fullInterior && /올\s*수리|올수리|리모델링/.test(requestText) && !/욕실\s*(?:1|한|두|2)|화장실\s*(?:1|한|두|2)|주방\s*만|부엌\s*만/.test(requestText)) {
     f.fullInterior = true;
     if (trade === 'unclassified') trade = 'combined';
   }
 
   // 가벽(경량벽체) 요청 — 뜯는 말이 없으면 목공 현장이다
   const partInfo = parsePartition(parsed);
-  const wantsPartition = /가벽|칸막이|경량\s*벽체|경량벽체|룸\s*(?:만들|나누)|방\s*(?:만들|나누)/.test(parsed.text);
+  const wantsPartition = /가벽|칸막이|경량\s*벽체|경량벽체|룸\s*(?:만들|나누)|방\s*(?:만들|나누)/.test(requestText);
   const removingPartition = parsed.ops.some((o) => o.itemId === 'partition' && o.action === 'remove');
   if (wantsPartition && !removingPartition && ['unclassified', 'demolition', 'carpentry'].includes(trade)) trade = 'carpentry';
   if (sig.partition && !sig.removal && ['unclassified', 'demolition', 'carpentry'].includes(trade)) trade = 'carpentry';
 
   // 욕실 한 칸을 올수리하며 타일·방수·도기를 말한 것은 복합이 아니라 욕실 공사다
-  if (trade === 'combined' && f.baths > 0 && /욕실|화장실/.test(parsed.text)) {
+  if (trade === 'combined' && f.baths > 0 && /욕실|화장실/.test(requestText)) {
     const scopes = unique(parsed.ops.map((o) => (o.action === 'remove' ? 'demolition' : o.scope)));
     const bathFamily = scopes.every((sc) => ['bathroom', 'tilewaterproof', 'demolition', 'plumbing', 'repair'].includes(sc));
     if (bathFamily && scopes.some((sc) => sc === 'bathroom' || sc === 'tilewaterproof')) trade = 'bathroom';
   }
 
   // 누수로 천장을 뜯는 일은 평수 철거가 아니라 부분 수선이다
-  if (['demolition', 'combined', 'repair'].includes(trade) && /누수|물\s*(?:이|가|좀)?\s*새/.test(parsed.text) && /천장/.test(parsed.text) && !f.pyung && !f.sqm) {
+  if (['demolition', 'combined', 'repair'].includes(trade) && /누수|물\s*(?:이|가|좀)?\s*새/.test(requestText) && /천장/.test(requestText) && !f.pyung && !f.sqm) {
     trade = 'repair';
   }
   let size = chooseSize(trade, parsed, parsed.ops, mode);
@@ -412,11 +457,11 @@ export function buildJobSpec(rawText, { sheet = null, signals = null } = {}) {
     if (def && !['carpentry', 'electric', 'plumbing', 'repair'].includes(trade)) size = { value: def.value, unit: def.unit, defaulted: true };
   }
 
-  const subScopes = subScopesOf(parsed, trade);
+  const subScopes = subScopesOf(parsed, trade, requestText);
   // 뜯는 품목이 정해져 있으면 부분 철거다 — '전체 철거'라는 말이 붙어도
   // 마감재 한 가지만(장판·데코타일·텍스)이면 그 면적만 뜯는 현장이다.
   const partial = trade === 'demolition' ? partialItems(parsed) : [];
-  const demoOnly = isDemoOnlyText(parsed.text);
+  const demoOnly = isDemoOnlyText(requestText);
 
   // 현장 성격
   const place = PLACES.commercial.test(parsed.text) ? 'commercial' : PLACES.residential.test(parsed.text) ? 'residential' : '';
@@ -424,6 +469,10 @@ export function buildJobSpec(rawText, { sheet = null, signals = null } = {}) {
   return {
     mode,
     trade,
+    // 요청서 라벨로 정한 공종과, 자유 서술만으로 정했을 때의 공종 — 화면·시험이 둘을 비교해 설명한다
+    declared: tiers.declaredTrade,
+    narrativeTrade,
+    tiers,
     tradeLabel: SCOPE_LABEL[trade] || '',
     size,
     parsed,

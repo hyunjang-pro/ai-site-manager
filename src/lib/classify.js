@@ -10,6 +10,7 @@ import { detectPartial, partialOf, PARTIAL_ITEMS } from './partial.js';
 import { parseRequestSheet, sheetToText, requestSignals, preservationGate, sheetValue } from './request.js';
 import { buildJobSpec } from './engine/jobspec.js';
 import { itemById } from './engine/lexicon.js';
+import { wasteQuoteMan, WASTE_VEHICLES } from './waste.js';
 
 const PARTIAL_LABEL = Object.fromEntries(Object.entries(PARTIAL_ITEMS).map(([id, def]) => [id, def.label]));
 
@@ -226,6 +227,34 @@ export function classifyRequest(rawText = '', opts = {}) {
   if (budgetMatch) hints.push(`손님 예산 ${budgetMatch[1]}만원${budgetMatch[2] || ''} — 이 안에서 범위를 잡으세요.`);
   if (/방\s*\d|욕실\s*\d|부엌|현관/.test(t)) hints.push('공간 구성이 적혀 있습니다 — 실측 때 방·욕실·주방 수를 확인하세요.');
 
+  // ── 요청서 라벨(Tier 1)과 자유 서술(Tier 2) ─────────────────
+  // 라벨이 공종을 정했고 본문만 보면 다른 공종이 나올 때, 왜 라벨을 따랐는지 한 줄로 남긴다.
+  const bgWords = (parsed.background?.words || []).filter((w) => /철거|해체|인터리어|리모델링|타일|도배|장판|필름|목공/.test(w));
+  if (spec.declared && spec.declared !== spec.narrativeTrade && trade === spec.declared) {
+    hints.push(
+      `요청서에 '${TRADES[spec.declared]?.label || spec.declared}'(으)로 적혀 있어 그 기준으로 잡았습니다` +
+        (bgWords.length ? ` — 본문의 '${bgWords[0]}' — 시점·조건 설명으로 봤습니다.` : '.')
+    );
+  } else if (bgWords.length) {
+    // 라벨이 없거나 같아도, 본문의 배경 낱말을 빼고 계산했다는 사실은 알려 준다
+    hints.push(`본문의 '${bgWords.join('·')}' — '전·예정·제외'처럼 배경을 말하는 자리라 공종에서 뺐습니다.`);
+  }
+
+  // ── 폐기물 양이 범위로 적힌 경우 ───────────────────────────
+  const tonRange = facts.tonRange;
+  if (trade === 'waste' && tonRange) {
+    hints.push(
+      `폐기물 양이 ${tonRange.min}톤~${tonRange.max}톤차로 적혀 있습니다 — 큰 차(${tonRange.max}톤) 기준으로 잡았고, ` +
+        `현장 양 보고 ${WASTE_VEHICLES.map((v) => `${v.short} ${wasteQuoteMan(null, v.id)}만`).join(' · ')} 중에서 고르세요.`
+    );
+  }
+
+  // ── 음식물·액체류 혼합 위험 ───────────────────────────────
+  if (/음식물|식자재|음식\s*쓰레기|액체|폐유|튀김유|기름\s*때|조리|곰팡이/.test(`${contentT} ${t}`)) {
+    hints.push('음식물·액체류는 일반 사업장 폐기물과 분리 필요 (미분리 시 수거 거부·추가 비용)');
+    survey.foodLiquid = true;
+  }
+
   // 가벽·칸막이(경량벽체) — 면적이 아니라 길이(m)와 칸 수로 견적한다
   const partitionInfo =
     spec.partition && (spec.partition.meters || spec.partition.rooms || signals.dims?.meters || signals.dims?.rooms)
@@ -301,7 +330,10 @@ export function classifyRequest(rawText = '', opts = {}) {
   if (region || location) rows.push({ label: '지역', value: location || region });
   if (floor) rows.push({ label: '층 / 엘베', value: `${floor}층 · ${elevator === 'no' ? '없음' : elevator === 'yes' ? '있음' : '확인 필요'}` });
   // 폐기물은 톤당 단가가 아니라 차량 실비(반차 26 · 1톤 42.5 · 2.5톤 75만)로 계산한다 (v3.20)
-  if (trade === 'waste') rows.push({ label: '처리', value: `${wasteVehicleLabel || '1톤 1차'} · 차량 실비 기준(상차·운반·처리 포함)` });
+  if (trade === 'waste') {
+    const rangeNote = facts.tonRange ? ` · 요청서 ${facts.tonRange.min}톤~${facts.tonRange.max}톤` : '';
+    rows.push({ label: '처리', value: `${wasteVehicleLabel || '1톤 1차'} · 차량 실비 기준(상차·운반·처리 포함)${rangeNote}` });
+  }
   if (trade === 'labor') rows.push({ label: '청구 기준', value: '1명 1일 26만원(원가 19만)' });
   if (trade === 'plaster' && extraWorks.length) rows.push({ label: '추가', value: extraWorks.join(' · ') });
   if (excludedWorks.length) rows.push({ label: '제외', value: excludedWorks.join(' · ') });
